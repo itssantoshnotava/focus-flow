@@ -30,12 +30,18 @@ const App: React.FC = () => {
   });
 
   // --- Effects: Firebase Test ---
-  useEffect(() => {
-    set(ref(database, "ping"), {
-      status: "connected",
-      time: Date.now()
+useEffect(() => {
+  set(ref(database, "ping"), {
+    status: "connected",
+    time: Date.now()
+  })
+    .then(() => {
+      alert("PING SUCCESS");
+    })
+    .catch((err) => {
+      alert("PING FAIL: " + err.message);
     });
-  }, []);
+}, []);
 
   // --- Effects: Persistence ---
   useEffect(() => {
