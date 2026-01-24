@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { ref, set } from "firebase/database";
+import { database } from "./firebase";
 import { Timer } from './components/Timer';
 import { ExamCountdown } from './components/ExamCountdown';
 import { SyllabusTracker } from './components/SyllabusTracker';
@@ -24,6 +26,14 @@ const App: React.FC = () => {
     }
     return { date: today, seconds: 0 };
   });
+
+  // --- Effects: Firebase Test ---
+  useEffect(() => {
+    set(ref(database, "ping"), {
+      status: "connected",
+      time: Date.now()
+    });
+  }, []);
 
   // --- Effects: Persistence ---
   useEffect(() => {
