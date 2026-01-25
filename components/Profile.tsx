@@ -86,7 +86,9 @@ export const Profile: React.FC = () => {
 
   const handleLogout = async () => {
       await logout();
-      navigate('/login'); // Redirect handled by App but safe to explicit
+      // Manually set URL to /login after logout to ensure clean state and correct URL
+      // We don't use navigate() because the router unmounts when user becomes null
+      window.location.hash = '/login';
   };
 
   if (loading) return <div className="flex h-full items-center justify-center"><div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
