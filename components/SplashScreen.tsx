@@ -22,23 +22,16 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     <div className={`fixed inset-0 z-50 bg-neutral-950 flex flex-col items-center justify-center p-6 text-center transition-opacity duration-500 ${isExiting ? 'opacity-0' : 'opacity-100'}`}>
       <div className="max-w-md w-full flex flex-col items-center animate-in fade-in zoom-in duration-700">
         
-{/* Logo */}
-<div className="flex flex-col items-center mb-10">
-<img
-  src="/logo.png"
-  alt="wishp"
-  className="w-48 h-auto mb-6 select-none"
- /> 
+        {/* Logo */}
+        <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-indigo-900/30 mb-8 rotate-3 hover:rotate-6 transition-transform">
+          <LayoutDashboard size={40} className="text-white" />
+        </div>
 
-  <h1 className="text-5xl font-bold text-white tracking-tight">
-    wishp
-  </h1>
-
-  <p className="text-neutral-400 text-base mt-2">
-    study. connect. stay consistent.
-  </p>
-</div>
-
+        {/* Title & Tagline */}
+        <h1 className="text-4xl font-bold text-white tracking-tight mb-3">FocusFlow</h1>
+        <p className="text-neutral-400 text-lg mb-12 max-w-xs">
+          Your personal command center for academic excellence.
+        </p>
 
         {/* Terms */}
         <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 w-full mb-8 text-left">

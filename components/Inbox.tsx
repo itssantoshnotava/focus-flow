@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
 import { ref, onValue, push, update, get, set, remove, runTransaction, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
@@ -65,6 +65,7 @@ export const Inbox: React.FC = () => {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isAutoScrollEnabled = useRef(true);
+  const lastChatIdRef = useRef<string | null>(null);
 
   // Helper: DM Conversation ID
   const getDmConvoId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
@@ -175,6 +176,10 @@ export const Inbox: React.FC = () => {
           setFriendPresence(null);
           return;
       }
+      
+      // Clear previous messages immediately to prevent scroll jumping on old content
+      setMessages([]);
+
       const myInboxRef = ref(database, `userInboxes/${user.uid}/${selectedChat.id}`);
       update(myInboxRef, { unreadCount: 0 });
 
@@ -194,19 +199,36 @@ export const Inbox: React.FC = () => {
       });
       
       setTimeout(() => inputRef.current?.focus(), 100);
-      isAutoScrollEnabled.current = true;
       return () => unsubMsg();
   }, [user, selectedChat]);
 
-  // --- Auto Scroll ---
-  useEffect(() => {
-      if (isAutoScrollEnabled.current) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, showSettings]);
+  // --- Auto Scroll Logic (Instant on Open, Smooth on New Message) ---
+  useLayoutEffect(() => {
+      if (!scrollContainerRef.current || !selectedChat) return;
+      const container = scrollContainerRef.current;
+      
+      const isChatSwitch = selectedChat.id !== lastChatIdRef.current;
+      
+      if (isChatSwitch) {
+          // New Chat Session: If messages loaded, snap to bottom instantly
+          if (messages.length > 0) {
+              container.scrollTop = container.scrollHeight;
+              lastChatIdRef.current = selectedChat.id;
+              isAutoScrollEnabled.current = true;
+          }
+      } else {
+          // Same Chat: New message arrived
+          if (isAutoScrollEnabled.current) {
+              container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+          }
+      }
+  }, [messages, selectedChat?.id]);
 
   const handleScroll = () => {
       if (!scrollContainerRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-      isAutoScrollEnabled.current = scrollHeight - scrollTop - clientHeight < 50;
+      // If user is near bottom (within 100px), enable auto-scroll for next message
+      isAutoScrollEnabled.current = (scrollHeight - scrollTop - clientHeight) < 100;
   };
 
   // --- Actions ---
@@ -216,6 +238,9 @@ export const Inbox: React.FC = () => {
       const text = inputText.trim();
       const timestamp = Date.now();
       const msgData = { senderUid: user.uid, senderName: user.displayName || 'Unknown', text, timestamp };
+
+      // Force scroll to bottom when sending
+      isAutoScrollEnabled.current = true;
 
       if (selectedChat.type === 'dm') {
           const convoId = getDmConvoId(user.uid, selectedChat.id);
@@ -252,7 +277,7 @@ export const Inbox: React.FC = () => {
               return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => (count || 0) + 1);
           }));
       }
-      isAutoScrollEnabled.current = true;
+      
       setInputText('');
   };
 

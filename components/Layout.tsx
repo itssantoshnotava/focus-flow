@@ -4,7 +4,7 @@ import { ref, onValue, update, onDisconnect } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  Home, MessageCircle, Search, Bell, Globe, User 
+  LayoutDashboard, Home, MessageCircle, Search, Bell, Globe, User 
 } from 'lucide-react';
 
 export const Layout: React.FC = () => {
@@ -104,14 +104,11 @@ export const Layout: React.FC = () => {
       
       {/* --- DESKTOP SIDEBAR --- */}
       <aside className="hidden md:flex w-20 flex-col items-center py-6 border-r border-neutral-900 bg-neutral-950 z-50 shrink-0">
-      <div className="mb-8 flex items-center justify-center">
-  <img
-    src="/logo.png"
-    alt="wishp"
-    className="h-16 w-auto object-contain"
-  />
-</div>
-
+        <div className="mb-8">
+           <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/20">
+              <LayoutDashboard size={20} className="text-white" />
+           </div>
+        </div>
 
         <div className="flex flex-col gap-4 flex-1 w-full items-center">
            <NavItem icon={Home} path="/" label="Home" />
