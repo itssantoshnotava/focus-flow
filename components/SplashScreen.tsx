@@ -26,8 +26,9 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
 <img
   src="/logo.png"
   alt="wishp"
-  className="w-20 h-20 mb-8 drop-shadow-[0_0_25px_rgba(99,102,241,0.35)] select-none"
+  className="w-40 h-40 mb-6 select-none"
 />
+
 
 
 
