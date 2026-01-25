@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
     Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
-    LogOut, Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck
+    LogOut, Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight
 } from 'lucide-react';
 
 interface ChatItem {
@@ -54,6 +54,10 @@ export const Inbox: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<Set<string>>(new Set());
+  
+  // Reply State
+  const [replyingTo, setReplyingTo] = useState<any | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   
   // Group Edit Inputs
   const [editGroupName, setEditGroupName] = useState('');
@@ -203,6 +207,7 @@ export const Inbox: React.FC = () => {
           isInitialLoadRef.current = true; // Mark as initial load for scroll logic
           setMessages([]); // Clear old messages instantly
           setInputText(''); // FIX: Clear input on chat switch
+          setReplyingTo(null); // FIX: Clear reply on chat switch
           setTypingText('');
           setLastSeenMap({});
           isAutoScrollEnabled.current = true;
@@ -309,6 +314,15 @@ export const Inbox: React.FC = () => {
       isAutoScrollEnabled.current = (scrollHeight - scrollTop - clientHeight) < 100;
   };
 
+  const scrollToMessage = (messageId: string) => {
+      const element = document.getElementById(`msg-${messageId}`);
+      if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setHighlightedMessageId(messageId);
+          setTimeout(() => setHighlightedMessageId(null), 2000);
+      }
+  };
+
   // --- Actions ---
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setInputText(e.target.value);
@@ -345,12 +359,22 @@ export const Inbox: React.FC = () => {
       isAutoScrollEnabled.current = true;
 
       const timestamp = Date.now();
-      const msgData = { 
+      const msgData: any = { 
           senderUid: user.uid, 
           senderName: user.displayName || 'Unknown', 
           text, 
           timestamp 
       };
+
+      // Add Reply Metadata if present
+      if (replyingTo) {
+          msgData.replyTo = {
+              messageId: replyingTo.id,
+              senderId: replyingTo.senderUid,
+              senderName: replyingTo.senderName,
+              previewText: replyingTo.text
+          };
+      }
 
       try {
           if (selectedChat.type === 'dm') {
@@ -434,8 +458,9 @@ export const Inbox: React.FC = () => {
               }));
           }
 
-          // SUCCESS: Clear Input and Typing
+          // SUCCESS: Clear Input, Typing, and Reply state
           setInputText('');
+          setReplyingTo(null);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           await update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
 
@@ -692,6 +717,7 @@ export const Inbox: React.FC = () => {
                                     const prevMsg = messages[idx - 1];
                                     const isChain = prevMsg && prevMsg.senderUid === msg.senderUid && (msg.timestamp - prevMsg.timestamp < 60000);
                                     const isLatestMe = idx === latestMeIdx;
+                                    const isHighlighted = highlightedMessageId === msg.id;
 
                                     // Resolve Sender Photo for Group Chat
                                     let senderPhoto = null;
@@ -702,7 +728,11 @@ export const Inbox: React.FC = () => {
                                     }
 
                                     return (
-                                        <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'}`}>
+                                        <div 
+                                            key={msg.id} 
+                                            id={`msg-${msg.id}`}
+                                            className={`flex flex-col group/msg transition-all duration-500 ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'} ${isHighlighted ? 'bg-indigo-500/10 rounded-xl py-1' : ''}`}
+                                        >
                                             {!isMe && !isChain && selectedChat.type === 'group' && (
                                                 <span className="text-[10px] text-neutral-500 ml-10 mb-1 cursor-pointer hover:text-neutral-300 transition-colors" onClick={() => navigate(`/profile/${msg.senderUid}`)}>
                                                     {msg.senderName}
@@ -736,20 +766,53 @@ export const Inbox: React.FC = () => {
                                                     </div>
                                                 )}
 
-                                                {/* Message Bubble */}
-                                                <div className={`relative px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap shadow-sm transition-all overflow-hidden ${
-                                                    isMe 
-                                                    ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` 
-                                                    : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`
-                                                }`}>
-                                                    <div className="pr-1 inline">{msg.text}</div>
-                                                    {/* Meta Info Integrated */}
-                                                    <div className="inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none">
-                                                        <span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>
-                                                            {formatTime(msg.timestamp)}
-                                                        </span>
-                                                        {isLatestMe && renderMessageStatus(msg)}
+                                                <div className="flex flex-col relative group/bubble">
+                                                    {/* Reply Preview in Bubble */}
+                                                    {msg.replyTo && (
+                                                        <div 
+                                                            onClick={() => scrollToMessage(msg.replyTo.messageId)}
+                                                            className={`mb-1 p-2 rounded-xl text-[11px] cursor-pointer border backdrop-blur-sm truncate max-w-[200px] ${
+                                                                isMe 
+                                                                ? 'bg-white/10 border-white/10 text-indigo-100 self-end' 
+                                                                : 'bg-neutral-900/50 border-neutral-700/50 text-neutral-400 self-start'
+                                                            }`}
+                                                        >
+                                                            <div className="font-bold mb-0.5 flex items-center gap-1">
+                                                                <Reply size={10} /> {msg.replyTo.senderName}
+                                                            </div>
+                                                            <div className="truncate opacity-70 italic">{msg.replyTo.previewText}</div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Message Bubble */}
+                                                    <div className={`relative px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap shadow-sm transition-all overflow-hidden ${
+                                                        isMe 
+                                                        ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` 
+                                                        : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`
+                                                    }`}>
+                                                        <div className="pr-1 inline">{msg.text}</div>
+                                                        {/* Meta Info Integrated */}
+                                                        <div className="inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none">
+                                                            <span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>
+                                                                {formatTime(msg.timestamp)}
+                                                            </span>
+                                                            {isLatestMe && renderMessageStatus(msg)}
+                                                        </div>
                                                     </div>
+
+                                                    {/* Reply Action Button (Desktop Hover) */}
+                                                    <button 
+                                                        onClick={() => {
+                                                            setReplyingTo(msg);
+                                                            inputRef.current?.focus();
+                                                        }}
+                                                        className={`absolute top-1/2 -translate-y-1/2 p-2 rounded-full bg-neutral-900/80 text-neutral-400 hover:text-white border border-neutral-800 opacity-0 group-hover/bubble:opacity-100 transition-all z-20 ${
+                                                            isMe ? '-left-12' : '-right-12'
+                                                        }`}
+                                                        title="Reply"
+                                                    >
+                                                        <Reply size={14} />
+                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -765,8 +828,29 @@ export const Inbox: React.FC = () => {
                                 </div>
                             )}
 
+                            {/* Reply Preview Above Input */}
+                            {replyingTo && (
+                                <div className="mx-3 mt-1 px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-t-xl border-b-0 flex items-center justify-between animate-in slide-in-from-bottom-2">
+                                    <div className="flex-1 min-w-0 flex items-center gap-3">
+                                        <div className="p-1.5 bg-indigo-500/10 rounded-lg">
+                                            <CornerUpRight size={14} className="text-indigo-400" />
+                                        </div>
+                                        <div className="flex flex-col min-w-0">
+                                            <span className="text-[10px] font-bold text-indigo-400 truncate uppercase tracking-tight">Replying to {replyingTo.senderName}</span>
+                                            <span className="text-xs text-neutral-500 truncate italic">{replyingTo.text}</span>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => setReplyingTo(null)}
+                                        className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+                            )}
+
                             <div className="p-3 bg-neutral-950 border-t border-neutral-900">
-                                <form onSubmit={handleSend} className="flex gap-2 items-end bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 focus-within:border-indigo-500/50 transition-colors">
+                                <form onSubmit={handleSend} className={`flex gap-2 items-end bg-neutral-900 border border-neutral-800 px-2 py-2 focus-within:border-indigo-500/50 transition-colors ${replyingTo ? 'rounded-b-xl' : 'rounded-xl'}`}>
                                     <textarea ref={inputRef} value={inputText} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={`Message ${selectedChat.name}...`} rows={1} className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" style={{ minHeight: '40px' }} />
                                     <button type="submit" disabled={!inputText.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:bg-neutral-800 text-white p-2.5 rounded-lg transition-colors mb-0.5"><Send size={16} /></button>
                                 </form>
