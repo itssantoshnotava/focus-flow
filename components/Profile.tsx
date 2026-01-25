@@ -290,7 +290,7 @@ export const Profile: React.FC = () => {
             <div className="w-full grid grid-cols-2 gap-4">
               <div className="bg-white/5 border border-white/[0.05] rounded-3xl p-5 flex flex-col items-center gap-2 hover:bg-white/[0.08] transition-colors group">
                 <div className="p-3 bg-orange-500/10 rounded-2xl group-hover:scale-110 transition-transform">
-                  <Flame size={24} className="text-orange-500 fill-orange-500" />
+                  <Flame size={24} className="text-orange-500 fill-orange-500 animate-fire-flicker" />
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-black text-white leading-tight">{profileData.streaks?.current || profileData.streak || 0}</div>

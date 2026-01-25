@@ -35,100 +35,67 @@ export const Inbox: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
-  // View State
   const [viewMode, setViewMode] = useState<'list' | 'create_group'>('list');
-  
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [selectedChat, setSelectedChat] = useState<ChatItem | null>(null);
-  
-  // Active Group Realtime Data
   const [activeGroupData, setActiveGroupData] = useState<any>(null);
   const [groupMembersDetails, setGroupMembersDetails] = useState<any[]>([]);
-  
-  // Data State
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number} | null>(null);
   const [myFriends, setMyFriends] = useState<any[]>([]);
   const [allReactions, setAllReactions] = useState<Record<string, any>>({});
-  
-  // Typing & Seen State
   const [typingText, setTypingText] = useState('');
   const [lastSeenMap, setLastSeenMap] = useState<Record<string, number>>({});
-  
-  // Inputs
   const [inputText, setInputText] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<Set<string>>(new Set());
-  
-  // Interaction State
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
-  
-  // Attachment State
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [pendingMedia, setPendingMedia] = useState<{ url: string, type: 'image' | 'video', duration?: number } | null>(null);
-
   const [loading, setLoading] = useState(true);
-  
+  const [justSentId, setJustSentId] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
-  
-  // Scroll & Typing Refs
   const isAutoScrollEnabled = useRef(true);
   const isInitialLoadRef = useRef(false);
   const typingTimeoutRef = useRef<number | null>(null);
 
-  // Helper: DM Conversation ID
   const getDmConvoId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
-
-  // Helper: Get Current Chat ID (Unified for DM/Group)
   const currentChatId = useMemo(() => {
     if (!user || !selectedChat) return null;
     return selectedChat.type === 'dm' ? getDmConvoId(user.uid, selectedChat.id) : selectedChat.id;
   }, [user, selectedChat]);
 
-  // Helper: Member Lookup for Group Avatars
   const memberLookup = useMemo(() => {
       const map: Record<string, any> = {};
       groupMembersDetails.forEach(m => { map[m.uid] = m; });
       return map;
   }, [groupMembersDetails]);
 
-  // Helper: Find index of the latest message from current user
   const latestMeIdx = useMemo(() => {
       for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].senderUid === user?.uid) return i;
+          if (messages[i].senderUid === user?.uid && !messages[i].system) return i;
       }
       return -1;
   }, [messages, user?.uid]);
 
-  // --- 1. Real-time Inbox Listener ---
   useEffect(() => {
     if (!user) return;
-    
     const inboxRef = ref(database, `userInboxes/${user.uid}`);
-    get(inboxRef).then(() => {
-        setLoading(false);
-    });
-
+    get(inboxRef).then(() => setLoading(false));
     const handleInboxUpdate = (snapshot: any) => {
         const val = snapshot.val();
         const key = snapshot.key;
         if (!key || !val) return;
-
         const newItem: ChatItem = {
-            id: key,
-            type: val.type,
-            name: val.name,
-            photoURL: val.photoURL,
-            lastMessage: val.lastMessage,
-            timestamp: val.lastMessageAt || 0,
-            unreadCount: val.unreadCount || 0
+            id: key, type: val.type, name: val.name, photoURL: val.photoURL,
+            lastMessage: val.lastMessage, timestamp: val.lastMessageAt || 0, unreadCount: val.unreadCount || 0
         };
-
         setChats(prev => {
             const existingIdx = prev.findIndex(c => c.id === key);
             let newChats = [...prev];
@@ -138,34 +105,27 @@ export const Inbox: React.FC = () => {
         });
         setLoading(false);
     };
-
     const handleInboxRemove = (snapshot: any) => {
         const key = snapshot.key;
         if (!key) return;
         setChats(prev => prev.filter(c => c.id !== key));
     };
-
     const unsubAdded = onChildAdded(inboxRef, handleInboxUpdate);
     const unsubChanged = onChildChanged(inboxRef, handleInboxUpdate);
     const unsubRemoved = onChildRemoved(inboxRef, handleInboxRemove);
-
     return () => { unsubAdded(); unsubChanged(); unsubRemoved(); };
   }, [user]);
 
-  // --- 1.1 Auto-select chat from search params ---
   useEffect(() => {
     if (chats.length > 0) {
         const targetChatId = searchParams.get('chatId');
         if (targetChatId) {
             const targetChat = chats.find(c => c.id === targetChatId);
-            if (targetChat && selectedChat?.id !== targetChatId) {
-                setSelectedChat(targetChat);
-            }
+            if (targetChat && selectedChat?.id !== targetChatId) setSelectedChat(targetChat);
         }
     }
   }, [chats, searchParams, selectedChat?.id]);
 
-  // --- 2. Active Group Details ---
   useEffect(() => {
       if (selectedChat?.type === 'group') {
           const gRef = ref(database, `groupChats/${selectedChat.id}`);
@@ -191,7 +151,6 @@ export const Inbox: React.FC = () => {
       }
   }, [selectedChat]);
 
-  // --- 3. Friends Fetcher ---
   useEffect(() => {
       if (!user) return;
       if (viewMode === 'create_group') {
@@ -207,7 +166,6 @@ export const Inbox: React.FC = () => {
       }
   }, [user, viewMode]);
 
-  // --- 4. Chat Reset on Switch ---
   useEffect(() => {
       if (selectedChat) {
           isInitialLoadRef.current = true;
@@ -219,95 +177,62 @@ export const Inbox: React.FC = () => {
           setTypingText('');
           setLastSeenMap({});
           isAutoScrollEnabled.current = true;
-          
-          if (user) {
-              update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
-          }
+          if (user) update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
       }
   }, [selectedChat?.id, user]);
 
-  // --- 5. Messages & Presence Listener ---
   useEffect(() => {
       if (!user || !selectedChat || !currentChatId) {
           setFriendPresence(null);
           return;
       }
-
       let messagesPath = selectedChat.type === 'dm' ? `messages/${currentChatId}` : `groupMessages/${selectedChat.id}`;
-      
-      if (selectedChat.type === 'dm') {
-          onValue(ref(database, `presence/${selectedChat.id}`), (snap) => setFriendPresence(snap.exists() ? snap.val() : null));
-      }
-
+      if (selectedChat.type === 'dm') onValue(ref(database, `presence/${selectedChat.id}`), (snap) => setFriendPresence(snap.exists() ? snap.val() : null));
       const unsubMsg = onValue(ref(database, messagesPath), (snapshot) => {
           if (snapshot.exists()) {
               const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
               setMessages(list);
               update(ref(database, `chatSeen/${currentChatId}/${user.uid}`), { timestamp: Date.now() });
-          } else {
-              setMessages([]);
-          }
+          } else setMessages([]);
       });
-
-      const unsubReactions = onValue(ref(database, `reactions/${currentChatId}`), (snap) => {
-          setAllReactions(snap.exists() ? snap.val() : {});
-      });
-      
+      const unsubReactions = onValue(ref(database, `reactions/${currentChatId}`), (snap) => setAllReactions(snap.exists() ? snap.val() : {}));
       setTimeout(() => inputRef.current?.focus(), 100);
-
       const typingRef = ref(database, `typing/${currentChatId}`);
       const unsubTyping = onValue(typingRef, (snap) => {
           if (snap.exists()) {
               const data = snap.val();
-              const typers = Object.entries(data)
-                  .filter(([uid, isTyping]) => uid !== user.uid && isTyping === true)
-                  .map(([uid]) => uid);
-              
+              const typers = Object.entries(data).filter(([uid, isTyping]) => uid !== user.uid && isTyping === true).map(([uid]) => uid);
               if (typers.length === 0) setTypingText('');
               else if (selectedChat.type === 'dm') setTypingText('typing...');
               else {
                   if (typers.length === 1) {
                       const name = groupMembersDetails.find(m => m.uid === typers[0])?.name || 'Someone';
                       setTypingText(`${name} is typing...`);
-                  } else {
-                      setTypingText('Multiple people are typing...');
-                  }
+                  } else setTypingText('Multiple people are typing...');
               }
-          } else {
-              setTypingText('');
-          }
+          } else setTypingText('');
       });
-
       const seenRef = ref(database, `chatSeen/${currentChatId}`);
       update(ref(database, `chatSeen/${currentChatId}/${user.uid}`), { timestamp: Date.now() });
-      
       const unsubSeen = onValue(seenRef, (snap) => {
           if (snap.exists()) {
               const data = snap.val();
               const map: Record<string, number> = {};
-              Object.entries(data).forEach(([uid, val]: [string, any]) => {
-                   map[uid] = val.timestamp || val; 
-              });
+              Object.entries(data).forEach(([uid, val]: [string, any]) => { map[uid] = val.timestamp || val; });
               setLastSeenMap(map);
           }
       });
-
       return () => { unsubMsg(); unsubTyping(); unsubSeen(); unsubReactions(); };
   }, [user, selectedChat, currentChatId, groupMembersDetails]);
 
-
-  // --- 6. Scroll Logic ---
   useLayoutEffect(() => {
       if (!scrollContainerRef.current) return;
       const container = scrollContainerRef.current;
-      
       if (isInitialLoadRef.current && messages.length > 0) {
           container.scrollTop = container.scrollHeight;
           isInitialLoadRef.current = false;
       } 
-      else if (messages.length > 0 && isAutoScrollEnabled.current) {
-          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-      }
+      else if (messages.length > 0 && isAutoScrollEnabled.current) container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   }, [messages, selectedChat?.id]);
 
   const handleScroll = () => {
@@ -329,63 +254,38 @@ export const Inbox: React.FC = () => {
     if (!user || !currentChatId) return;
     const reactionRef = ref(database, `reactions/${currentChatId}/${messageId}/${emoji}/${user.uid}`);
     const snap = await get(reactionRef);
-    if (snap.exists()) {
-      await remove(reactionRef);
-    } else {
-      await set(reactionRef, true);
-    }
+    if (snap.exists()) await remove(reactionRef);
+    else await set(reactionRef, true);
     setActiveReactionPickerId(null);
   };
 
   const handleUnsend = async (msgId: string) => {
     if (!user || !selectedChat || !currentChatId) return;
-    
     const confirmUnsend = window.confirm("Unsend this message?");
     if (!confirmUnsend) return;
-
-    const path = selectedChat.type === 'dm' 
-      ? `messages/${currentChatId}/${msgId}` 
-      : `groupMessages/${selectedChat.id}/${msgId}`;
-
-    const updates = {
-        isUnsent: true,
-        text: null,
-        media: null,
-        reactions: null,
-        replyTo: null
-    };
-
+    const path = selectedChat.type === 'dm' ? `messages/${currentChatId}/${msgId}` : `groupMessages/${selectedChat.id}/${msgId}`;
+    const updates = { isUnsent: true, text: null, media: null, reactions: null, replyTo: null };
     try {
         await update(ref(database, path), updates);
         await remove(ref(database, `reactions/${currentChatId}/${msgId}`));
-    } catch (err) {
-        console.error("Unsend failed", err);
-    }
+    } catch (err) { console.error("Unsend failed", err); }
   };
 
   const handleMediaUpload = async (file: File) => {
     if (!file) return;
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
-    if (!isImage && !isVideo) {
-      alert("Only images and videos are supported.");
-      return;
-    }
+    if (!isImage && !isVideo) { alert("Only images and videos are supported."); return; }
     if (isVideo) {
       const video = document.createElement('video');
       video.preload = 'metadata';
       video.onloadedmetadata = () => {
           window.URL.revokeObjectURL(video.src);
-          if (video.duration > 60) {
-              alert("Videos must be less than 60 seconds.");
-              return;
-          }
+          if (video.duration > 60) { alert("Videos must be less than 60 seconds."); return; }
           uploadFile(file, 'video', video.duration);
       };
       video.src = URL.createObjectURL(file);
-    } else {
-      uploadFile(file, 'image');
-    }
+    } else uploadFile(file, 'image');
   };
 
   const uploadFile = async (file: File, type: 'image' | 'video', duration?: number) => {
@@ -393,11 +293,7 @@ export const Inbox: React.FC = () => {
     try {
       const url = await uploadImageToCloudinary(file);
       setPendingMedia({ url, type, duration });
-    } catch (err) {
-      console.error("Media upload failed", err);
-    } finally {
-      setIsUploadingMedia(false);
-    }
+    } catch (err) { console.error("Media upload failed", err); } finally { setIsUploadingMedia(false); }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -415,9 +311,7 @@ export const Inbox: React.FC = () => {
       if (!user || !currentChatId) return;
       update(ref(database, `typing/${currentChatId}/${user.uid}`), true);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = window.setTimeout(() => {
-          update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
-      }, 1500);
+      typingTimeoutRef.current = window.setTimeout(() => { update(ref(database, `typing/${currentChatId}/${user.uid}`), false); }, 1500);
   };
 
   const handleSend = async (e?: React.FormEvent) => {
@@ -425,59 +319,30 @@ export const Inbox: React.FC = () => {
       const text = inputText.trim();
       if (!user || !selectedChat || !currentChatId) return;
       if (!text && !pendingMedia) return;
-
       isAutoScrollEnabled.current = true;
       const timestamp = Date.now();
-      
-      const msgData: any = { 
-          senderUid: user.uid, 
-          senderName: user.displayName || 'Unknown', 
-          timestamp,
-          type: pendingMedia ? pendingMedia.type : 'text',
-          text: text || null
-      };
-
-      if (pendingMedia) {
-          msgData.media = { url: pendingMedia.url, duration: pendingMedia.duration || null };
-      }
-
-      if (replyingTo) {
-          msgData.replyTo = {
-              messageId: replyingTo.id,
-              senderId: replyingTo.senderUid,
-              senderName: replyingTo.senderName,
-              previewText: replyingTo.media ? (replyingTo.type === 'image' ? 'Image' : 'Video') : replyingTo.text
-          };
-      }
+      const msgData: any = { senderUid: user.uid, senderName: user.displayName || 'Unknown', timestamp, type: pendingMedia ? pendingMedia.type : 'text', text: text || null };
+      if (pendingMedia) msgData.media = { url: pendingMedia.url, duration: pendingMedia.duration || null };
+      if (replyingTo) msgData.replyTo = { messageId: replyingTo.id, senderId: replyingTo.senderUid, senderName: replyingTo.senderName, previewText: replyingTo.media ? (replyingTo.type === 'image' ? 'Image' : 'Video') : replyingTo.text };
 
       try {
+          let newMessageRef;
           if (selectedChat.type === 'dm') {
               const friendUid = selectedChat.id;
               const messagesRef = ref(database, `messages/${currentChatId}`);
-              const newMessageRef = push(messagesRef);
+              newMessageRef = push(messagesRef);
               await set(newMessageRef, msgData);
-              await update(ref(database, `conversations/${currentChatId}`), { 
-                  members: { [user.uid]: true, [friendUid]: true }, 
-                  lastMessage: { ...msgData, seen: false } 
-              });
-              await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), { 
-                  type: 'dm', 
-                  name: selectedChat.name, 
-                  photoURL: selectedChat.photoURL || null, 
-                  lastMessage: msgData, 
-                  lastMessageAt: timestamp 
-              });
+              await update(ref(database, `conversations/${currentChatId}`), { members: { [user.uid]: true, [friendUid]: true }, lastMessage: { ...msgData, seen: false } });
+              await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), { type: 'dm', name: selectedChat.name, photoURL: selectedChat.photoURL || null, lastMessage: msgData, lastMessageAt: timestamp });
               const friendInboxRef = ref(database, `userInboxes/${friendUid}/${user.uid}`);
               await runTransaction(friendInboxRef, (currentData) => {
-                  if (currentData === null) {
-                      return { type: 'dm', name: user.displayName, photoURL: user.photoURL, lastMessage: msgData, lastMessageAt: timestamp, unreadCount: 1 };
-                  }
+                  if (currentData === null) return { type: 'dm', name: user.displayName, photoURL: user.photoURL, lastMessage: msgData, lastMessageAt: timestamp, unreadCount: 1 };
                   return { ...currentData, name: user.displayName, photoURL: user.photoURL, lastMessage: msgData, lastMessageAt: timestamp, unreadCount: (currentData.unreadCount || 0) + 1 };
               });
           } else {
               const groupId = selectedChat.id;
               const messagesRef = ref(database, `groupMessages/${groupId}`);
-              const newMessageRef = push(messagesRef);
+              newMessageRef = push(messagesRef);
               await set(newMessageRef, msgData);
               await update(ref(database, `groupChats/${groupId}`), { lastMessage: msgData });
               let membersToUpdate: string[] = activeGroupData?.members ? Object.keys(activeGroupData.members) : [];
@@ -496,14 +361,14 @@ export const Inbox: React.FC = () => {
                   return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => (count || 0) + 1);
               }));
           }
-          setInputText('');
-          setReplyingTo(null);
-          setPendingMedia(null);
+          if (newMessageRef?.key) {
+              setJustSentId(newMessageRef.key);
+              setTimeout(() => setJustSentId(null), 1000);
+          }
+          setInputText(''); setReplyingTo(null); setPendingMedia(null);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           await update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
-      } catch (error) {
-          console.error("Failed to send message:", error);
-      }
+      } catch (error) { console.error("Failed to send message:", error); }
   };
 
   const handleCreateGroup = async () => {
@@ -516,55 +381,55 @@ export const Inbox: React.FC = () => {
           const groupData = { name: newGroupName.trim(), createdBy: user.uid, hostUid: user.uid, createdAt: Date.now(), members: membersObj, admins: { [user.uid]: true } };
           await set(newGroupRef, groupData);
           const updates: any = {};
-          [user.uid, ...Array.from(selectedGroupMembers)].forEach(uid => {
-             updates[`userInboxes/${uid}/${groupId}`] = { type: 'group', name: groupData.name, lastMessage: null, lastMessageAt: Date.now(), unreadCount: 0 };
-          });
+          [user.uid, ...Array.from(selectedGroupMembers)].forEach(uid => { updates[`userInboxes/${uid}/${groupId}`] = { type: 'group', name: groupData.name, lastMessage: null, lastMessageAt: Date.now(), unreadCount: 0 }; });
           await update(ref(database), updates);
-          setViewMode('list');
-          setNewGroupName('');
-          setSelectedGroupMembers(new Set());
+          setViewMode('list'); setNewGroupName(''); setSelectedGroupMembers(new Set());
       }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          handleSend();
-      }
-  };
-
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } };
   const formatTime = (timestamp: number) => new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const goToProfile = (e: React.MouseEvent, targetUid: string) => { e.stopPropagation(); navigate(`/profile/${targetUid}`); };
 
-  const goToProfile = (e: React.MouseEvent, targetUid: string) => {
-      e.stopPropagation();
-      navigate(`/profile/${targetUid}`);
-  };
-
-  const renderMessageStatus = (msg: any) => {
+  const renderReadReceipts = (msg: any) => {
       if (msg.senderUid !== user?.uid || msg.isUnsent) return null;
-      let isSeen = false;
+      
+      const seenBy: string[] = [];
       if (selectedChat?.type === 'dm') {
-          const friendSeen = lastSeenMap[selectedChat.id];
-          isSeen = friendSeen >= msg.timestamp;
-      } else {
-          if (activeGroupData?.members) {
-              const otherMembers = Object.keys(activeGroupData.members).filter(id => id !== user?.uid);
-              const seenCount = otherMembers.filter(id => lastSeenMap[id] >= msg.timestamp).length;
-              isSeen = seenCount > 0;
-          }
+          if (lastSeenMap[selectedChat.id] >= msg.timestamp) seenBy.push(selectedChat.id);
+      } else if (activeGroupData?.members) {
+          Object.keys(activeGroupData.members).forEach(uid => {
+              if (uid !== user?.uid && lastSeenMap[uid] >= msg.timestamp) seenBy.push(uid);
+          });
       }
-      return isSeen 
-        ? <CheckCheck size={11} className="text-indigo-200" />
-        : <Check size={11} className="text-neutral-300" />;
+
+      if (seenBy.length === 0) return null;
+
+      const maxAvatars = 3;
+      const showCount = Math.min(seenBy.length, maxAvatars);
+      const remaining = seenBy.length - showCount;
+
+      return (
+          <div className="flex -space-x-1.5 mt-0.5 justify-end animate-in fade-in duration-300">
+              {seenBy.slice(0, showCount).map(uid => {
+                  const photo = selectedChat?.type === 'dm' ? selectedChat.photoURL : memberLookup[uid]?.photoURL;
+                  const initial = (selectedChat?.type === 'dm' ? selectedChat.name : memberLookup[uid]?.name || '?').charAt(0);
+                  return photo ? (
+                      <img key={uid} src={photo} className="w-3.5 h-3.5 rounded-full border border-neutral-950 object-cover" alt="seen" />
+                  ) : (
+                      <div key={uid} className="w-3.5 h-3.5 rounded-full border border-neutral-950 bg-indigo-600 flex items-center justify-center text-[6px] font-bold text-white">{initial}</div>
+                  );
+              })}
+              {remaining > 0 && (
+                  <div className="w-3.5 h-3.5 rounded-full border border-neutral-950 bg-neutral-800 flex items-center justify-center text-[6px] font-bold text-neutral-400">+{remaining}</div>
+              )}
+          </div>
+      );
   };
 
   return (
     <div className="flex h-full w-full bg-neutral-950">
-        {activeReactionPickerId && (
-            <div className="fixed inset-0 z-[45] bg-transparent" onClick={() => setActiveReactionPickerId(null)} />
-        )}
-
-        {/* LIST */}
+        {activeReactionPickerId && ( <div className="fixed inset-0 z-[45] bg-transparent" onClick={() => setActiveReactionPickerId(null)} /> )}
         <div className={`w-full md:w-[350px] lg:w-[400px] border-r border-neutral-900 flex-none flex flex-col ${selectedChat ? 'hidden md:flex' : 'flex'} bg-[rgba(20,20,20,0.55)] backdrop-blur-[12px]`}>
             <div className="p-4 border-b border-neutral-900 bg-transparent flex justify-between items-center h-16 shrink-0">
                 {viewMode === 'list' ? (
@@ -587,7 +452,7 @@ export const Inbox: React.FC = () => {
                             const displayPhoto = (chat.id === selectedChat?.id && activeGroupData) ? activeGroupData.photoURL : chat.photoURL;
                             const isUnread = (chat.unreadCount || 0) > 0;
                             return (
-                                <button key={chat.id} onClick={() => { setSelectedChat(chat); }} className={`w-full py-4 px-5 flex items-center gap-4 hover:bg-neutral-900/30 transition-all border-b border-neutral-900/50 text-left relative group ${selectedChat?.id === chat.id ? 'bg-neutral-900/50' : ''}`}>
+                                <button key={chat.id} onClick={() => setSelectedChat(chat)} className={`w-full py-4 px-5 flex items-center gap-4 hover:bg-neutral-900/30 transition-all border-b border-neutral-900/50 text-left relative group ${selectedChat?.id === chat.id ? 'bg-neutral-900/50' : ''}`}>
                                     <div className="relative shrink-0" onClick={(e) => chat.type === 'dm' && goToProfile(e, chat.id)}>
                                         {chat.type === 'group' ? ( displayPhoto ? <img src={displayPhoto} className="w-14 h-14 rounded-2xl bg-neutral-800 object-cover shadow-sm" /> : <div className="w-14 h-14 rounded-2xl bg-neutral-800 flex items-center justify-center shadow-sm"><Users size={24} className="text-neutral-500" /></div> ) : ( displayPhoto ? <img src={displayPhoto} className="w-14 h-14 rounded-full bg-neutral-800 object-cover shadow-sm hover:opacity-80 transition-opacity" /> : <div className="w-14 h-14 rounded-full bg-indigo-600 flex items-center justify-center text-lg font-bold text-white shadow-sm hover:opacity-80 transition-opacity">{displayName.charAt(0)}</div>)}
                                         {isUnread && <span className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-500 border-[3px] border-neutral-950 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm">{chat.unreadCount}</span>}
@@ -629,7 +494,6 @@ export const Inbox: React.FC = () => {
             )}
         </div>
 
-        {/* CHAT AREA */}
         <div className={`flex-1 flex flex-col bg-neutral-950 min-w-0 ${!selectedChat ? 'hidden md:flex' : 'flex'}`}>
             {selectedChat ? (
                 <>
@@ -642,18 +506,7 @@ export const Inbox: React.FC = () => {
                                     {friendPresence && <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-neutral-950 ${friendPresence.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
                                 </div>
                                 <div className="flex flex-col">
-                                    <span 
-                                        className="font-bold text-neutral-200 text-sm cursor-pointer hover:text-white transition-colors" 
-                                        onClick={() => {
-                                            if (selectedChat.type === 'group') {
-                                                navigate(`/group/${selectedChat.id}/settings`);
-                                            } else {
-                                                navigate(`/profile/${selectedChat.id}`);
-                                            }
-                                        }}
-                                    >
-                                        { (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }
-                                    </span>
+                                    <span className="font-bold text-neutral-200 text-sm cursor-pointer hover:text-white transition-colors" onClick={() => navigate(selectedChat.type === 'group' ? `/group/${selectedChat.id}/settings` : `/profile/${selectedChat.id}`)}>{ (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }</span>
                                     {selectedChat.type === 'group' ? ( <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span> ) : ( typingText && <span className="text-[10px] text-indigo-400 animate-pulse font-medium">{typingText}</span> )}
                                 </div>
                             </div>
@@ -662,30 +515,23 @@ export const Inbox: React.FC = () => {
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-1" ref={scrollContainerRef} onScroll={handleScroll}>
                         {messages.map((msg, idx) => {
-                            // System Message Rendering
                             if (msg.system || msg.type === 'system') {
                                 return (
                                     <div key={msg.id} className="w-full flex justify-center my-4 px-4 animate-in fade-in duration-500">
-                                        <div className="bg-neutral-900/30 border border-neutral-800/50 rounded-full px-4 py-1.5 text-[11px] text-neutral-500 font-medium tracking-wide shadow-sm">
-                                            {msg.text}
-                                        </div>
+                                        <div className="bg-neutral-900/30 border border-neutral-800/50 rounded-full px-4 py-1.5 text-[11px] text-neutral-500 font-medium tracking-wide shadow-sm">{msg.text}</div>
                                     </div>
                                 );
                             }
-
                             const isMe = msg.senderUid === user?.uid;
                             const prevMsg = messages[idx - 1];
                             const isChain = prevMsg && prevMsg.senderUid === msg.senderUid && (msg.timestamp - prevMsg.timestamp < 60000);
                             const isLatestMe = idx === latestMeIdx;
                             const isHighlighted = highlightedMessageId === msg.id;
                             const reactions = allReactions[msg.id];
-
-                            let senderPhoto = null;
-                            if (selectedChat.type === 'group' && !isMe) senderPhoto = memberLookup[msg.senderUid]?.photoURL;
-                            else if (selectedChat.type === 'dm' && !isMe) senderPhoto = selectedChat.photoURL;
+                            const senderPhoto = selectedChat.type === 'group' && !isMe ? memberLookup[msg.senderUid]?.photoURL : (selectedChat.type === 'dm' && !isMe ? selectedChat.photoURL : null);
 
                             return (
-                                <div key={msg.id} id={`msg-${msg.id}`} className={`flex flex-col group/msg transition-all duration-500 ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'} ${isHighlighted ? 'bg-indigo-500/10 rounded-xl py-1' : ''}`}>
+                                <div key={msg.id} id={`msg-${msg.id}`} className={`flex flex-col group/msg transition-all duration-500 ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'} ${isHighlighted ? 'bg-indigo-500/10 rounded-xl py-1' : ''} ${justSentId === msg.id ? 'animate-message-pop' : ''}`}>
                                     {!isMe && !isChain && selectedChat.type === 'group' && ( <span className="text-[10px] text-neutral-500 ml-10 mb-1 cursor-pointer hover:text-neutral-300 transition-colors" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName}</span> )}
                                     <div className={`flex gap-2 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                                         {!isMe && (
@@ -701,57 +547,36 @@ export const Inbox: React.FC = () => {
                                                     ))}
                                                 </div>
                                             )}
-
                                             {msg.replyTo && !msg.isUnsent && (
                                                 <div onClick={() => scrollToMessage(msg.replyTo.messageId)} className={`mb-1 p-2 rounded-xl text-[11px] cursor-pointer border backdrop-blur-sm truncate max-w-[200px] ${isMe ? 'bg-white/10 border-white/10 text-indigo-100 self-end' : 'bg-neutral-900/50 border-neutral-700/50 text-neutral-400 self-start'}`}><div className="font-bold mb-0.5 flex items-center gap-1"><Reply size={10} /> {msg.replyTo.senderName}</div><div className="truncate opacity-70 italic">{msg.replyTo.previewText}</div></div>
                                             )}
-                                            
                                             <div className={`relative flex flex-col rounded-2xl shadow-sm transition-all overflow-hidden ${isMe ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`}`}>
-                                                {msg.isUnsent ? (
-                                                    <div className={`px-3.5 py-2 text-xs italic ${isMe ? 'text-indigo-200/50' : 'text-neutral-500'}`}>This message was unsent</div>
-                                                ) : (
+                                                {msg.isUnsent ? ( <div className={`px-3.5 py-2 text-xs italic ${isMe ? 'text-indigo-200/50' : 'text-neutral-500'}`}>This message was unsent</div> ) : (
                                                     <>
-                                                        {msg.type === 'image' && msg.media && (
-                                                            <div className="cursor-pointer group/img_wrap relative max-w-sm" onClick={() => window.open(msg.media.url, '_blank')}>
-                                                                <img src={msg.media.url} className="w-full h-auto object-cover" alt="attachment" />
-                                                            </div>
-                                                        )}
-                                                        {msg.type === 'video' && msg.media && (
-                                                            <div className="relative max-w-sm group/vid_wrap">
-                                                                <video src={msg.media.url} className="w-full h-auto max-h-[300px] object-cover" muted playsInline loop onClick={(e) => e.currentTarget.paused ? e.currentTarget.play() : e.currentTarget.pause()} />
-                                                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/vid_wrap:opacity-100 transition-opacity">
-                                                                    <div className="p-2 bg-black/40 rounded-full text-white backdrop-blur-sm"><Play size={20} fill="white" /></div>
-                                                                </div>
-                                                            </div>
-                                                        )}
+                                                        {msg.type === 'image' && msg.media && ( <div className="cursor-pointer group/img_wrap relative max-w-sm" onClick={() => window.open(msg.media.url, '_blank')}><img src={msg.media.url} className="w-full h-auto object-cover" alt="attachment" /></div> )}
+                                                        {msg.type === 'video' && msg.media && ( <div className="relative max-w-sm group/vid_wrap"><video src={msg.media.url} className="w-full h-auto max-h-[300px] object-cover" muted playsInline loop onClick={(e) => e.currentTarget.paused ? e.currentTarget.play() : e.currentTarget.pause()} /><div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/vid_wrap:opacity-100 transition-opacity"><div className="p-2 bg-black/40 rounded-full text-white backdrop-blur-sm"><Play size={20} fill="white" /></div></div></div> )}
                                                         <div className="px-3.5 py-1.5 text-sm break-words whitespace-pre-wrap">
                                                             {msg.text && <div className="pr-1 inline">{msg.text}</div>}
-                                                            <div className={`inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none`}>
-                                                                <span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>{formatTime(msg.timestamp)}</span>
-                                                                {isLatestMe && renderMessageStatus(msg)}
+                                                            <div className={`inline-flex flex-col items-end ml-2 -mr-1 align-bottom select-none`}>
+                                                                <span className={`text-[9px] font-medium tracking-tight leading-none ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>{formatTime(msg.timestamp)}</span>
+                                                                {isLatestMe && renderReadReceipts(msg)}
                                                             </div>
                                                         </div>
                                                     </>
                                                 )}
                                             </div>
-                                            
                                             {reactions && !msg.isUnsent && (
                                                 <div className={`flex flex-wrap gap-1 mt-1 z-10 ${isMe ? 'justify-end' : 'justify-start'}`}>
                                                     {Object.entries(reactions).map(([emoji, users]: [string, any]) => {
                                                         const count = Object.keys(users).length;
                                                         const hasReacted = users[user?.uid || ''];
-                                                        return (
-                                                            <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border backdrop-blur-sm transition-all active:scale-95 ${hasReacted ? 'bg-indigo-500/25 border-indigo-500/40 text-indigo-200' : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:bg-neutral-800'}`}><span>{emoji}</span><span className="font-bold tabular-nums">{count}</span></button>
-                                                        );
+                                                        return ( <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className={`animate-reaction-bounce flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border backdrop-blur-sm transition-all active:scale-95 ${hasReacted ? 'bg-indigo-500/25 border-indigo-500/40 text-indigo-200' : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:bg-neutral-800'}`}><span>{emoji}</span><span className="font-bold tabular-nums">{count}</span></button> );
                                                     })}
                                                 </div>
                                             )}
-
                                             {!msg.isUnsent && (
                                                 <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover/bubble:opacity-100 transition-all z-20 ${isMe ? '-left-[110px]' : '-right-24'}`}>
-                                                    {isMe && (
-                                                        <button onClick={() => handleUnsend(msg.id)} className="p-2.5 rounded-full bg-neutral-900/90 text-red-500/70 hover:text-red-400 border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all" title="Unsend"><Trash2 size={15} /></button>
-                                                    )}
+                                                    {isMe && ( <button onClick={() => handleUnsend(msg.id)} className="p-2.5 rounded-full bg-neutral-900/90 text-red-500/70 hover:text-red-400 border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all" title="Unsend"><Trash2 size={15} /></button> )}
                                                     <button onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} className="p-2.5 rounded-full bg-neutral-900/90 text-neutral-400 hover:text-white border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all" title="Reply"><Reply size={15} /></button>
                                                     <button onClick={(e) => { e.stopPropagation(); setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id); }} className={`p-2.5 rounded-full bg-neutral-900/90 border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all ${activeReactionPickerId === msg.id ? 'text-indigo-400 border-indigo-500/50' : 'text-neutral-400 hover:text-white'}`} title="React"><SmilePlus size={15} /></button>
                                                 </div>
@@ -763,19 +588,14 @@ export const Inbox: React.FC = () => {
                         })}
                         <div ref={messagesEndRef} />
                     </div>
-                    
                     {typingText && ( <div className="px-6 py-1 text-[10px] text-indigo-400 font-bold uppercase tracking-wider animate-pulse bg-neutral-950/20 backdrop-blur-sm">{typingText}</div> )}
-                    
                     {(pendingMedia || replyingTo) && (
                         <div className="mx-3 mt-1 bg-neutral-900 border border-neutral-800 rounded-t-xl border-b-0 overflow-hidden flex flex-col animate-in slide-in-from-bottom-2">
                             {replyingTo && (
                                 <div className="px-4 py-2 border-b border-neutral-800 flex items-center justify-between">
                                     <div className="flex-1 min-w-0 flex items-center gap-3">
                                         <div className="p-1.5 bg-indigo-500/10 rounded-lg"><CornerUpRight size={14} className="text-indigo-400" /></div>
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="text-[10px] font-bold text-indigo-400 truncate uppercase tracking-tight">Replying to {replyingTo.senderName}</span>
-                                            <span className="text-xs text-neutral-500 truncate italic">{replyingTo.media ? (replyingTo.type === 'image' ? 'Image' : 'Video') : replyingTo.text}</span>
-                                        </div>
+                                        <div className="flex flex-col min-w-0"><span className="text-[10px] font-bold text-indigo-400 truncate uppercase tracking-tight">Replying to {replyingTo.senderName}</span><span className="text-xs text-neutral-500 truncate italic">{replyingTo.media ? (replyingTo.type === 'image' ? 'Image' : 'Video') : replyingTo.text}</span></div>
                                     </div>
                                     <button onClick={() => setReplyingTo(null)} className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg"><X size={14} /></button>
                                 </div>
@@ -783,25 +603,19 @@ export const Inbox: React.FC = () => {
                             {pendingMedia && (
                                 <div className="p-3 flex items-center gap-4">
                                     <div className="w-16 h-16 rounded-lg bg-neutral-950 border border-neutral-800 relative overflow-hidden flex items-center justify-center shrink-0">
-                                        {pendingMedia.type === 'image' ? <img src={pendingMedia.url} className="w-full h-full object-cover" /> : <Film size={24} className="text-neutral-500" />}
+                                        {pendingMedia.type === 'image' ? <img src={pendingMedia.url} className="w-full h-full object-cover" alt="pending" /> : <Film size={24} className="text-neutral-500" />}
                                         {pendingMedia.type === 'video' && <div className="absolute bottom-1 right-1 px-1 bg-black/60 rounded text-[9px] text-white">Video</div>}
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-tighter mb-0.5">Media Attachment</div>
-                                        <div className="text-xs text-neutral-500 truncate">Ready to send</div>
-                                    </div>
+                                    <div className="flex-1 min-w-0"><div className="text-[10px] font-bold text-indigo-400 uppercase tracking-tighter mb-0.5">Media Attachment</div><div className="text-xs text-neutral-500 truncate">Ready to send</div></div>
                                     <button onClick={() => setPendingMedia(null)} className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg"><Trash2 size={16} /></button>
                                 </div>
                             )}
                         </div>
                     )}
-
                     <div className="p-3 bg-neutral-950 border-t border-neutral-900">
                         <form onSubmit={handleSend} className={`flex gap-2 items-end bg-neutral-900 border border-neutral-800 px-2 py-2 focus-within:border-indigo-500/50 transition-colors ${pendingMedia || replyingTo ? 'rounded-b-xl' : 'rounded-xl'}`}>
                             <input type="file" ref={mediaInputRef} className="hidden" accept="image/*,video/*" onChange={(e) => e.target.files && handleMediaUpload(e.target.files[0])} />
-                            <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2.5 text-neutral-500 hover:text-white transition-colors mb-0.5 rounded-lg active:scale-95" disabled={isUploadingMedia}>
-                                {isUploadingMedia ? <Loader2 size={18} className="animate-spin text-indigo-500" /> : <Paperclip size={18} />}
-                            </button>
+                            <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2.5 text-neutral-500 hover:text-white transition-colors mb-0.5 rounded-lg active:scale-95" disabled={isUploadingMedia}>{isUploadingMedia ? <Loader2 size={18} className="animate-spin text-indigo-500" /> : <Paperclip size={18} />}</button>
                             <textarea ref={inputRef} value={inputText} onChange={handleInputChange} onKeyDown={handleKeyDown} onPaste={handlePaste} placeholder={`Message ${selectedChat.name}...`} rows={1} className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" style={{ minHeight: '40px' }} />
                             <button type="submit" disabled={(!inputText.trim() && !pendingMedia) || isUploadingMedia} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:bg-neutral-800 text-white p-2.5 rounded-lg transition-colors mb-0.5"><Send size={16} /></button>
                         </form>

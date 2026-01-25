@@ -121,7 +121,7 @@ export const Dashboard: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1 group hover:border-orange-500/30 transition-colors">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Flame size={12} className="text-orange-500 group-hover:animate-pulse" /> Streak</span>
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Flame size={12} className="text-orange-500 animate-fire-flicker" /> Streak</span>
                       <span className="text-2xl font-mono text-white">{stats.streak} <span className="text-xs text-neutral-600 font-sans">days</span></span>
                   </div>
                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
