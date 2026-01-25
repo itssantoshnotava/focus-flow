@@ -8,7 +8,7 @@ import {
     Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
     LogOut, Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
-    SmilePlus
+    SmilePlus, Paperclip, Play, Image as ImageIcon, Film
 } from 'lucide-react';
 
 interface ChatItem {
@@ -64,6 +64,10 @@ export const Inbox: React.FC = () => {
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
   
+  // Attachment State
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [pendingMedia, setPendingMedia] = useState<{ url: string, type: 'image' | 'video', duration?: number } | null>(null);
+
   // Group Edit Inputs
   const [editGroupName, setEditGroupName] = useState('');
   const [editGroupPhoto, setEditGroupPhoto] = useState('');
@@ -77,6 +81,7 @@ export const Inbox: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   
   // Scroll & Typing Refs
   const isAutoScrollEnabled = useRef(true);
@@ -213,6 +218,7 @@ export const Inbox: React.FC = () => {
           setInputText(''); // FIX: Clear input on chat switch
           setReplyingTo(null); // FIX: Clear reply on chat switch
           setActiveReactionPickerId(null);
+          setPendingMedia(null);
           setTypingText('');
           setLastSeenMap({});
           isAutoScrollEnabled.current = true;
@@ -336,6 +342,58 @@ export const Inbox: React.FC = () => {
     setActiveReactionPickerId(null);
   };
 
+  // --- Attachment Logic ---
+  const handleMediaUpload = async (file: File) => {
+    if (!file) return;
+    
+    const isImage = file.type.startsWith('image/');
+    const isVideo = file.type.startsWith('video/');
+
+    if (!isImage && !isVideo) {
+      alert("Only images and videos are supported.");
+      return;
+    }
+
+    if (isVideo) {
+      // Validate duration
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+          window.URL.revokeObjectURL(video.src);
+          if (video.duration > 60) {
+              alert("Videos must be less than 60 seconds.");
+              return;
+          }
+          uploadFile(file, 'video', video.duration);
+      };
+      video.src = URL.createObjectURL(file);
+    } else {
+      uploadFile(file, 'image');
+    }
+  };
+
+  const uploadFile = async (file: File, type: 'image' | 'video', duration?: number) => {
+    setIsUploadingMedia(true);
+    try {
+      const url = await uploadImageToCloudinary(file);
+      setPendingMedia({ url, type, duration });
+    } catch (err) {
+      console.error("Media upload failed", err);
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData.items;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf("image") !== -1) {
+        const file = items[i].getAsFile();
+        if (file) handleMediaUpload(file);
+      }
+    }
+  };
+
   // --- Actions ---
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setInputText(e.target.value);
@@ -350,23 +408,36 @@ export const Inbox: React.FC = () => {
   const handleSend = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
       const text = inputText.trim();
-      if (!user || !selectedChat || !currentChatId || !text) return;
+      if (!user || !selectedChat || !currentChatId) return;
+      if (!text && !pendingMedia) return;
+
       isAutoScrollEnabled.current = true;
       const timestamp = Date.now();
+      
       const msgData: any = { 
           senderUid: user.uid, 
           senderName: user.displayName || 'Unknown', 
-          text, 
-          timestamp 
+          timestamp,
+          type: pendingMedia ? pendingMedia.type : 'text',
+          text: text || null
       };
+
+      if (pendingMedia) {
+          msgData.media = {
+              url: pendingMedia.url,
+              duration: pendingMedia.duration || null
+          };
+      }
+
       if (replyingTo) {
           msgData.replyTo = {
               messageId: replyingTo.id,
               senderId: replyingTo.senderUid,
               senderName: replyingTo.senderName,
-              previewText: replyingTo.text
+              previewText: replyingTo.media ? (replyingTo.type === 'image' ? 'Image' : 'Video') : replyingTo.text
           };
       }
+
       try {
           if (selectedChat.type === 'dm') {
               const friendUid = selectedChat.id;
@@ -433,6 +504,7 @@ export const Inbox: React.FC = () => {
           }
           setInputText('');
           setReplyingTo(null);
+          setPendingMedia(null);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           await update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
       } catch (error) {
@@ -592,7 +664,7 @@ export const Inbox: React.FC = () => {
                                             <span className={`font-semibold text-base truncate ${isUnread ? 'text-white' : 'text-neutral-300 group-hover:text-white transition-colors'}`}>{displayName}</span>
                                             <span className={`text-xs ${isUnread ? 'text-indigo-400 font-medium' : 'text-neutral-600'}`}>{chat.timestamp ? new Date(chat.timestamp).toLocaleDateString([], {month:'short', day:'numeric'}) : ''}</span>
                                         </div>
-                                        <p className={`text-sm truncate leading-relaxed ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-500 group-hover:text-neutral-400 transition-colors'}`}>{chat.lastMessage?.senderUid === user?.uid && <span className="text-neutral-600 mr-1">You:</span>}{chat.lastMessage?.text || 'No messages'}</p>
+                                        <p className={`text-sm truncate leading-relaxed ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-500 group-hover:text-neutral-400 transition-colors'}`}>{chat.lastMessage?.senderUid === user?.uid && <span className="text-neutral-600 mr-1">You:</span>}{chat.lastMessage?.type === 'image' ? 'Image' : chat.lastMessage?.type === 'video' ? 'Video' : (chat.lastMessage?.text || 'No messages')}</p>
                                     </div>
                                 </button>
                             );
@@ -687,17 +759,10 @@ export const Inbox: React.FC = () => {
                                                     </div>
                                                 )}
                                                 <div className="flex flex-col relative group/bubble">
-                                                    {/* Reaction Picker (Floating Above/Beside) */}
                                                     {activeReactionPickerId === msg.id && (
                                                         <div className={`absolute bottom-[calc(100%+8px)] z-[50] flex gap-1 p-1.5 bg-neutral-900/95 border border-neutral-700/50 rounded-2xl shadow-2xl backdrop-blur-md animate-in zoom-in-95 duration-200 ${isMe ? 'right-0' : 'left-0'} max-sm:left-1/2 max-sm:-translate-x-1/2`}>
                                                             {REACTION_EMOJIS.map(emoji => (
-                                                                <button 
-                                                                    key={emoji} 
-                                                                    onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); }} 
-                                                                    className="w-9 h-9 flex items-center justify-center text-xl hover:bg-white/10 active:scale-90 rounded-xl transition-all"
-                                                                >
-                                                                    {emoji}
-                                                                </button>
+                                                                <button key={emoji} onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); }} className="w-9 h-9 flex items-center justify-center text-xl hover:bg-white/10 active:scale-90 rounded-xl transition-all">{emoji}</button>
                                                             ))}
                                                         </div>
                                                     )}
@@ -706,40 +771,51 @@ export const Inbox: React.FC = () => {
                                                         <div onClick={() => scrollToMessage(msg.replyTo.messageId)} className={`mb-1 p-2 rounded-xl text-[11px] cursor-pointer border backdrop-blur-sm truncate max-w-[200px] ${isMe ? 'bg-white/10 border-white/10 text-indigo-100 self-end' : 'bg-neutral-900/50 border-neutral-700/50 text-neutral-400 self-start'}`}><div className="font-bold mb-0.5 flex items-center gap-1"><Reply size={10} /> {msg.replyTo.senderName}</div><div className="truncate opacity-70 italic">{msg.replyTo.previewText}</div></div>
                                                     )}
                                                     
-                                                    <div className={`relative px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap shadow-sm transition-all ${isMe ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`}`}><div className="pr-1 inline">{msg.text}</div><div className="inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none"><span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>{formatTime(msg.timestamp)}</span>{isLatestMe && renderMessageStatus(msg)}</div></div>
+                                                    <div className={`relative flex flex-col rounded-2xl shadow-sm transition-all overflow-hidden ${isMe ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`}`}>
+                                                        {msg.type === 'image' && msg.media && (
+                                                            <div className="cursor-pointer group/img_wrap relative max-w-sm" onClick={() => window.open(msg.media.url, '_blank')}>
+                                                                <img src={msg.media.url} className="w-full h-auto object-cover" alt="attachment" />
+                                                            </div>
+                                                        )}
+                                                        {msg.type === 'video' && msg.media && (
+                                                            <div className="relative max-w-sm group/vid_wrap">
+                                                                <video 
+                                                                    src={msg.media.url} 
+                                                                    className="w-full h-auto max-h-[300px] object-cover" 
+                                                                    muted 
+                                                                    playsInline 
+                                                                    loop 
+                                                                    onClick={(e) => e.currentTarget.paused ? e.currentTarget.play() : e.currentTarget.pause()} 
+                                                                />
+                                                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover/vid_wrap:opacity-100 transition-opacity">
+                                                                    <div className="p-2 bg-black/40 rounded-full text-white backdrop-blur-sm"><Play size={20} fill="white" /></div>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        <div className="px-3.5 py-1.5 text-sm break-words whitespace-pre-wrap">
+                                                            {msg.text && <div className="pr-1 inline">{msg.text}</div>}
+                                                            <div className={`inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none`}>
+                                                                <span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>{formatTime(msg.timestamp)}</span>
+                                                                {isLatestMe && renderMessageStatus(msg)}
+                                                            </div>
+                                                        </div>
+                                                    </div>
                                                     
-                                                    {/* Reactions Pills */}
                                                     {reactions && (
                                                         <div className={`flex flex-wrap gap-1 mt-1 z-10 ${isMe ? 'justify-end' : 'justify-start'}`}>
                                                             {Object.entries(reactions).map(([emoji, users]: [string, any]) => {
                                                                 const count = Object.keys(users).length;
                                                                 const hasReacted = users[user?.uid || ''];
                                                                 return (
-                                                                    <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border backdrop-blur-sm transition-all active:scale-95 ${hasReacted ? 'bg-indigo-500/25 border-indigo-500/40 text-indigo-200' : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:bg-neutral-800'}`}>
-                                                                        <span>{emoji}</span>
-                                                                        <span className="font-bold tabular-nums">{count}</span>
-                                                                    </button>
+                                                                    <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border backdrop-blur-sm transition-all active:scale-95 ${hasReacted ? 'bg-indigo-500/25 border-indigo-500/40 text-indigo-200' : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:bg-neutral-800'}`}><span>{emoji}</span><span className="font-bold tabular-nums">{count}</span></button>
                                                                 );
                                                             })}
                                                         </div>
                                                     )}
 
-                                                    {/* Actions Bar */}
                                                     <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover/bubble:opacity-100 transition-all z-20 ${isMe ? '-left-24' : '-right-24'}`}>
-                                                        <button 
-                                                            onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} 
-                                                            className="p-2.5 rounded-full bg-neutral-900/90 text-neutral-400 hover:text-white border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all" 
-                                                            title="Reply"
-                                                        >
-                                                            <Reply size={15} />
-                                                        </button>
-                                                        <button 
-                                                            onClick={(e) => { e.stopPropagation(); setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id); }} 
-                                                            className={`p-2.5 rounded-full bg-neutral-900/90 border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all ${activeReactionPickerId === msg.id ? 'text-indigo-400 border-indigo-500/50' : 'text-neutral-400 hover:text-white'}`} 
-                                                            title="React"
-                                                        >
-                                                            <SmilePlus size={15} />
-                                                        </button>
+                                                        <button onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} className="p-2.5 rounded-full bg-neutral-900/90 text-neutral-400 hover:text-white border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all" title="Reply"><Reply size={15} /></button>
+                                                        <button onClick={(e) => { e.stopPropagation(); setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id); }} className={`p-2.5 rounded-full bg-neutral-900/90 border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all ${activeReactionPickerId === msg.id ? 'text-indigo-400 border-indigo-500/50' : 'text-neutral-400 hover:text-white'}`} title="React"><SmilePlus size={15} /></button>
                                                     </div>
                                                 </div>
                                             </div>
@@ -748,12 +824,58 @@ export const Inbox: React.FC = () => {
                                 })}
                                 <div ref={messagesEndRef} />
                             </div>
+                            
                             {typingText && ( <div className="px-6 py-1 text-[10px] text-indigo-400 font-bold uppercase tracking-wider animate-pulse bg-neutral-950/20 backdrop-blur-sm">{typingText}</div> )}
-                            {replyingTo && ( <div className="mx-3 mt-1 px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-t-xl border-b-0 flex items-center justify-between animate-in slide-in-from-bottom-2"><div className="flex-1 min-w-0 flex items-center gap-3"><div className="p-1.5 bg-indigo-500/10 rounded-lg"><CornerUpRight size={14} className="text-indigo-400" /></div><div className="flex flex-col min-w-0"><span className="text-[10px] font-bold text-indigo-400 truncate uppercase tracking-tight">Replying to {replyingTo.senderName}</span><span className="text-xs text-neutral-500 truncate italic">{replyingTo.text}</span></div></div><button onClick={() => setReplyingTo(null)} className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"><X size={14} /></button></div> )}
+                            
+                            {/* Attachment Preview Above Input */}
+                            {(pendingMedia || replyingTo) && (
+                                <div className="mx-3 mt-1 bg-neutral-900 border border-neutral-800 rounded-t-xl border-b-0 overflow-hidden flex flex-col animate-in slide-in-from-bottom-2">
+                                    {replyingTo && (
+                                        <div className="px-4 py-2 border-b border-neutral-800 flex items-center justify-between">
+                                            <div className="flex-1 min-w-0 flex items-center gap-3">
+                                                <div className="p-1.5 bg-indigo-500/10 rounded-lg"><CornerUpRight size={14} className="text-indigo-400" /></div>
+                                                <div className="flex flex-col min-w-0">
+                                                    <span className="text-[10px] font-bold text-indigo-400 truncate uppercase tracking-tight">Replying to {replyingTo.senderName}</span>
+                                                    <span className="text-xs text-neutral-500 truncate italic">{replyingTo.media ? (replyingTo.type === 'image' ? 'Image' : 'Video') : replyingTo.text}</span>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => setReplyingTo(null)} className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg"><X size={14} /></button>
+                                        </div>
+                                    )}
+                                    {pendingMedia && (
+                                        <div className="p-3 flex items-center gap-4">
+                                            <div className="w-16 h-16 rounded-lg bg-neutral-950 border border-neutral-800 relative overflow-hidden flex items-center justify-center shrink-0">
+                                                {pendingMedia.type === 'image' ? <img src={pendingMedia.url} className="w-full h-full object-cover" /> : <Film size={24} className="text-neutral-500" />}
+                                                {pendingMedia.type === 'video' && <div className="absolute bottom-1 right-1 px-1 bg-black/60 rounded text-[9px] text-white">Video</div>}
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-[10px] font-bold text-indigo-400 uppercase tracking-tighter mb-0.5">Media Attachment</div>
+                                                <div className="text-xs text-neutral-500 truncate">Ready to send</div>
+                                            </div>
+                                            <button onClick={() => setPendingMedia(null)} className="p-2 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg"><Trash2 size={16} /></button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             <div className="p-3 bg-neutral-950 border-t border-neutral-900">
-                                <form onSubmit={handleSend} className={`flex gap-2 items-end bg-neutral-900 border border-neutral-800 px-2 py-2 focus-within:border-indigo-500/50 transition-colors ${replyingTo ? 'rounded-b-xl' : 'rounded-xl'}`}>
-                                    <textarea ref={inputRef} value={inputText} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={`Message ${selectedChat.name}...`} rows={1} className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" style={{ minHeight: '40px' }} />
-                                    <button type="submit" disabled={!inputText.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:bg-neutral-800 text-white p-2.5 rounded-lg transition-colors mb-0.5"><Send size={16} /></button>
+                                <form onSubmit={handleSend} className={`flex gap-2 items-end bg-neutral-900 border border-neutral-800 px-2 py-2 focus-within:border-indigo-500/50 transition-colors ${pendingMedia || replyingTo ? 'rounded-b-xl' : 'rounded-xl'}`}>
+                                    <input type="file" ref={mediaInputRef} className="hidden" accept="image/*,video/*" onChange={(e) => e.target.files && handleMediaUpload(e.target.files[0])} />
+                                    <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2.5 text-neutral-500 hover:text-white transition-colors mb-0.5 rounded-lg active:scale-95" disabled={isUploadingMedia}>
+                                        {isUploadingMedia ? <Loader2 size={18} className="animate-spin text-indigo-500" /> : <Paperclip size={18} />}
+                                    </button>
+                                    <textarea 
+                                        ref={inputRef} 
+                                        value={inputText} 
+                                        onChange={handleInputChange} 
+                                        onKeyDown={handleKeyDown} 
+                                        onPaste={handlePaste}
+                                        placeholder={`Message ${selectedChat.name}...`} 
+                                        rows={1} 
+                                        className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" 
+                                        style={{ minHeight: '40px' }} 
+                                    />
+                                    <button type="submit" disabled={(!inputText.trim() && !pendingMedia) || isUploadingMedia} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:bg-neutral-800 text-white p-2.5 rounded-lg transition-colors mb-0.5"><Send size={16} /></button>
                                 </form>
                             </div>
                         </>
