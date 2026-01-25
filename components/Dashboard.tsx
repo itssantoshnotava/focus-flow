@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ref, set, update, onDisconnect, onValue } from "firebase/database";
-import { database } from "../firebase";
+import { updateProfile } from "firebase/auth";
+import { database, auth } from "../firebase";
 import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
@@ -10,8 +11,9 @@ import { FriendsLeaderboard } from './FriendsLeaderboard';
 import { Inbox } from './Inbox';
 import { EXAMS } from '../constants';
 import { ProgressMap, StudySession, TimerMode } from '../types';
-import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield, UserPlus, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield, UserPlus, MessageCircle, Camera, Loader2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { uploadImageToCloudinary } from '../utils/cloudinary';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -19,6 +21,11 @@ export const Dashboard: React.FC = () => {
   const [showFriends, setShowFriends] = useState(false);
   const [showInbox, setShowInbox] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // Profile Upload State
+  const [isUploadingProfile, setIsUploadingProfile] = useState(false);
+  const [profileImage, setProfileImage] = useState(user?.photoURL);
+  const profileInputRef = useRef<HTMLInputElement>(null);
 
   // --- State: Syllabus Progress ---
   const [progress, setProgress] = useState<ProgressMap>(() => {
@@ -42,6 +49,11 @@ export const Dashboard: React.FC = () => {
     const saved = localStorage.getItem('focusflow_sessions');
     return saved ? JSON.parse(saved) : [];
   });
+
+  // Sync profile image state when user loads
+  useEffect(() => {
+    if (user) setProfileImage(user.photoURL);
+  }, [user]);
 
   // --- Effects: Presence System & Connection Test ---
   useEffect(() => {
@@ -156,6 +168,36 @@ export const Dashboard: React.FC = () => {
     setSessions(prev => [...prev, newSession]);
   }, []);
 
+  const handleProfileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0] && user && !isGuest) {
+      setIsUploadingProfile(true);
+      try {
+        const file = e.target.files[0];
+        const url = await uploadImageToCloudinary(file);
+        
+        // 1. Update Auth Profile
+        if (auth.currentUser) {
+          await updateProfile(auth.currentUser, { photoURL: url });
+        }
+        
+        // 2. Update Database User
+        await update(ref(database, `users/${user.uid}`), {
+          photoURL: url
+        });
+
+        // 3. Update Local State
+        setProfileImage(url);
+
+      } catch (err) {
+        console.error("Profile upload failed", err);
+        alert("Failed to upload profile picture.");
+      } finally {
+        setIsUploadingProfile(false);
+        if (profileInputRef.current) profileInputRef.current.value = '';
+      }
+    }
+  };
+
   // --- Stats Calculation ---
   const stats = useMemo(() => {
     const now = new Date();
@@ -267,13 +309,50 @@ export const Dashboard: React.FC = () => {
                     <span>Guest Mode</span>
                  </div>
                )}
-               {user?.photoURL ? (
-                 <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-neutral-800" />
+               
+               {/* User Avatar with Upload */}
+               {!isGuest ? (
+                   <div className="relative group">
+                       <input 
+                          type="file" 
+                          ref={profileInputRef} 
+                          onChange={handleProfileUpload} 
+                          className="hidden" 
+                          accept="image/*"
+                       />
+                       
+                       <div 
+                          className="relative cursor-pointer"
+                          onClick={() => profileInputRef.current?.click()}
+                          title="Change Profile Picture"
+                       >
+                           {profileImage ? (
+                             <img src={profileImage} alt="Profile" className="w-8 h-8 rounded-full border border-neutral-800 object-cover" />
+                           ) : (
+                             <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold text-white border border-neutral-800">
+                               {user?.displayName?.charAt(0) || 'U'}
+                             </div>
+                           )}
+                           
+                           {/* Hover Overlay */}
+                           <div className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                               <Camera size={12} className="text-white" />
+                           </div>
+
+                           {/* Loading Overlay */}
+                           {isUploadingProfile && (
+                               <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center z-10">
+                                   <Loader2 size={12} className="text-indigo-400 animate-spin" />
+                               </div>
+                           )}
+                       </div>
+                   </div>
                ) : (
-                 <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold text-white">
-                   {user?.displayName?.charAt(0) || 'G'}
+                 <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-bold text-neutral-500 border border-neutral-800">
+                   G
                  </div>
                )}
+
                <span className="text-sm font-medium text-white hidden md:block">{user?.displayName?.split(' ')[0]}</span>
                <button 
                   onClick={() => logout()}

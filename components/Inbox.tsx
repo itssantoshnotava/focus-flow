@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ref, onValue, push, update, get, set, remove } from "firebase/database";
-import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
-import { database, storage } from "../firebase";
+import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
+import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { 
     X, Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
@@ -291,9 +291,7 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       const file = e.target.files[0];
       setIsUploading(true);
       try {
-        const fileRef = storageRef(storage, `group_avatars/${selectedChat.id}/${Date.now()}_${file.name}`);
-        await uploadBytes(fileRef, file);
-        const url = await getDownloadURL(fileRef);
+        const url = await uploadImageToCloudinary(file);
         
         // Immediate update as per requirements
         await update(ref(database, `groupChats/${selectedChat.id}`), {
