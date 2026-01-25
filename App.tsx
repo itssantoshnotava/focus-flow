@@ -1,13 +1,21 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { Dashboard } from './components/Dashboard';
 import { GroupStudy } from './components/GroupStudy';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { AccessGate } from './components/AccessGate';
+import { seedAccessCodes } from './utils/seeder';
 
 const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
+
+  // Run seeder once user is authenticated to avoid permission issues
+  useEffect(() => {
+    if (user && !loading) {
+      seedAccessCodes();
+    }
+  }, [user, loading]);
 
   if (loading) {
     return (
