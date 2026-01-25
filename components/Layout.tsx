@@ -1,30 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { ref, onValue, set, update, onDisconnect, get } from "firebase/database";
-import { updateProfile } from "firebase/auth";
-import { database, auth } from "../firebase";
+import { ref, onValue, update, onDisconnect } from "firebase/database";
+import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
-import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { 
-  LayoutDashboard, Home, MessageCircle, Search, Bell, Globe, 
-  LogOut, Camera, Loader2, User 
+  LayoutDashboard, Home, MessageCircle, Search, Bell, Globe, User 
 } from 'lucide-react';
 
 export const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout, isGuest } = useAuth();
+  const { user, isGuest } = useAuth();
   
   const [inboxUnread, setInboxUnread] = useState(0);
   const [requestCount, setRequestCount] = useState(0);
-
-  const [isUploadingProfile, setIsUploadingProfile] = useState(false);
   const [profileImage, setProfileImage] = useState(user?.photoURL);
-  const profileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Sync profile image
   useEffect(() => {
-    if (user) setProfileImage(user.photoURL);
+    if (user) {
+        // Realtime listen for photo updates (if changed in Profile page)
+        const userRef = ref(database, `users/${user.uid}/photoURL`);
+        const unsub = onValue(userRef, (snap) => {
+            if (snap.exists()) setProfileImage(snap.val());
+            else setProfileImage(user.photoURL);
+        });
+        return () => unsub();
+    }
   }, [user]);
 
   // --- Global Presence System ---
@@ -78,25 +80,6 @@ export const Layout: React.FC = () => {
       };
   }, [user, isGuest]);
 
-  const handleProfileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0] && user && !isGuest) {
-      setIsUploadingProfile(true);
-      try {
-        const file = e.target.files[0];
-        const url = await uploadImageToCloudinary(file);
-        if (auth.currentUser) await updateProfile(auth.currentUser, { photoURL: url });
-        await update(ref(database, `users/${user.uid}`), { photoURL: url });
-        setProfileImage(url);
-      } catch (err) {
-        console.error("Profile upload failed", err);
-        alert("Failed to upload profile picture.");
-      } finally {
-        setIsUploadingProfile(false);
-        if (profileInputRef.current) profileInputRef.current.value = '';
-      }
-    }
-  };
-
   const NavItem = ({ icon: Icon, path, label, badge }: { icon: any, path: string, label: string, badge?: number }) => {
       const isActive = location.pathname === path;
       return (
@@ -139,33 +122,20 @@ export const Layout: React.FC = () => {
            <NavItem icon={Globe} path="/group" label="Group Study" />
         </div>
 
-        <div className="mt-auto flex flex-col gap-4 items-center">
+        <div className="mt-auto flex flex-col gap-4 items-center mb-2">
             {!isGuest && (
-               <div className="relative group">
-                   <input type="file" ref={profileInputRef} onChange={handleProfileUpload} className="hidden" accept="image/*" />
-                   <button 
-                      className="relative cursor-pointer w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-800 hover:border-neutral-600 transition-colors overflow-hidden"
-                      onClick={() => profileInputRef.current?.click()}
-                   >
-                       {profileImage ? (
-                         <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
-                       ) : (
-                         <div className="text-xs font-bold text-neutral-400">{user?.displayName?.charAt(0) || <User size={16} />}</div>
-                       )}
-                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                           <Camera size={14} className="text-white" />
-                       </div>
-                       {isUploadingProfile && (
-                           <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
-                               <Loader2 size={14} className="text-indigo-400 animate-spin" />
-                           </div>
-                       )}
-                   </button>
-               </div>
+               <button 
+                  onClick={() => navigate(`/profile/${user?.uid}`)}
+                  className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-800 hover:border-neutral-600 transition-colors overflow-hidden"
+                  title="Profile"
+               >
+                   {profileImage ? (
+                     <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+                   ) : (
+                     <div className="text-xs font-bold text-neutral-400">{user?.displayName?.charAt(0) || <User size={16} />}</div>
+                   )}
+               </button>
             )}
-            <button onClick={() => logout()} className="p-3 text-neutral-600 hover:text-red-400 transition-colors rounded-xl hover:bg-neutral-900">
-                <LogOut size={20} />
-            </button>
         </div>
       </aside>
 
@@ -185,9 +155,18 @@ export const Layout: React.FC = () => {
            </>
          )}
          <NavItem icon={Globe} path="/group" label="Group" />
-         <button onClick={() => logout()} className="p-3 rounded-xl transition-all text-neutral-500 hover:text-white">
-             <LogOut size={24} />
-         </button>
+         {!isGuest && (
+            <button 
+                onClick={() => navigate(`/profile/${user?.uid}`)}
+                className="w-10 h-10 rounded-full overflow-hidden border border-neutral-800"
+            >
+               {profileImage ? (
+                 <img src={profileImage} alt="Me" className="w-full h-full object-cover" />
+               ) : (
+                 <div className="w-full h-full bg-neutral-800 flex items-center justify-center text-xs"><User size={16} /></div>
+               )}
+            </button>
+         )}
       </nav>
 
     </div>

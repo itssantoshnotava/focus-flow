@@ -3,9 +3,11 @@ import { ref, get, set, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { Search as SearchIcon, UserPlus, Clock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export const SearchPage: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -58,7 +60,8 @@ export const SearchPage: React.FC = () => {
     setLoading(false);
   };
 
-  const sendRequest = async (targetUid: string) => {
+  const sendRequest = async (e: React.MouseEvent, targetUid: string) => {
+    e.stopPropagation();
     if (!user) return;
     setSentRequests(prev => new Set(prev).add(targetUid));
     try {
@@ -70,6 +73,10 @@ export const SearchPage: React.FC = () => {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const goToProfile = (uid: string) => {
+      navigate(`/profile/${uid}`);
   };
 
   return (
@@ -100,7 +107,7 @@ export const SearchPage: React.FC = () => {
 
                 <div className="space-y-4">
                     {searchResults.map(result => (
-                        <div key={result.uid} className="flex items-center justify-between p-4 bg-neutral-900 border border-neutral-800 rounded-xl">
+                        <div key={result.uid} onClick={() => goToProfile(result.uid)} className="flex items-center justify-between p-4 bg-neutral-900 border border-neutral-800 rounded-xl cursor-pointer hover:bg-neutral-800 transition-colors">
                             <div className="flex items-center gap-4">
                                 {result.photoURL ? <img src={result.photoURL} className="w-12 h-12 rounded-full border border-neutral-700" /> : <div className="w-12 h-12 rounded-full bg-neutral-800 flex items-center justify-center text-sm font-bold text-neutral-500">{result.name?.charAt(0)}</div>}
                                 <span className="text-white text-lg font-medium">{result.name}</span>
@@ -108,7 +115,7 @@ export const SearchPage: React.FC = () => {
                             {sentRequests.has(result.uid) ? (
                                 <span className="text-xs text-neutral-500 flex items-center gap-2 px-4 py-2 bg-neutral-950 rounded-lg border border-neutral-800"><Clock size={14} /> Request Sent</span>
                             ) : (
-                                <button onClick={() => sendRequest(result.uid)} className="flex items-center gap-2 bg-white text-black text-sm font-bold px-4 py-2 rounded-lg hover:bg-neutral-200 transition-colors"><UserPlus size={16} /> Add Friend</button>
+                                <button onClick={(e) => sendRequest(e, result.uid)} className="flex items-center gap-2 bg-white text-black text-sm font-bold px-4 py-2 rounded-lg hover:bg-neutral-200 transition-colors"><UserPlus size={16} /> Add Friend</button>
                             )}
                         </div>
                     ))}
@@ -122,7 +129,7 @@ export const SearchPage: React.FC = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {myFriends.length > 0 ? (
                         myFriends.map(friend => (
-                            <div key={friend.uid} className="flex items-center gap-4 p-4 bg-neutral-900/50 border border-neutral-900 rounded-xl">
+                            <div key={friend.uid} onClick={() => goToProfile(friend.uid)} className="flex items-center gap-4 p-4 bg-neutral-900/50 border border-neutral-900 rounded-xl cursor-pointer hover:bg-neutral-900 transition-colors">
                                 {friend.photoURL ? <img src={friend.photoURL} className="w-10 h-10 rounded-full border border-neutral-800" /> : <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">{friend.name?.charAt(0)}</div>}
                                 <span className="text-neutral-200 font-medium">{friend.name}</span>
                             </div>

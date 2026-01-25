@@ -6,6 +6,7 @@ import { Inbox } from './components/Inbox';
 import { SearchPage } from './components/Search';
 import { NotificationsPage } from './components/Notifications';
 import { GroupStudy } from './components/GroupStudy';
+import { Profile } from './components/Profile';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimerProvider } from './contexts/TimerContext';
 import { Login } from './components/Login';
@@ -46,6 +47,7 @@ const AppContent: React.FC = () => {
               <Route path="/inbox" element={<Inbox />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/profile/:uid" element={<Profile />} />
             </Route>
             
             <Route path="/group" element={<GroupStudy />} />

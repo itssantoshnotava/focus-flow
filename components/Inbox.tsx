@@ -3,6 +3,7 @@ import { ref, onValue, push, update, get, set, remove, runTransaction, onChildAd
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
+import { useNavigate } from 'react-router-dom';
 import { 
     Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
@@ -27,6 +28,7 @@ interface ChatItem {
 
 export const Inbox: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   
   // View State
   const [viewMode, setViewMode] = useState<'list' | 'create_group'>('list');
@@ -341,9 +343,15 @@ export const Inbox: React.FC = () => {
 
   const formatTime = (timestamp: number) => new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+  // Navigation Helper
+  const goToProfile = (e: React.MouseEvent, targetUid: string) => {
+      e.stopPropagation();
+      navigate(`/profile/${targetUid}`);
+  };
+
   return (
     <div className="flex h-full w-full bg-neutral-950">
-        {/* LIST - INCREASED WIDTH */}
+        {/* LIST - INCREASED WIDTH & SPACING */}
         <div className={`w-full md:w-[350px] lg:w-[400px] border-r border-neutral-900 flex-none flex flex-col ${selectedChat ? 'hidden md:flex' : 'flex'}`}>
             <div className="p-4 border-b border-neutral-900 bg-neutral-950 flex justify-between items-center h-16 shrink-0">
                 {viewMode === 'list' ? (
@@ -367,14 +375,28 @@ export const Inbox: React.FC = () => {
                             const displayPhoto = (chat.id === selectedChat?.id && activeGroupData) ? activeGroupData.photoURL : chat.photoURL;
                             const isUnread = (chat.unreadCount || 0) > 0;
                             return (
-                                <button key={chat.id} onClick={() => { setSelectedChat(chat); setShowSettings(false); }} className={`w-full p-4 flex items-center gap-3 hover:bg-neutral-900 transition-colors border-b border-neutral-900/50 text-left relative ${selectedChat?.id === chat.id ? 'bg-neutral-900' : ''}`}>
-                                    <div className="relative shrink-0">
-                                        {chat.type === 'group' ? ( displayPhoto ? <img src={displayPhoto} className="w-12 h-12 rounded-2xl bg-neutral-800 object-cover" /> : <div className="w-12 h-12 rounded-2xl bg-neutral-800 flex items-center justify-center"><Users size={20} className="text-neutral-500" /></div> ) : displayPhoto ? <img src={displayPhoto} className="w-12 h-12 rounded-full bg-neutral-800 object-cover" /> : <div className="w-12 h-12 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">{displayName.charAt(0)}</div>}
-                                        {isUnread && <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 border-2 border-neutral-950 rounded-full flex items-center justify-center text-[8px] font-bold text-white">{chat.unreadCount}</span>}
+                                <button key={chat.id} onClick={() => { setSelectedChat(chat); setShowSettings(false); }} className={`w-full py-4 px-5 flex items-center gap-4 hover:bg-neutral-900 transition-all border-b border-neutral-900/50 text-left relative group ${selectedChat?.id === chat.id ? 'bg-neutral-900' : ''}`}>
+                                    <div className="relative shrink-0" onClick={(e) => chat.type === 'dm' && goToProfile(e, chat.id)}>
+                                        {chat.type === 'group' ? ( 
+                                            displayPhoto ? 
+                                            <img src={displayPhoto} className="w-14 h-14 rounded-2xl bg-neutral-800 object-cover shadow-sm" /> : 
+                                            <div className="w-14 h-14 rounded-2xl bg-neutral-800 flex items-center justify-center shadow-sm"><Users size={24} className="text-neutral-500" /></div> 
+                                        ) : (
+                                            displayPhoto ? 
+                                            <img src={displayPhoto} className="w-14 h-14 rounded-full bg-neutral-800 object-cover shadow-sm hover:opacity-80 transition-opacity" /> : 
+                                            <div className="w-14 h-14 rounded-full bg-indigo-600 flex items-center justify-center text-lg font-bold text-white shadow-sm hover:opacity-80 transition-opacity">{displayName.charAt(0)}</div>
+                                        )}
+                                        {isUnread && <span className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-500 border-[3px] border-neutral-950 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm">{chat.unreadCount}</span>}
                                     </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex justify-between items-baseline mb-0.5"><span className={`font-medium text-sm truncate ${isUnread ? 'text-white' : 'text-neutral-400'}`}>{displayName}</span><span className="text-[10px] text-neutral-600">{chat.timestamp ? new Date(chat.timestamp).toLocaleDateString([], {month:'short', day:'numeric'}) : ''}</span></div>
-                                        <p className={`text-xs truncate ${isUnread ? 'text-neutral-300' : 'text-neutral-600'}`}>{chat.lastMessage?.text || 'No messages'}</p>
+                                    <div className="flex-1 min-w-0 flex flex-col gap-1">
+                                        <div className="flex justify-between items-baseline">
+                                            <span className={`font-semibold text-base truncate ${isUnread ? 'text-white' : 'text-neutral-300 group-hover:text-white transition-colors'}`}>{displayName}</span>
+                                            <span className={`text-xs ${isUnread ? 'text-indigo-400 font-medium' : 'text-neutral-600'}`}>{chat.timestamp ? new Date(chat.timestamp).toLocaleDateString([], {month:'short', day:'numeric'}) : ''}</span>
+                                        </div>
+                                        <p className={`text-sm truncate leading-relaxed ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-500 group-hover:text-neutral-400 transition-colors'}`}>
+                                            {chat.lastMessage?.senderUid === user?.uid && <span className="text-neutral-600 mr-1">You:</span>}
+                                            {chat.lastMessage?.text || 'No messages'}
+                                        </p>
                                     </div>
                                 </button>
                             );
@@ -393,8 +415,15 @@ export const Inbox: React.FC = () => {
                             const isSelected = selectedGroupMembers.has(friend.uid);
                             return (
                                 <button key={friend.uid} onClick={() => { const n = new Set(selectedGroupMembers); n.has(friend.uid) ? n.delete(friend.uid) : n.add(friend.uid); setSelectedGroupMembers(n); }} className={`w-full p-3 flex items-center justify-between rounded-xl mb-1 ${isSelected ? 'bg-indigo-900/20 border border-indigo-500/20' : 'hover:bg-neutral-900 border border-transparent'}`}>
-                                    <div className="flex items-center gap-3">{friend.photoURL ? <img src={friend.photoURL} className="w-8 h-8 rounded-full" /> : <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-xs text-white font-bold">{friend.name?.charAt(0)}</div>}<span className={`text-sm ${isSelected ? 'text-indigo-200' : 'text-neutral-300'}`}>{friend.name}</span></div>
-                                    {isSelected ? <CheckCircle2 size={18} className="text-indigo-500" /> : <Circle size={18} className="text-neutral-700" />}
+                                    <div className="flex items-center gap-3">
+                                        {friend.photoURL ? (
+                                            <img src={friend.photoURL} className="w-10 h-10 rounded-full" /> 
+                                        ) : (
+                                            <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">{friend.name?.charAt(0)}</div>
+                                        )}
+                                        <span className={`text-base ${isSelected ? 'text-indigo-200' : 'text-neutral-300'}`}>{friend.name}</span>
+                                    </div>
+                                    {isSelected ? <CheckCircle2 size={20} className="text-indigo-500" /> : <Circle size={20} className="text-neutral-700" />}
                                 </button>
                             );
                         })}
@@ -412,11 +441,11 @@ export const Inbox: React.FC = () => {
                         <div className="flex items-center gap-3">
                             <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 text-neutral-400 hover:text-white"><ArrowLeft size={20} /></button>
                             <div className="flex items-center gap-3">
-                                <div className="relative">
+                                <button onClick={(e) => selectedChat.type === 'dm' && goToProfile(e, selectedChat.id)} className={`relative ${selectedChat.type === 'dm' ? 'cursor-pointer hover:opacity-80' : ''}`}>
                                     {selectedChat.type === 'group' ? ( (activeGroupData?.photoURL || selectedChat.photoURL) ? <img src={activeGroupData?.photoURL || selectedChat.photoURL} className="w-9 h-9 rounded-2xl bg-neutral-800 object-cover" /> : <div className="w-9 h-9 rounded-2xl bg-neutral-800 flex items-center justify-center"><Users size={16} className="text-neutral-500" /></div> ) : selectedChat.photoURL ? <img src={selectedChat.photoURL} className="w-9 h-9 rounded-full bg-neutral-800" /> : <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">{selectedChat.name.charAt(0)}</div>}
                                     {friendPresence && <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-neutral-950 ${friendPresence.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
-                                </div>
-                                <div className="flex flex-col"><span className="font-bold text-neutral-200 text-sm">{ (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }</span>{selectedChat.type === 'group' && <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span>}</div>
+                                </button>
+                                <div className="flex flex-col"><span className="font-bold text-neutral-200 text-sm cursor-pointer hover:text-white transition-colors" onClick={(e) => selectedChat.type === 'dm' && goToProfile(e, selectedChat.id)}>{ (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }</span>{selectedChat.type === 'group' && <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span>}</div>
                             </div>
                         </div>
                         {selectedChat.type === 'group' && <button onClick={() => setShowSettings(!showSettings)} className={`p-2 rounded-lg transition-colors ${showSettings ? 'bg-indigo-600 text-white' : 'text-neutral-500 hover:text-white'}`}><Settings size={20} /></button>}
@@ -436,7 +465,7 @@ export const Inbox: React.FC = () => {
                              <div className="space-y-4">
                                   <div className="flex items-center justify-between"><h3 className="text-neutral-500 text-xs font-bold uppercase">Members</h3><button onClick={() => setShowAddMember(!showAddMember)} className="text-indigo-400 text-xs"><UserPlus size={14} /></button></div>
                                   {showAddMember && <div className="bg-neutral-900 p-3 rounded-xl mb-4">{myFriends.filter(f => !activeGroupData.members?.[f.uid]).map(f => <div key={f.uid} className="flex justify-between p-2 hover:bg-neutral-800"><span className="text-sm">{f.name}</span><button onClick={() => addMemberToGroup(f.uid)} className="text-indigo-400"><Plus size={14}/></button></div>)} </div>}
-                                  <div className="space-y-2">{groupMembersDetails.map(member => <div key={member.uid} className="flex justify-between p-3 bg-neutral-900 rounded-xl"><div className="flex gap-3"><span className="text-sm text-neutral-200">{member.name}</span></div>{amIAdmin && member.uid !== user?.uid && <button onClick={() => removeMember(member.uid)} className="text-red-500"><UserMinus size={16}/></button>}</div>)}</div>
+                                  <div className="space-y-2">{groupMembersDetails.map(member => <div key={member.uid} className="flex justify-between p-3 bg-neutral-900 rounded-xl cursor-pointer hover:bg-neutral-800 transition-colors" onClick={() => navigate(`/profile/${member.uid}`)}><div className="flex gap-3"><span className="text-sm text-neutral-200">{member.name}</span></div>{amIAdmin && member.uid !== user?.uid && <button onClick={(e) => { e.stopPropagation(); removeMember(member.uid); }} className="text-red-500"><UserMinus size={16}/></button>}</div>)}</div>
                              </div>
                              <div className="pt-8 border-t border-neutral-800 space-y-3"><button onClick={leaveGroup} className="w-full p-3 bg-neutral-900 rounded-xl text-neutral-400 hover:text-white">Leave Group</button>{amIAdmin && <button onClick={deleteGroup} className="w-full p-3 bg-red-950/20 text-red-400 rounded-xl">Delete Group</button>}</div>
                         </div>
@@ -450,10 +479,10 @@ export const Inbox: React.FC = () => {
                                     const isChain = prevMsg && prevMsg.senderUid === msg.senderUid && (msg.timestamp - prevMsg.timestamp < 60000);
                                     return (
                                         <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'}`}>
-                                            {!isMe && !isChain && selectedChat.type === 'group' && <span className="text-[10px] text-neutral-500 ml-10 mb-0.5">{msg.senderName}</span>}
+                                            {!isMe && !isChain && selectedChat.type === 'group' && <span className="text-[10px] text-neutral-500 ml-10 mb-0.5 cursor-pointer hover:text-neutral-300" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName}</span>}
                                             <div className={`flex gap-2 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                                                 <div className="w-8 flex-shrink-0 flex flex-col items-center">
-                                                    {!isMe && !isChain && ( selectedChat.type === 'group' ? <div className="w-8 h-8 rounded-full bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-300 border border-indigo-500/20">{msg.senderName?.charAt(0)}</div> : <div className="w-8 h-8 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center font-bold text-white">{selectedChat.name.charAt(0)}</div> )}
+                                                    {!isMe && !isChain && ( selectedChat.type === 'group' ? <div className="w-8 h-8 rounded-full bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-300 border border-indigo-500/20 cursor-pointer hover:opacity-80" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName?.charAt(0)}</div> : <div className="w-8 h-8 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-80" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{selectedChat.name.charAt(0)}</div> )}
                                                 </div>
                                                 <div className={`px-4 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap leading-relaxed shadow-sm ${isMe ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-neutral-800 text-neutral-200 rounded-tl-sm'}`}>{msg.text}</div>
                                             </div>
