@@ -19,45 +19,67 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
 
   const intervalRef = useRef<number | null>(null);
 
-  const resetTimer = useCallback(() => {
-    // Check if we need to record a session (if it was running or had progress)
-    if (isActive || (mode !== TimerMode.STOPWATCH && seconds !== initialTime) || (mode === TimerMode.STOPWATCH && seconds > 0)) {
-        let duration = 0;
-        let completed = false;
+  // Helper to save session
+  const saveSession = () => {
+      // Calculate duration based on CURRENT mode state
+      let duration = 0;
+      let completed = false;
 
-        if (mode === TimerMode.STOPWATCH) {
-            duration = seconds;
-        } else {
-            duration = initialTime - seconds;
-            // If we are resetting manually and it's not 0, it's not completed
-            completed = seconds <= 0;
-        }
+      if (mode === TimerMode.STOPWATCH) {
+          duration = seconds;
+      } else {
+          duration = initialTime - seconds;
+          completed = seconds <= 0;
+      }
 
-        // Only save if duration is meaningful (> 10 seconds)
-        if (duration > 10) {
-            onSessionComplete({ duration, mode, completed });
-        }
-    }
+      // Only save if duration is meaningful (> 10 seconds)
+      if (duration > 10) {
+          onSessionComplete({ duration, mode, completed });
+      }
+  };
 
-    setIsActive(false);
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    
-    if (mode === TimerMode.STOPWATCH) {
-      setSeconds(0);
-    } else if (mode === TimerMode.POMODORO) {
-      setSeconds(25 * 60);
-      setInitialTime(25 * 60);
-    } else {
-      setSeconds(customMinutes * 60);
-      setInitialTime(customMinutes * 60);
-    }
-  }, [mode, customMinutes, isActive, seconds, initialTime, onSessionComplete]);
+  const handleModeChange = (newMode: TimerMode) => {
+      if (mode === newMode) return;
 
-  // Handle mode switching
-  useEffect(() => {
-    resetTimer();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+      // Stop timer & Reset State purely (No Save)
+      setIsActive(false);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+
+      setMode(newMode);
+
+      // Set defaults for new mode
+      if (newMode === TimerMode.STOPWATCH) {
+          setSeconds(0);
+          setInitialTime(0);
+      } else if (newMode === TimerMode.POMODORO) {
+          setSeconds(25 * 60);
+          setInitialTime(25 * 60);
+      } else {
+          setSeconds(customMinutes * 60);
+          setInitialTime(customMinutes * 60);
+      }
+  };
+
+  const handleManualReset = () => {
+      // Manual reset implies finishing/stopping the current session
+      if (isActive || (mode !== TimerMode.STOPWATCH && seconds !== initialTime) || (mode === TimerMode.STOPWATCH && seconds > 0)) {
+          saveSession();
+      }
+      
+      setIsActive(false);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      
+      // Reset times for CURRENT mode
+      if (mode === TimerMode.STOPWATCH) {
+        setSeconds(0);
+      } else if (mode === TimerMode.POMODORO) {
+        setSeconds(25 * 60);
+        setInitialTime(25 * 60);
+      } else {
+        setSeconds(customMinutes * 60);
+        setInitialTime(customMinutes * 60);
+      }
+  };
 
   // Timer Tick
   useEffect(() => {
@@ -113,10 +135,12 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
   };
 
   return (
-    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 flex flex-col items-center justify-between gap-6 shadow-lg relative overflow-hidden">
+    <div className="bg-neutral-900 border border-neutral-800 rounded-xl p-6 flex flex-col items-center gap-6 shadow-lg relative">
       
-      {/* Background Accent */}
-      <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl -z-0 pointer-events-none"></div>
+      {/* Background Accent - Contained to prevent overflow issues on buttons */}
+      <div className="absolute inset-0 overflow-hidden rounded-xl pointer-events-none">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-3xl -z-0"></div>
+      </div>
 
       {/* Header */}
       <div className="w-full flex justify-between items-center z-10">
@@ -127,7 +151,7 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
       </div>
 
       {/* Timer Display */}
-      <div className="flex flex-col items-center z-10">
+      <div className="flex flex-col items-center z-10 w-full">
         <div className="text-7xl font-mono font-light tracking-tighter text-white tabular-nums mb-2">
           {formatTime(seconds)}
         </div>
@@ -135,21 +159,21 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
         {/* Mode Selector */}
         <div className="flex gap-2 mb-6">
           <button 
-            onClick={() => setMode(TimerMode.STOPWATCH)} 
+            onClick={() => handleModeChange(TimerMode.STOPWATCH)} 
             className={`p-2 rounded-lg transition-colors ${mode === TimerMode.STOPWATCH ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}
             title="Stopwatch"
           >
             <Watch size={18} />
           </button>
           <button 
-            onClick={() => setMode(TimerMode.POMODORO)} 
+            onClick={() => handleModeChange(TimerMode.POMODORO)} 
             className={`p-2 rounded-lg transition-colors ${mode === TimerMode.POMODORO ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}
             title="Pomodoro (25m)"
           >
             <Hourglass size={18} />
           </button>
           <button 
-            onClick={() => setMode(TimerMode.COUNTDOWN)} 
+            onClick={() => handleModeChange(TimerMode.COUNTDOWN)} 
             className={`p-2 rounded-lg transition-colors ${mode === TimerMode.COUNTDOWN ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}
             title="Countdown"
           >
@@ -159,7 +183,7 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
 
         {/* Custom Input for Countdown */}
         {mode === TimerMode.COUNTDOWN && !isActive && seconds === initialTime && (
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 animate-in fade-in slide-in-from-top-2">
             <input 
               type="number" 
               value={customMinutes} 
@@ -177,7 +201,7 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
       </div>
 
       {/* Controls */}
-      <div className="flex gap-4 z-10 w-full max-w-xs justify-center">
+      <div className="flex gap-4 z-10 w-full max-w-xs justify-center pb-1">
         <button 
           onClick={toggleTimer}
           className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-medium transition-all ${
@@ -189,9 +213,9 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
           {isActive ? <><Pause size={20} /> Pause</> : <><Play size={20} /> Start</>}
         </button>
         <button 
-          onClick={resetTimer}
+          onClick={handleManualReset}
           className="p-3 bg-neutral-800 text-neutral-400 rounded-lg hover:bg-neutral-700 hover:text-white transition-colors"
-          title="Reset"
+          title="Save & Reset"
         >
           <RotateCcw size={20} />
         </button>
