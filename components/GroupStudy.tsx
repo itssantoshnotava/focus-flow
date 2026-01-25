@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ArrowLeft, Users, Plus, LogIn, LogOut, Play, Pause, Clock, Zap, Coffee, Settings, Check } from 'lucide-react';
+import { ArrowLeft, Users, Plus, LogIn, LogOut, Play, Pause, Clock, Zap, Coffee, Settings, Check, RotateCcw, Trash2 } from 'lucide-react';
 import { ref, set, push, get, child, update, onValue, onDisconnect, remove } from "firebase/database";
 import { database } from "../firebase";
 
@@ -10,13 +10,13 @@ export const GroupStudy: React.FC = () => {
   const location = useLocation();
   const mode = location.state?.mode; // 'create' | 'join'
   const myKey = location.state?.myKey;
-  const isHost = mode === 'create';
-
+  
   // HOOKS MUST BE AT TOP LEVEL (Before any return statements)
   const [userName, setUserName] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [isJoinMode, setIsJoinMode] = useState(false);
   const [participants, setParticipants] = useState<any[]>([]);
+  const [hostKey, setHostKey] = useState<string | null>(null);
   
   // Timer State
   const [timerState, setTimerState] = useState({ 
@@ -35,8 +35,9 @@ export const GroupStudy: React.FC = () => {
   const [customBreak, setCustomBreak] = useState(5);
 
   const switchLock = useRef(false);
+  const isHost = myKey && hostKey && myKey === hostKey;
 
-  // --- EFFECT: Fetch Participants & Timer Data ---
+  // --- EFFECT: Fetch Participants, Timer & Host Data ---
   useEffect(() => {
     if (roomId) {
       // Listen for participants
@@ -44,7 +45,12 @@ export const GroupStudy: React.FC = () => {
       const unsubParticipants = onValue(participantsRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.val();
-          setParticipants(Object.values(data));
+          // Convert to array and preserve keys
+          const pList = Object.entries(data).map(([key, val]: [string, any]) => ({
+            key,
+            ...val
+          }));
+          setParticipants(pList);
         } else {
           setParticipants([]);
         }
@@ -66,12 +72,66 @@ export const GroupStudy: React.FC = () => {
         }
       });
 
+      // Listen for hostKey
+      const hostRef = ref(database, `rooms/${roomId}/hostKey`);
+      const unsubHost = onValue(hostRef, (snapshot) => {
+          if (snapshot.exists()) {
+              setHostKey(snapshot.val());
+          } else {
+              setHostKey(null);
+          }
+      });
+      
+      // Listen for room existence (to handle deletion)
+      const roomRef = ref(database, `rooms/${roomId}`);
+      const unsubRoom = onValue(roomRef, (snapshot) => {
+          if (!snapshot.exists()) {
+              navigate('/group');
+          }
+      });
+
       return () => {
         unsubParticipants();
         unsubTimer();
+        unsubHost();
+        unsubRoom();
       };
     }
-  }, [roomId]);
+  }, [roomId, navigate]);
+
+  // --- EFFECT: Host Logic (Transfer & Cleanup) ---
+  useEffect(() => {
+      if (!roomId || !myKey || participants.length === 0) return;
+
+      const roomRef = ref(database, `rooms/${roomId}`);
+      
+      // 1. Host Transfer Logic
+      // If hostKey is defined but that user is NOT in participants list
+      if (hostKey) {
+          const hostExists = participants.find(p => p.key === hostKey);
+          if (!hostExists) {
+              // Host left. Elect new host (earliest joinedAt).
+              const sorted = [...participants].sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+              const newHost = sorted[0];
+              
+              // If I am the new host, I claim it.
+              if (newHost.key === myKey) {
+                  update(roomRef, { hostKey: myKey, host: newHost.name });
+              }
+          }
+      }
+
+      // 2. Auto-Delete Logic (Last Person Standing)
+      // If I am the ONLY participant, ensure room is deleted if I disconnect.
+      if (participants.length === 1 && participants[0].key === myKey) {
+          onDisconnect(roomRef).remove();
+      } else {
+          // If there are others, CANCEL the room removal on my disconnect
+          onDisconnect(roomRef).cancel();
+      }
+
+  }, [participants, hostKey, myKey, roomId]);
+
 
   // --- EFFECT: Local Ticker & Auto-Switch Logic ---
   useEffect(() => {
@@ -144,7 +204,8 @@ export const GroupStudy: React.FC = () => {
 
         await set(roomRef, {
             host: userName,
-            timer: {          // New Shared Timer Node
+            hostKey: newParticipantKey, // Set initial host key
+            timer: {          
                 isRunning: false,
                 startTime: 0,
                 elapsed: 0,
@@ -198,7 +259,12 @@ export const GroupStudy: React.FC = () => {
   const handleLeaveRoom = async () => {
      if (roomId && myKey) {
          try {
-             await remove(ref(database, `rooms/${roomId}/participants/${myKey}`));
+             // If I am the last participant, delete the room
+             if (participants.length <= 1) {
+                 await remove(ref(database, `rooms/${roomId}`));
+             } else {
+                 await remove(ref(database, `rooms/${roomId}/participants/${myKey}`));
+             }
          } catch (e) {
              console.error("Error leaving room:", e);
          }
@@ -206,6 +272,7 @@ export const GroupStudy: React.FC = () => {
      navigate('/group');
   };
 
+  // --- Host Controls ---
   const toggleTimer = () => {
     if (!roomId) return;
     const timerRef = ref(database, `rooms/${roomId}/timer`);
@@ -227,6 +294,22 @@ export const GroupStudy: React.FC = () => {
             startTime: Date.now()
         });
     }
+  };
+
+  const resetTimer = () => {
+      if (!roomId) return;
+      update(ref(database, `rooms/${roomId}/timer`), {
+          isRunning: false,
+          elapsed: 0,
+          startTime: 0,
+          phase: 'focus'
+      });
+  };
+
+  const deleteRoom = async () => {
+      if (!roomId) return;
+      await remove(ref(database, `rooms/${roomId}`));
+      // Navigation handled by onValue listener
   };
 
   const setTimerMode = (mode: string, focus = 25, breakMins = 5) => {
@@ -305,16 +388,26 @@ export const GroupStudy: React.FC = () => {
                    {/* Main Timer Control */}
                    {isHost ? (
                        <div className="flex flex-col gap-4 w-full">
-                            <button 
-                                onClick={toggleTimer}
-                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all ${
-                                    timerState.isRunning 
-                                    ? 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-700' 
-                                    : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20'
-                                }`}
-                            >
-                                {timerState.isRunning ? <><Pause size={18} /> Pause Timer</> : <><Play size={18} /> Start Timer</>}
-                            </button>
+                            <div className="flex gap-2 w-full">
+                                <button 
+                                    onClick={toggleTimer}
+                                    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium transition-all ${
+                                        timerState.isRunning 
+                                        ? 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-700' 
+                                        : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20'
+                                    }`}
+                                >
+                                    {timerState.isRunning ? <Pause size={18} /> : <Play size={18} />}
+                                    {timerState.isRunning ? 'Pause' : 'Start'}
+                                </button>
+                                <button 
+                                    onClick={resetTimer}
+                                    className="px-4 py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white rounded-xl border border-neutral-700 transition-all"
+                                    title="Reset Timer"
+                                >
+                                    <RotateCcw size={18} />
+                                </button>
+                            </div>
 
                             {/* Mode Selector */}
                             <div className="bg-neutral-950/50 p-1.5 rounded-lg grid grid-cols-4 gap-1">
@@ -391,11 +484,20 @@ export const GroupStudy: React.FC = () => {
               <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
                 {participants.length > 0 ? (
                   participants.map((p, index) => (
-                    <div key={index} className="flex items-center gap-3 p-2 bg-neutral-900 border border-neutral-800/50 rounded-lg">
-                      <div className="w-8 h-8 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/20 shrink-0">
-                         {p.name ? p.name.charAt(0).toUpperCase() : '?'}
+                    <div key={index} className="flex items-center gap-3 p-2 bg-neutral-900 border border-neutral-800/50 rounded-lg justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border shrink-0 ${
+                            p.key === hostKey 
+                            ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' 
+                            : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                        }`}>
+                            {p.name ? p.name.charAt(0).toUpperCase() : '?'}
+                        </div>
+                        <span className="text-neutral-300 font-medium truncate">{p.name || 'Unknown'}</span>
                       </div>
-                      <span className="text-neutral-300 font-medium truncate">{p.name || 'Unknown'}</span>
+                      {p.key === hostKey && (
+                          <span className="text-[10px] uppercase font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">Host</span>
+                      )}
                     </div>
                   ))
                 ) : (
@@ -404,7 +506,8 @@ export const GroupStudy: React.FC = () => {
               </div>
            </div>
 
-           <div className="pt-2">
+           {/* Host Danger Zone or Leave */}
+           <div className="pt-2 space-y-3">
                <button 
                   onClick={handleLeaveRoom}
                   className="flex items-center justify-center gap-2 w-full text-neutral-500 hover:text-neutral-300 text-sm font-medium py-2 transition-colors"
@@ -412,6 +515,16 @@ export const GroupStudy: React.FC = () => {
                   <LogOut size={16} />
                   <span>Leave Room</span>
               </button>
+              
+              {isHost && (
+                  <button 
+                    onClick={deleteRoom}
+                    className="flex items-center justify-center gap-2 w-full text-red-900/50 hover:text-red-500 text-xs font-medium py-2 transition-colors"
+                  >
+                      <Trash2 size={14} />
+                      <span>Delete Room</span>
+                  </button>
+              )}
            </div>
         </div>
       </div>
