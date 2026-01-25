@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ref, set } from "firebase/database";
 import { database } from "../firebase";
@@ -6,8 +6,8 @@ import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { EXAMS } from '../constants';
-import { ProgressMap } from '../types';
-import { LayoutDashboard, Users } from 'lucide-react';
+import { ProgressMap, StudySession, TimerMode } from '../types';
+import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -18,8 +18,7 @@ export const Dashboard: React.FC = () => {
     return saved ? JSON.parse(saved) : {};
   });
 
-  // --- State: Daily Study Time ---
-  // Keyed by date string YYYY-MM-DD to reset daily
+  // --- State: Daily Study Time (Live) ---
   const [studyData, setStudyData] = useState<{date: string, seconds: number}>(() => {
     const saved = localStorage.getItem('focusflow_study_data');
     const today = new Date().toISOString().split('T')[0];
@@ -28,6 +27,12 @@ export const Dashboard: React.FC = () => {
       if (parsed.date === today) return parsed;
     }
     return { date: today, seconds: 0 };
+  });
+
+  // --- State: Session History ---
+  const [sessions, setSessions] = useState<StudySession[]>(() => {
+    const saved = localStorage.getItem('focusflow_sessions');
+    return saved ? JSON.parse(saved) : [];
   });
 
   // --- Effects: Firebase Test ---
@@ -46,6 +51,10 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('focusflow_study_data', JSON.stringify(studyData));
   }, [studyData]);
+
+  useEffect(() => {
+    localStorage.setItem('focusflow_sessions', JSON.stringify(sessions));
+  }, [sessions]);
 
   // --- Handlers ---
   const handleToggleProgress = (examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
@@ -68,6 +77,58 @@ export const Dashboard: React.FC = () => {
       return { ...prev, seconds: prev.seconds + addedSeconds };
     });
   };
+
+  const handleSessionComplete = (sessionData: { duration: number; mode: TimerMode; completed: boolean }) => {
+    const newSession: StudySession = {
+        id: crypto.randomUUID(),
+        date: new Date().toISOString(),
+        duration: sessionData.duration,
+        mode: sessionData.mode,
+        completed: sessionData.completed
+    };
+    setSessions(prev => [...prev, newSession]);
+  };
+
+  // --- Stats Calculation ---
+  const stats = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    let totalSeconds = 0;
+    let todaySeconds = 0;
+    let weekSeconds = 0;
+    let pomodoros = 0;
+
+    sessions.forEach(s => {
+        // Filter out very short sessions if needed
+        if (s.duration < 10) return;
+
+        totalSeconds += s.duration;
+
+        const sDate = s.date.split('T')[0];
+        if (sDate === todayStr) {
+            todaySeconds += s.duration;
+        }
+
+        if (new Date(s.date) >= oneWeekAgo) {
+            weekSeconds += s.duration;
+        }
+
+        // Count completed pomodoros (Dashboard 'POMODORO' or Group '25/5'/'50/10')
+        const isPomodoroMode = s.mode === 'POMODORO' || s.mode === '25/5' || s.mode === '50/10';
+        if (isPomodoroMode && s.completed) {
+            pomodoros++;
+        }
+    });
+
+    return {
+        totalHours: (totalSeconds / 3600).toFixed(1),
+        todayHours: (todaySeconds / 3600).toFixed(1),
+        weekHours: (weekSeconds / 3600).toFixed(1),
+        pomodoros
+    };
+  }, [sessions]);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30">
@@ -101,13 +162,42 @@ export const Dashboard: React.FC = () => {
         
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* Left Column: Timer & Countdowns */}
+          {/* Left Column: Stats, Timer & Countdowns */}
           <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-6">
             
+            {/* Stats Grid */}
+            <div className="grid grid-cols-2 gap-3">
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                        <Flame size={12} className="text-orange-500" /> Today
+                    </span>
+                    <span className="text-2xl font-mono text-white">{stats.todayHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                </div>
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                        <CalendarClock size={12} className="text-blue-500" /> Week
+                    </span>
+                    <span className="text-2xl font-mono text-white">{stats.weekHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                </div>
+                 <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                        <Clock size={12} className="text-emerald-500" /> Total
+                    </span>
+                    <span className="text-2xl font-mono text-white">{stats.totalHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                </div>
+                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                        <Trophy size={12} className="text-yellow-500" /> Pomodoros
+                    </span>
+                    <span className="text-2xl font-mono text-white">{stats.pomodoros}</span>
+                </div>
+            </div>
+
             {/* Timer Widget */}
             <Timer 
               onAddStudyTime={handleAddStudyTime} 
               dailyTotal={studyData.seconds} 
+              onSessionComplete={handleSessionComplete}
             />
 
             {/* Exam Countdowns Grid */}

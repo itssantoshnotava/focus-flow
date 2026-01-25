@@ -36,3 +36,12 @@ export enum TimerMode {
   POMODORO = 'POMODORO',
   COUNTDOWN = 'COUNTDOWN',
 }
+
+export interface StudySession {
+  id: string;
+  date: string; // ISO string
+  duration: number; // seconds
+  mode: string;
+  roomCode?: string;
+  completed?: boolean;
+}

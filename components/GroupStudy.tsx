@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Users, Plus, LogIn, LogOut, Play, Pause, Clock, Zap, Coffee, Settings, Check, RotateCcw, Trash2 } from 'lucide-react';
 import { ref, set, push, get, child, update, onValue, onDisconnect, remove } from "firebase/database";
 import { database } from "../firebase";
+import { StudySession } from '../types';
 
 export const GroupStudy: React.FC = () => {
   const { roomId } = useParams();
@@ -37,6 +38,33 @@ export const GroupStudy: React.FC = () => {
   const switchLock = useRef(false);
   const isHost = myKey && hostKey && myKey === hostKey;
 
+  // Session Tracking Refs
+  const lastState = useRef(timerState);
+  const sessionAccumulator = useRef(0);
+  const lastTick = useRef(Date.now());
+
+  // Helper to save session
+  const saveCurrentSession = (duration: number, mode: string, phase: string) => {
+      if (duration < 10) return; // Ignore very short sessions
+      if (phase === 'break') return; // Do not record breaks as study sessions
+
+      const newSession: StudySession = {
+          id: crypto.randomUUID(),
+          date: new Date().toISOString(),
+          duration: Math.floor(duration),
+          mode: mode,
+          roomCode: roomId,
+          completed: false // Group sessions are hard to mark as 'completed' definitively, default false or infer
+      };
+      
+      // Infer completion for pomodoros if duration is close to target
+      if (mode === '25/5' && duration > 20 * 60) newSession.completed = true;
+      if (mode === '50/10' && duration > 45 * 60) newSession.completed = true;
+
+      const existing = JSON.parse(localStorage.getItem('focusflow_sessions') || '[]');
+      localStorage.setItem('focusflow_sessions', JSON.stringify([...existing, newSession]));
+  };
+
   // --- EFFECT: Fetch Participants, Timer & Host Data ---
   useEffect(() => {
     if (roomId) {
@@ -61,14 +89,30 @@ export const GroupStudy: React.FC = () => {
       const unsubTimer = onValue(timerRef, (snapshot) => {
         if (snapshot.exists()) {
           const val = snapshot.val();
-          setTimerState({
+          const newState = {
              isRunning: val.isRunning || false,
              startTime: val.startTime || 0,
              elapsed: val.elapsed || 0,
              mode: val.mode || 'stopwatch',
              phase: val.phase || 'focus',
              config: val.config || { focus: 25, break: 5 }
-          });
+          };
+
+          // Detect Session Events (Manual Reset or Phase Change)
+          // 1. Phase Change (Focus -> Break)
+          if (lastState.current.phase !== newState.phase) {
+              // Save accumulator
+              saveCurrentSession(sessionAccumulator.current, lastState.current.mode, lastState.current.phase);
+              sessionAccumulator.current = 0; // Reset
+          }
+          // 2. Manual Reset (Elapsed drops to 0 while previously > 0)
+          else if (lastState.current.elapsed > 0 && newState.elapsed === 0) {
+               saveCurrentSession(sessionAccumulator.current, lastState.current.mode, lastState.current.phase);
+               sessionAccumulator.current = 0;
+          }
+
+          setTimerState(newState);
+          lastState.current = newState;
         }
       });
 
@@ -140,6 +184,14 @@ export const GroupStudy: React.FC = () => {
     // Function to calculate and update display time
     const updateDisplay = () => {
         const now = Date.now();
+        const delta = (now - lastTick.current) / 1000;
+        lastTick.current = now;
+
+        // Session Accumulation for local history
+        if (timerState.isRunning) {
+            sessionAccumulator.current += delta;
+        }
+
         const currentSession = timerState.isRunning ? Math.floor((now - timerState.startTime) / 1000) : 0;
         const totalElapsed = (timerState.elapsed || 0) + currentSession;
 
@@ -172,13 +224,10 @@ export const GroupStudy: React.FC = () => {
         }
     };
 
+    lastTick.current = Date.now(); // Reset tick on effect start
     updateDisplay(); // Initial update
 
-    if (timerState.isRunning) {
-      interval = window.setInterval(updateDisplay, 1000);
-    } else {
-        switchLock.current = false; // Reset lock if stopped
-    }
+    interval = window.setInterval(updateDisplay, 1000);
 
     return () => clearInterval(interval);
   }, [timerState, isHost, roomId]);
@@ -257,6 +306,9 @@ export const GroupStudy: React.FC = () => {
   };
 
   const handleLeaveRoom = async () => {
+     // Save any pending session data
+     saveCurrentSession(sessionAccumulator.current, timerState.mode, timerState.phase);
+
      if (roomId && myKey) {
          try {
              // If I am the last participant, delete the room

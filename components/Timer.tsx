@@ -5,9 +5,10 @@ import { Play, Pause, RotateCcw, Clock, Watch, Hourglass } from 'lucide-react';
 interface TimerProps {
   onAddStudyTime: (seconds: number) => void;
   dailyTotal: number;
+  onSessionComplete: (session: { duration: number; mode: TimerMode; completed: boolean }) => void;
 }
 
-export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal }) => {
+export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSessionComplete }) => {
   const [mode, setMode] = useState<TimerMode>(TimerMode.STOPWATCH);
   const [isActive, setIsActive] = useState(false);
   const [seconds, setSeconds] = useState(0);
@@ -19,6 +20,25 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal }) => {
   const intervalRef = useRef<number | null>(null);
 
   const resetTimer = useCallback(() => {
+    // Check if we need to record a session (if it was running or had progress)
+    if (isActive || (mode !== TimerMode.STOPWATCH && seconds !== initialTime) || (mode === TimerMode.STOPWATCH && seconds > 0)) {
+        let duration = 0;
+        let completed = false;
+
+        if (mode === TimerMode.STOPWATCH) {
+            duration = seconds;
+        } else {
+            duration = initialTime - seconds;
+            // If we are resetting manually and it's not 0, it's not completed
+            completed = seconds <= 0;
+        }
+
+        // Only save if duration is meaningful (> 10 seconds)
+        if (duration > 10) {
+            onSessionComplete({ duration, mode, completed });
+        }
+    }
+
     setIsActive(false);
     if (intervalRef.current) clearInterval(intervalRef.current);
     
@@ -31,7 +51,7 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal }) => {
       setSeconds(customMinutes * 60);
       setInitialTime(customMinutes * 60);
     }
-  }, [mode, customMinutes]);
+  }, [mode, customMinutes, isActive, seconds, initialTime, onSessionComplete]);
 
   // Handle mode switching
   useEffect(() => {
@@ -49,8 +69,17 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal }) => {
           } else {
             // Countdown modes
             if (prev <= 0) {
+              // Timer Finished naturally
               setIsActive(false);
               if (intervalRef.current) clearInterval(intervalRef.current);
+              
+              // Record Completion
+              onSessionComplete({ 
+                  duration: initialTime, 
+                  mode, 
+                  completed: true 
+              });
+              
               return 0;
             }
             onAddStudyTime(1);
@@ -65,7 +94,7 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal }) => {
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isActive, mode, onAddStudyTime]);
+  }, [isActive, mode, onAddStudyTime, initialTime, onSessionComplete]);
 
   const toggleTimer = () => setIsActive(!isActive);
 
