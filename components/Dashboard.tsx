@@ -1,17 +1,17 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { ref, update } from "firebase/database";
-import { database } from "../firebase";
 import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsLeaderboard } from './FriendsLeaderboard';
 import { EXAMS } from '../constants';
-import { ProgressMap, StudySession, TimerMode } from '../types';
+import { ProgressMap } from '../types';
 import { Trophy, Flame, CalendarClock, Clock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useTimer } from '../contexts/TimerContext';
 
 export const Dashboard: React.FC = () => {
   const { user, isGuest } = useAuth();
+  const { sessions } = useTimer();
   
   // --- State: Syllabus Progress ---
   const [progress, setProgress] = useState<ProgressMap>(() => {
@@ -19,35 +19,10 @@ export const Dashboard: React.FC = () => {
     return saved ? JSON.parse(saved) : {};
   });
 
-  // --- State: Daily Study Time (Live) ---
-  const [studyData, setStudyData] = useState<{date: string, seconds: number}>(() => {
-    const saved = localStorage.getItem('focusflow_study_data');
-    const today = new Date().toISOString().split('T')[0];
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.date === today) return parsed;
-    }
-    return { date: today, seconds: 0 };
-  });
-
-  // --- State: Session History ---
-  const [sessions, setSessions] = useState<StudySession[]>(() => {
-    const saved = localStorage.getItem('focusflow_sessions');
-    return saved ? JSON.parse(saved) : [];
-  });
-
   // --- Effects: Persistence ---
   useEffect(() => {
     localStorage.setItem('focusflow_progress', JSON.stringify(progress));
   }, [progress]);
-
-  useEffect(() => {
-    localStorage.setItem('focusflow_study_data', JSON.stringify(studyData));
-  }, [studyData]);
-
-  useEffect(() => {
-    localStorage.setItem('focusflow_sessions', JSON.stringify(sessions));
-  }, [sessions]);
 
   // --- Handlers ---
   const handleToggleProgress = useCallback((examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
@@ -59,27 +34,6 @@ export const Dashboard: React.FC = () => {
         [type]: !prev[key]?.[type]
       }
     }));
-  }, []);
-
-  const handleAddStudyTime = useCallback((addedSeconds: number) => {
-    const today = new Date().toISOString().split('T')[0];
-    setStudyData(prev => {
-      if (prev.date !== today) {
-        return { date: today, seconds: addedSeconds };
-      }
-      return { ...prev, seconds: prev.seconds + addedSeconds };
-    });
-  }, []);
-
-  const handleSessionComplete = useCallback((sessionData: { duration: number; mode: TimerMode; completed: boolean }) => {
-    const newSession: StudySession = {
-        id: crypto.randomUUID(),
-        date: new Date().toISOString(),
-        duration: sessionData.duration,
-        mode: sessionData.mode,
-        completed: sessionData.completed
-    };
-    setSessions(prev => [...prev, newSession]);
   }, []);
 
   // --- Stats Calculation ---
@@ -112,15 +66,6 @@ export const Dashboard: React.FC = () => {
     };
   }, [sessions]);
 
-  // --- Sync Stats ---
-  useEffect(() => {
-    if (user && !isGuest) {
-        update(ref(database, `users/${user.uid}`), {
-            totalStudySeconds: stats.rawTotalSeconds
-        }).catch(err => console.error("Failed to sync stats", err));
-    }
-  }, [user, isGuest, stats.rawTotalSeconds]);
-
   return (
     <div className="flex-1 overflow-y-auto custom-scrollbar h-full bg-neutral-950 pb-20 md:pb-0">
         <div className="max-w-7xl w-full mx-auto px-4 py-8 flex flex-col gap-6">
@@ -128,7 +73,7 @@ export const Dashboard: React.FC = () => {
             
             {/* Left Column */}
             <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-4">
-              <Timer onAddStudyTime={handleAddStudyTime} dailyTotal={studyData.seconds} onSessionComplete={handleSessionComplete} />
+              <Timer />
 
               <div className="grid grid-cols-2 gap-3">
                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
