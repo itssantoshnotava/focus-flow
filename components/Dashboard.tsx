@@ -7,6 +7,7 @@ import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsSystem } from './FriendsSystem';
 import { FriendsLeaderboard } from './FriendsLeaderboard';
+import { GroupsSystem } from './GroupsSystem';
 import { Inbox } from './Inbox';
 import { EXAMS } from '../constants';
 import { ProgressMap, StudySession, TimerMode } from '../types';
@@ -17,6 +18,7 @@ export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout, isGuest } = useAuth();
   const [showFriends, setShowFriends] = useState(false);
+  const [showGroups, setShowGroups] = useState(false);
   const [showInbox, setShowInbox] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -213,6 +215,7 @@ export const Dashboard: React.FC = () => {
       
       {/* Modals */}
       {showFriends && <FriendsSystem onClose={() => setShowFriends(false)} />}
+      {showGroups && <GroupsSystem onClose={() => setShowGroups(false)} />}
       {showInbox && <Inbox onClose={() => setShowInbox(false)} />}
 
       {/* Top Navigation / Brand */}
@@ -241,6 +244,14 @@ export const Dashboard: React.FC = () => {
                   </button>
 
                   <button 
+                      onClick={() => setShowGroups(true)}
+                      className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+                  >
+                      <Users size={14} />
+                      <span className="hidden sm:inline">Groups</span>
+                  </button>
+
+                  <button 
                       onClick={() => setShowFriends(true)}
                       className="hidden sm:flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
                   >
@@ -255,7 +266,7 @@ export const Dashboard: React.FC = () => {
                 className="hidden sm:flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
             >
                 <Users size={14} />
-                <span>Group Study</span>
+                <span>Study</span>
             </button>
             
             <div className="h-6 w-[1px] bg-neutral-800 mx-1 hidden sm:block"></div>
