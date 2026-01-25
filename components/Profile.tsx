@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ref, onValue, update } from "firebase/database";
+import { ref, onValue, update, get, set } from "firebase/database";
 import { updateProfile } from "firebase/auth";
 import { database, auth } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
@@ -8,7 +8,7 @@ import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { getZodiacSign } from '../utils/zodiac';
 import { 
   Camera, Edit2, Save, X, LogOut, Settings, 
-  MapPin, Calendar, Sparkles, Flame, User, ChevronRight, Trophy
+  MapPin, Calendar, Sparkles, Flame, User, ChevronRight, Trophy, MessageCircle, Loader2
 } from 'lucide-react';
 
 export const Profile: React.FC = () => {
@@ -22,6 +22,8 @@ export const Profile: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isFriend, setIsFriend] = useState(false);
+  const [isStartingChat, setIsStartingChat] = useState(false);
 
   // Edit State
   const [editName, setEditName] = useState('');
@@ -43,8 +45,21 @@ export const Profile: React.FC = () => {
       }
       setLoading(false);
     });
+
+    // Check friendship status
+    if (user && !isOwnProfile) {
+        const friendRef = ref(database, `friends/${user.uid}/${uid}`);
+        const unsubFriend = onValue(friendRef, (snap) => {
+            setIsFriend(snap.exists());
+        });
+        return () => {
+            unsub();
+            unsubFriend();
+        }
+    }
+
     return () => unsub();
-  }, [uid]);
+  }, [uid, user, isOwnProfile]);
 
   const handleSave = async () => {
     if (!uid || !isOwnProfile) return;
@@ -81,6 +96,57 @@ export const Profile: React.FC = () => {
       } finally {
         setIsUploading(false);
       }
+    }
+  };
+
+  const handleStartChat = async () => {
+    if (!user || !uid || !isFriend || isStartingChat) return;
+    
+    setIsStartingChat(true);
+    try {
+        const myInboxRef = ref(database, `userInboxes/${user.uid}/${uid}`);
+        const snap = await get(myInboxRef);
+
+        if (!snap.exists()) {
+            // Create Conversation Entry (for tracking members)
+            const getDmConvoId = (u1: string, u2: string) => [u1, u2].sort().join('_');
+            const convoId = getDmConvoId(user.uid, uid);
+            
+            await update(ref(database, `conversations/${convoId}`), {
+                type: 'dm',
+                members: { [user.uid]: true, [uid]: true },
+                createdAt: Date.now()
+            });
+
+            // Initialize Inbox for me
+            await set(myInboxRef, {
+                type: 'dm',
+                name: profileData.name,
+                photoURL: profileData.photoURL || null,
+                lastMessage: null,
+                lastMessageAt: Date.now(),
+                unreadCount: 0
+            });
+
+            // Initialize Inbox for them
+            const theirInboxRef = ref(database, `userInboxes/${uid}/${user.uid}`);
+            await set(theirInboxRef, {
+                type: 'dm',
+                name: user.displayName,
+                photoURL: user.photoURL || null,
+                lastMessage: null,
+                lastMessageAt: Date.now(),
+                unreadCount: 0
+            });
+        }
+        
+        // Navigate with search param
+        navigate(`/inbox?chatId=${uid}`);
+    } catch (err) {
+        console.error("Failed to start chat", err);
+        alert("Failed to start chat. Please try again.");
+    } finally {
+        setIsStartingChat(false);
     }
   };
 
@@ -168,6 +234,18 @@ export const Profile: React.FC = () => {
                     >
                       + Add a bio
                     </button>
+                  )}
+
+                  {/* Message Friend Button */}
+                  {!isOwnProfile && isFriend && !isGuest && (
+                      <button 
+                        onClick={handleStartChat}
+                        disabled={isStartingChat}
+                        className="mt-4 inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-2xl font-bold transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                      >
+                        {isStartingChat ? <Loader2 size={20} className="animate-spin" /> : <MessageCircle size={20} />}
+                        Message
+                      </button>
                   )}
                 </>
               ) : (

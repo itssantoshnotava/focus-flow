@@ -3,7 +3,7 @@ import { ref, onValue, push, update, get, set, remove, runTransaction, onChildAd
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
     Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Trash2, UserPlus, 
@@ -32,6 +32,7 @@ const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉
 export const Inbox: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   
   // View State
   const [viewMode, setViewMode] = useState<'list' | 'create_group'>('list');
@@ -149,6 +150,19 @@ export const Inbox: React.FC = () => {
 
     return () => { unsubAdded(); unsubChanged(); unsubRemoved(); };
   }, [user]);
+
+  // --- 1.1 Auto-select chat from search params ---
+  useEffect(() => {
+    if (chats.length > 0) {
+        const targetChatId = searchParams.get('chatId');
+        if (targetChatId) {
+            const targetChat = chats.find(c => c.id === targetChatId);
+            if (targetChat && selectedChat?.id !== targetChatId) {
+                setSelectedChat(targetChat);
+            }
+        }
+    }
+  }, [chats, searchParams, selectedChat?.id]);
 
   // --- 2. Active Group Details ---
   useEffect(() => {
