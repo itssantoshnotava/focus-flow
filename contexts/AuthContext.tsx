@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { auth, googleProvider } from '../firebase';
+import { auth, googleProvider, database } from '../firebase';
 import { onAuthStateChanged, signInWithPopup, signOut, User, AuthError } from 'firebase/auth';
+import { ref, update } from 'firebase/database';
 
 interface AuthContextType {
   user: User | null;
@@ -32,6 +33,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!isGuest) {
         setUser(currentUser);
         setLoading(false);
+
+        // Sync user to database if logged in and not anonymous
+        if (currentUser && !currentUser.isAnonymous) {
+            const userRef = ref(database, `users/${currentUser.uid}`);
+            update(userRef, {
+                name: currentUser.displayName,
+                photoURL: currentUser.photoURL
+            }).catch(e => console.error("Error syncing user profile", e));
+        }
       }
     });
     return unsubscribe;

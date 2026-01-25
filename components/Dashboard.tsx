@@ -5,14 +5,16 @@ import { database } from "../firebase";
 import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
+import { FriendsSystem } from './FriendsSystem';
 import { EXAMS } from '../constants';
 import { ProgressMap, StudySession, TimerMode } from '../types';
-import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield } from 'lucide-react';
+import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield, UserPlus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout, isGuest } = useAuth();
+  const [showFriends, setShowFriends] = useState(false);
 
   // --- State: Syllabus Progress ---
   const [progress, setProgress] = useState<ProgressMap>(() => {
@@ -138,6 +140,9 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30">
       
+      {/* Friends System Overlay */}
+      {showFriends && <FriendsSystem onClose={() => setShowFriends(false)} />}
+
       {/* Top Navigation / Brand */}
       <header className="border-b border-neutral-900/80 bg-neutral-950/50 backdrop-blur sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
@@ -149,6 +154,17 @@ export const Dashboard: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
+            
+            {!isGuest && (
+               <button 
+                  onClick={() => setShowFriends(true)}
+                  className="hidden sm:flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+               >
+                  <UserPlus size={14} />
+                  <span>Friends</span>
+               </button>
+            )}
+
              <button 
                 onClick={() => navigate('/group')}
                 className="hidden sm:flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
