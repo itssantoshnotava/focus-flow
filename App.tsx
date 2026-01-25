@@ -4,6 +4,7 @@ import { Dashboard } from './components/Dashboard';
 import { GroupStudy } from './components/GroupStudy';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
+import { AccessGate } from './components/AccessGate';
 
 const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
@@ -24,13 +25,15 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <HashRouter>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/group" element={<GroupStudy />} />
-        <Route path="/group/:roomId" element={<GroupStudy />} />
-      </Routes>
-    </HashRouter>
+    <AccessGate>
+      <HashRouter>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/group" element={<GroupStudy />} />
+          <Route path="/group/:roomId" element={<GroupStudy />} />
+        </Routes>
+      </HashRouter>
+    </AccessGate>
   );
 };
 
