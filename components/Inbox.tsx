@@ -194,6 +194,7 @@ export const Inbox: React.FC = () => {
       if (selectedChat) {
           isInitialLoadRef.current = true; // Mark as initial load for scroll logic
           setMessages([]); // Clear old messages instantly
+          setInputText(''); // <--- FIX: Clear input on chat switch
           setTypingText('');
           setLastSeenMap({});
           isAutoScrollEnabled.current = true;
@@ -265,9 +266,6 @@ export const Inbox: React.FC = () => {
       const unsubSeen = onValue(seenRef, (snap) => {
           if (snap.exists()) {
               const data = snap.val();
-              // Flatten structure if needed, currently assumes { uid: { timestamp: 123 } } or just { uid: 123 }
-              // Adjust based on write structure.
-              // We wrote: { timestamp: Date.now() }. So val is { uid: { timestamp: ... } }
               const map: Record<string, number> = {};
               Object.entries(data).forEach(([uid, val]: [string, any]) => {
                    map[uid] = val.timestamp || val; 
@@ -294,7 +292,7 @@ export const Inbox: React.FC = () => {
       else if (messages.length > 0 && isAutoScrollEnabled.current) {
           container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
       }
-  }, [messages, selectedChat?.id]); // Re-run when messages change or chat ID changes
+  }, [messages, selectedChat?.id]);
 
   const handleScroll = () => {
       if (!scrollContainerRef.current) return;
@@ -320,55 +318,71 @@ export const Inbox: React.FC = () => {
 
   const handleSend = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
-      if (!inputText.trim() || !user || !selectedChat || !currentChatId) return;
       
       const text = inputText.trim();
-      const timestamp = Date.now();
-      const msgData = { senderUid: user.uid, senderName: user.displayName || 'Unknown', text, timestamp };
-
-      // Force scroll
-      isAutoScrollEnabled.current = true;
+      // Ensure we have text and valid chat context
+      if (!text || !user || !selectedChat || !currentChatId) return;
       
-      // Clear typing
+      // OPTIMISTIC RESET: Clear input immediately to prevent "stuck" text
+      setInputText('');
+      
+      // Clear typing status
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
 
-      if (selectedChat.type === 'dm') {
-          const friendUid = selectedChat.id;
-          await push(ref(database, `messages/${currentChatId}`), msgData);
-          await update(ref(database, `conversations/${currentChatId}`), { members: { [user.uid]: true, [friendUid]: true }, lastMessage: { ...msgData, seen: false } });
-          await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), { type: 'dm', name: selectedChat.name, photoURL: selectedChat.photoURL || null, lastMessage: msgData, lastMessageAt: timestamp });
-          const friendInboxRef = ref(database, `userInboxes/${friendUid}/${user.uid}`);
-          await runTransaction(friendInboxRef, (currentData) => {
-              if (currentData === null) return { type: 'dm', name: user.displayName, photoURL: user.photoURL, lastMessage: msgData, lastMessageAt: timestamp, unreadCount: 1 };
-              return { ...currentData, name: user.displayName, photoURL: user.photoURL, lastMessage: msgData, lastMessageAt: timestamp, unreadCount: (currentData.unreadCount || 0) + 1 };
-          });
-      } else {
-          const groupId = selectedChat.id;
-          await push(ref(database, `groupMessages/${groupId}`), msgData);
-          await update(ref(database, `groupChats/${groupId}`), { lastMessage: msgData });
-          let membersToUpdate: string[] = activeGroupData?.members ? Object.keys(activeGroupData.members) : [];
-          if (membersToUpdate.length === 0) {
-             const snap = await get(ref(database, `groupChats/${groupId}/members`));
-             if (snap.exists()) membersToUpdate = Object.keys(snap.val());
+      // Force scroll to bottom
+      isAutoScrollEnabled.current = true;
+
+      const timestamp = Date.now();
+      const msgData = { 
+          senderUid: user.uid, 
+          senderName: user.displayName || 'Unknown', 
+          text, 
+          timestamp 
+      };
+
+      try {
+          if (selectedChat.type === 'dm') {
+              const friendUid = selectedChat.id;
+              await push(ref(database, `messages/${currentChatId}`), msgData);
+              await update(ref(database, `conversations/${currentChatId}`), { members: { [user.uid]: true, [friendUid]: true }, lastMessage: { ...msgData, seen: false } });
+              await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), { type: 'dm', name: selectedChat.name, photoURL: selectedChat.photoURL || null, lastMessage: msgData, lastMessageAt: timestamp });
+              const friendInboxRef = ref(database, `userInboxes/${friendUid}/${user.uid}`);
+              await runTransaction(friendInboxRef, (currentData) => {
+                  if (currentData === null) return { type: 'dm', name: user.displayName, photoURL: user.photoURL, lastMessage: msgData, lastMessageAt: timestamp, unreadCount: 1 };
+                  return { ...currentData, name: user.displayName, photoURL: user.photoURL, lastMessage: msgData, lastMessageAt: timestamp, unreadCount: (currentData.unreadCount || 0) + 1 };
+              });
+          } else {
+              const groupId = selectedChat.id;
+              await push(ref(database, `groupMessages/${groupId}`), msgData);
+              await update(ref(database, `groupChats/${groupId}`), { lastMessage: msgData });
+              
+              let membersToUpdate: string[] = activeGroupData?.members ? Object.keys(activeGroupData.members) : [];
+              if (membersToUpdate.length === 0) {
+                 const snap = await get(ref(database, `groupChats/${groupId}/members`));
+                 if (snap.exists()) membersToUpdate = Object.keys(snap.val());
+              }
+              
+              const updates: Record<string, any> = {};
+              membersToUpdate.forEach(uid => {
+                 const basePath = `userInboxes/${uid}/${groupId}`;
+                 updates[`${basePath}/lastMessage`] = msgData;
+                 updates[`${basePath}/lastMessageAt`] = timestamp;
+                 updates[`${basePath}/type`] = 'group';
+                 updates[`${basePath}/name`] = selectedChat.name; 
+                 if (selectedChat.photoURL) updates[`${basePath}/photoURL`] = selectedChat.photoURL;
+              });
+              await update(ref(database), updates);
+              
+              await Promise.all(membersToUpdate.map(uid => {
+                  if (uid === user.uid) return Promise.resolve();
+                  return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => (count || 0) + 1);
+              }));
           }
-          const updates: Record<string, any> = {};
-          membersToUpdate.forEach(uid => {
-             const basePath = `userInboxes/${uid}/${groupId}`;
-             updates[`${basePath}/lastMessage`] = msgData;
-             updates[`${basePath}/lastMessageAt`] = timestamp;
-             updates[`${basePath}/type`] = 'group';
-             updates[`${basePath}/name`] = selectedChat.name; 
-             if (selectedChat.photoURL) updates[`${basePath}/photoURL`] = selectedChat.photoURL;
-          });
-          await update(ref(database), updates);
-          await Promise.all(membersToUpdate.map(uid => {
-              if (uid === user.uid) return Promise.resolve();
-              return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => (count || 0) + 1);
-          }));
+      } catch (error) {
+          console.error("Failed to send message:", error);
+          // Optional: Could revert input text here if needed, but usually not required for chat apps
       }
-      
-      setInputText('');
   };
 
   const handleCreateGroup = async () => {
