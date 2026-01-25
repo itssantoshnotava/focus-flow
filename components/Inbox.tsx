@@ -551,6 +551,14 @@ export const Inbox: React.FC = () => {
 
   return (
     <div className="flex h-full w-full bg-neutral-950">
+        {/* Reaction Overlay for click-outside */}
+        {activeReactionPickerId && (
+            <div 
+                className="fixed inset-0 z-[45] bg-transparent" 
+                onClick={() => setActiveReactionPickerId(null)}
+            />
+        )}
+
         {/* LIST */}
         <div className={`w-full md:w-[350px] lg:w-[400px] border-r border-neutral-900 flex-none flex flex-col ${selectedChat ? 'hidden md:flex' : 'flex'} bg-[rgba(20,20,20,0.55)] backdrop-blur-[12px]`}>
             <div className="p-4 border-b border-neutral-900 bg-transparent flex justify-between items-center h-16 shrink-0">
@@ -679,21 +687,37 @@ export const Inbox: React.FC = () => {
                                                     </div>
                                                 )}
                                                 <div className="flex flex-col relative group/bubble">
+                                                    {/* Reaction Picker (Floating Above/Beside) */}
+                                                    {activeReactionPickerId === msg.id && (
+                                                        <div className={`absolute bottom-[calc(100%+8px)] z-[50] flex gap-1 p-1.5 bg-neutral-900/95 border border-neutral-700/50 rounded-2xl shadow-2xl backdrop-blur-md animate-in zoom-in-95 duration-200 ${isMe ? 'right-0' : 'left-0'} max-sm:left-1/2 max-sm:-translate-x-1/2`}>
+                                                            {REACTION_EMOJIS.map(emoji => (
+                                                                <button 
+                                                                    key={emoji} 
+                                                                    onClick={(e) => { e.stopPropagation(); toggleReaction(msg.id, emoji); }} 
+                                                                    className="w-9 h-9 flex items-center justify-center text-xl hover:bg-white/10 active:scale-90 rounded-xl transition-all"
+                                                                >
+                                                                    {emoji}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                    )}
+
                                                     {msg.replyTo && (
                                                         <div onClick={() => scrollToMessage(msg.replyTo.messageId)} className={`mb-1 p-2 rounded-xl text-[11px] cursor-pointer border backdrop-blur-sm truncate max-w-[200px] ${isMe ? 'bg-white/10 border-white/10 text-indigo-100 self-end' : 'bg-neutral-900/50 border-neutral-700/50 text-neutral-400 self-start'}`}><div className="font-bold mb-0.5 flex items-center gap-1"><Reply size={10} /> {msg.replyTo.senderName}</div><div className="truncate opacity-70 italic">{msg.replyTo.previewText}</div></div>
                                                     )}
-                                                    <div className={`relative px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap shadow-sm transition-all overflow-hidden ${isMe ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`}`}><div className="pr-1 inline">{msg.text}</div><div className="inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none"><span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>{formatTime(msg.timestamp)}</span>{isLatestMe && renderMessageStatus(msg)}</div></div>
+                                                    
+                                                    <div className={`relative px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap shadow-sm transition-all ${isMe ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`}`}><div className="pr-1 inline">{msg.text}</div><div className="inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none"><span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>{formatTime(msg.timestamp)}</span>{isLatestMe && renderMessageStatus(msg)}</div></div>
                                                     
                                                     {/* Reactions Pills */}
                                                     {reactions && (
-                                                        <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                                        <div className={`flex flex-wrap gap-1 mt-1 z-10 ${isMe ? 'justify-end' : 'justify-start'}`}>
                                                             {Object.entries(reactions).map(([emoji, users]: [string, any]) => {
                                                                 const count = Object.keys(users).length;
                                                                 const hasReacted = users[user?.uid || ''];
                                                                 return (
-                                                                    <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] border transition-colors ${hasReacted ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:bg-neutral-800'}`}>
+                                                                    <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] border backdrop-blur-sm transition-all active:scale-95 ${hasReacted ? 'bg-indigo-500/25 border-indigo-500/40 text-indigo-200' : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:bg-neutral-800'}`}>
                                                                         <span>{emoji}</span>
-                                                                        <span className="font-bold">{count}</span>
+                                                                        <span className="font-bold tabular-nums">{count}</span>
                                                                     </button>
                                                                 );
                                                             })}
@@ -701,18 +725,21 @@ export const Inbox: React.FC = () => {
                                                     )}
 
                                                     {/* Actions Bar */}
-                                                    <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/bubble:opacity-100 transition-all z-20 ${isMe ? '-left-20' : '-right-20'}`}>
-                                                        <button onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} className="p-2 rounded-full bg-neutral-900/80 text-neutral-400 hover:text-white border border-neutral-800" title="Reply"><Reply size={14} /></button>
-                                                        <div className="relative">
-                                                            <button onClick={() => setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id)} className={`p-2 rounded-full bg-neutral-900/80 border border-neutral-800 transition-colors ${activeReactionPickerId === msg.id ? 'text-indigo-400 bg-indigo-900/20 border-indigo-500/50' : 'text-neutral-400 hover:text-white'}`} title="React"><SmilePlus size={14} /></button>
-                                                            {activeReactionPickerId === msg.id && (
-                                                                <div className={`absolute bottom-full mb-2 p-1.5 bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl flex gap-1 animate-in zoom-in-95 duration-200 z-50 ${isMe ? 'left-0' : 'right-0'}`}>
-                                                                    {REACTION_EMOJIS.map(emoji => (
-                                                                        <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className="w-8 h-8 flex items-center justify-center text-lg hover:bg-neutral-800 rounded-lg transition-colors">{emoji}</button>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                                    <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover/bubble:opacity-100 transition-all z-20 ${isMe ? '-left-24' : '-right-24'}`}>
+                                                        <button 
+                                                            onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} 
+                                                            className="p-2.5 rounded-full bg-neutral-900/90 text-neutral-400 hover:text-white border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all" 
+                                                            title="Reply"
+                                                        >
+                                                            <Reply size={15} />
+                                                        </button>
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id); }} 
+                                                            className={`p-2.5 rounded-full bg-neutral-900/90 border border-neutral-800/80 shadow-lg backdrop-blur-sm active:scale-90 transition-all ${activeReactionPickerId === msg.id ? 'text-indigo-400 border-indigo-500/50' : 'text-neutral-400 hover:text-white'}`} 
+                                                            title="React"
+                                                        >
+                                                            <SmilePlus size={15} />
+                                                        </button>
                                                     </div>
                                                 </div>
                                             </div>
