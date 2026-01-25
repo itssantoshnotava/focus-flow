@@ -21,9 +21,11 @@ const AppContent: React.FC = () => {
   const { user, loading, isGuest } = useAuth();
   
   // --- Flow State ---
+  // Initialize state from LocalStorage to avoid flicker and blocking
   const [splashSeen, setSplashSeen] = useState(() => localStorage.getItem('focusflow_splash_seen') === 'true');
   const [accessVerified, setAccessVerified] = useState(() => localStorage.getItem('focusflow_access') === 'true');
-  const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [onboardingComplete, setOnboardingComplete] = useState(() => localStorage.getItem('focusflow_onboarding_completed') === 'true');
+  
   const [checkingProfile, setCheckingProfile] = useState(true);
 
   // 1. Seed Codes (Admin utility - runs silently if user exists)
@@ -49,33 +51,37 @@ const AppContent: React.FC = () => {
                 const data = snap.val();
                 
                 // Sync Access Logic
-                // If DB says access granted, ensure local state is true (restore session)
                 if (data.accessGranted) {
                     if (!accessVerified) {
                         localStorage.setItem('focusflow_access', 'true');
                         setAccessVerified(true);
                     }
-                } 
-                // If local says access granted (just verified), ensure DB is true
-                else if (accessVerified) {
+                } else if (accessVerified) {
                     await update(userRef, { accessGranted: true });
                 }
 
-                // Check Onboarding
+                // Check Onboarding Logic
                 if (data.onboardingCompleted) {
-                    setOnboardingComplete(true);
+                    if (!onboardingComplete) {
+                        localStorage.setItem('focusflow_onboarding_completed', 'true');
+                        setOnboardingComplete(true);
+                    }
+                } else {
+                    // DB says not complete. But if local says complete (just finished), prioritize local and sync to DB
+                    if (onboardingComplete) {
+                        await update(userRef, { onboardingCompleted: true });
+                    } else {
+                        setOnboardingComplete(false);
+                    }
+                }
+            } else {
+                // User record doesn't exist yet
+                // If local state says complete, we trust it and create/update profile
+                if (onboardingComplete) {
+                    await update(userRef, { onboardingCompleted: true, accessGranted: accessVerified });
                 } else {
                     setOnboardingComplete(false);
                 }
-            } else {
-                // User record doesn't exist yet (fresh login)
-                // If we have local accessVerified, we should set accessGranted in DB on creation
-                // The Onboarding step usually handles profile creation, but we can flag access here
-                if (accessVerified) {
-                   // Profile creation happens in Onboarding or AuthContext, but we ensure flag is ready
-                   // We'll let Onboarding handle the rest
-                }
-                setOnboardingComplete(false);
             }
         } catch (e) {
             console.error("Failed to sync profile", e);
@@ -90,7 +96,7 @@ const AppContent: React.FC = () => {
     } else {
         setCheckingProfile(false);
     }
-  }, [user, isGuest, accessVerified]);
+  }, [user, isGuest]); // Removed dependencies that cause re-loops, handled inside logic
 
   const handleSplashComplete = () => {
       localStorage.setItem('focusflow_splash_seen', 'true');
@@ -103,6 +109,7 @@ const AppContent: React.FC = () => {
   };
 
   const handleOnboardingComplete = () => {
+      localStorage.setItem('focusflow_onboarding_completed', 'true');
       setOnboardingComplete(true);
   };
 
@@ -126,29 +133,27 @@ const AppContent: React.FC = () => {
   }
 
   // 3. Access Gate (Strictly before Login)
-  // Logic: If we haven't verified access locally, AND we aren't already logged in with a potentially valid session
-  // If user is logged in, we rely on the useEffect above to sync DB access -> local access. 
-  // But if user is NULL, and no local access, we MUST show gate.
   if (!accessVerified && !user) {
       return <AccessGate onSuccess={handleAccessSuccess} />;
   }
 
   // 4. Login Screen
-  // Only reachable if accessVerified is true (or user is already logged in)
   if (!user) {
     return <Login />;
   }
 
   // 5. Onboarding (Profile Setup)
-  if (checkingProfile) {
-      return (
-        <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-neutral-500 font-sans">
-            <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-      );
-  }
-  
+  // Logic: Show onboarding if NOT guest AND NOT complete.
+  // We use checkingProfile to avoid premature onboarding screen if data is fetching.
+  // BUT if local state already says complete, we skip the check and render app.
   if (!isGuest && !onboardingComplete) {
+      if (checkingProfile) {
+        return (
+            <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-neutral-500 font-sans">
+                <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+        );
+      }
       return <Onboarding onComplete={handleOnboardingComplete} />;
   }
 

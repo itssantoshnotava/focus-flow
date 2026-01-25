@@ -86,6 +86,9 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         // Update DB
         await update(ref(database, `users/${user.uid}`), profileUpdates);
         
+        // Mark local storage as well
+        localStorage.setItem('focusflow_onboarding_completed', 'true');
+        
         onComplete();
     } catch (e) {
         console.error("Onboarding failed", e);
