@@ -7,7 +7,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
     Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
-    LogOut, Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight
+    LogOut, Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
+    SmilePlus
 } from 'lucide-react';
 
 interface ChatItem {
@@ -25,6 +26,8 @@ interface ChatItem {
   timestamp: number;
   unreadCount?: number;
 }
+
+const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉', '👀'];
 
 export const Inbox: React.FC = () => {
   const { user } = useAuth();
@@ -45,6 +48,7 @@ export const Inbox: React.FC = () => {
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number} | null>(null);
   const [myFriends, setMyFriends] = useState<any[]>([]);
+  const [allReactions, setAllReactions] = useState<Record<string, any>>({});
   
   // Typing & Seen State
   const [typingText, setTypingText] = useState('');
@@ -55,9 +59,10 @@ export const Inbox: React.FC = () => {
   const [newGroupName, setNewGroupName] = useState('');
   const [selectedGroupMembers, setSelectedGroupMembers] = useState<Set<string>>(new Set());
   
-  // Reply State
+  // Interaction State
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
   
   // Group Edit Inputs
   const [editGroupName, setEditGroupName] = useState('');
@@ -105,7 +110,6 @@ export const Inbox: React.FC = () => {
   // --- 0. Migration Helper ---
   const migrateLegacyData = async () => {
       if (!user) return;
-      // Legacy migration logic (omitted for brevity)
   };
 
   // --- 1. Real-time Inbox Listener ---
@@ -208,6 +212,7 @@ export const Inbox: React.FC = () => {
           setMessages([]); // Clear old messages instantly
           setInputText(''); // FIX: Clear input on chat switch
           setReplyingTo(null); // FIX: Clear reply on chat switch
+          setActiveReactionPickerId(null);
           setTypingText('');
           setLastSeenMap({});
           isAutoScrollEnabled.current = true;
@@ -236,18 +241,19 @@ export const Inbox: React.FC = () => {
           if (snapshot.exists()) {
               const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
               setMessages(list);
-              
-              // Mark seen on new message arrival if chat is open
               update(ref(database, `chatSeen/${currentChatId}/${user.uid}`), { timestamp: Date.now() });
           } else {
               setMessages([]);
           }
       });
+
+      // Add reactions listener
+      const unsubReactions = onValue(ref(database, `reactions/${currentChatId}`), (snap) => {
+          setAllReactions(snap.exists() ? snap.val() : {});
+      });
       
-      // Focus Input
       setTimeout(() => inputRef.current?.focus(), 100);
 
-      // --- Typing Listener ---
       const typingRef = ref(database, `typing/${currentChatId}`);
       const unsubTyping = onValue(typingRef, (snap) => {
           if (snap.exists()) {
@@ -271,9 +277,7 @@ export const Inbox: React.FC = () => {
           }
       });
 
-      // --- Last Seen Listener ---
       const seenRef = ref(database, `chatSeen/${currentChatId}`);
-      // Mark initial seen
       update(ref(database, `chatSeen/${currentChatId}/${user.uid}`), { timestamp: Date.now() });
       
       const unsubSeen = onValue(seenRef, (snap) => {
@@ -287,21 +291,19 @@ export const Inbox: React.FC = () => {
           }
       });
 
-      return () => { unsubMsg(); unsubTyping(); unsubSeen(); };
+      return () => { unsubMsg(); unsubTyping(); unsubSeen(); unsubReactions(); };
   }, [user, selectedChat, currentChatId, groupMembersDetails]);
 
 
-  // --- 6. Scroll Logic (LAYOUT EFFECT FOR INSTANT SCROLL) ---
+  // --- 6. Scroll Logic ---
   useLayoutEffect(() => {
       if (!scrollContainerRef.current) return;
       const container = scrollContainerRef.current;
       
-      // Instant jump on first load of messages
       if (isInitialLoadRef.current && messages.length > 0) {
           container.scrollTop = container.scrollHeight;
-          isInitialLoadRef.current = false; // Disable initial load flag
+          isInitialLoadRef.current = false;
       } 
-      // Smooth scroll for new messages if user is near bottom
       else if (messages.length > 0 && isAutoScrollEnabled.current) {
           container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
       }
@@ -310,7 +312,6 @@ export const Inbox: React.FC = () => {
   const handleScroll = () => {
       if (!scrollContainerRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-      // Enable auto-scroll only if near bottom (< 100px)
       isAutoScrollEnabled.current = (scrollHeight - scrollTop - clientHeight) < 100;
   };
 
@@ -323,15 +324,23 @@ export const Inbox: React.FC = () => {
       }
   };
 
+  const toggleReaction = async (messageId: string, emoji: string) => {
+    if (!user || !currentChatId) return;
+    const reactionRef = ref(database, `reactions/${currentChatId}/${messageId}/${emoji}/${user.uid}`);
+    const snap = await get(reactionRef);
+    if (snap.exists()) {
+      await remove(reactionRef);
+    } else {
+      await set(reactionRef, true);
+    }
+    setActiveReactionPickerId(null);
+  };
+
   // --- Actions ---
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setInputText(e.target.value);
       if (!user || !currentChatId) return;
-
-      // Update typing status
       update(ref(database, `typing/${currentChatId}/${user.uid}`), true);
-      
-      // Debounce clear
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = window.setTimeout(() => {
           update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
@@ -340,24 +349,9 @@ export const Inbox: React.FC = () => {
 
   const handleSend = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
-      
       const text = inputText.trim();
-      
-      // Ensure we have text and valid chat context
-      if (!user || !selectedChat) {
-          console.error("Send failed: User or Chat not selected");
-          return;
-      }
-      if (!currentChatId) {
-          console.error("Send failed: currentChatId is missing/undefined");
-          return;
-      }
-
-      if (!text) return;
-
-      // Force scroll to bottom for when new message arrives
+      if (!user || !selectedChat || !currentChatId || !text) return;
       isAutoScrollEnabled.current = true;
-
       const timestamp = Date.now();
       const msgData: any = { 
           senderUid: user.uid, 
@@ -365,8 +359,6 @@ export const Inbox: React.FC = () => {
           text, 
           timestamp 
       };
-
-      // Add Reply Metadata if present
       if (replyingTo) {
           msgData.replyTo = {
               messageId: replyingTo.id,
@@ -375,23 +367,16 @@ export const Inbox: React.FC = () => {
               previewText: replyingTo.text
           };
       }
-
       try {
           if (selectedChat.type === 'dm') {
               const friendUid = selectedChat.id;
-              
-              // 1. Write Message (Using push then set for robust ID generation)
               const messagesRef = ref(database, `messages/${currentChatId}`);
               const newMessageRef = push(messagesRef);
               await set(newMessageRef, msgData);
-
-              // 2. Update Conversation Metadata
               await update(ref(database, `conversations/${currentChatId}`), { 
                   members: { [user.uid]: true, [friendUid]: true }, 
                   lastMessage: { ...msgData, seen: false } 
               });
-
-              // 3. Update Sender Inbox
               await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), { 
                   type: 'dm', 
                   name: selectedChat.name, 
@@ -399,8 +384,6 @@ export const Inbox: React.FC = () => {
                   lastMessage: msgData, 
                   lastMessageAt: timestamp 
               });
-
-              // 4. Update Receiver Inbox (Transaction)
               const friendInboxRef = ref(database, `userInboxes/${friendUid}/${user.uid}`);
               await runTransaction(friendInboxRef, (currentData) => {
                   if (currentData === null) {
@@ -422,25 +405,17 @@ export const Inbox: React.FC = () => {
                       unreadCount: (currentData.unreadCount || 0) + 1 
                   };
               });
-
           } else {
               const groupId = selectedChat.id;
-              
-              // 1. Write Message
               const messagesRef = ref(database, `groupMessages/${groupId}`);
               const newMessageRef = push(messagesRef);
               await set(newMessageRef, msgData);
-
-              // 2. Update Group Metadata
               await update(ref(database, `groupChats/${groupId}`), { lastMessage: msgData });
-              
-              // 3. Fan-out to Members
               let membersToUpdate: string[] = activeGroupData?.members ? Object.keys(activeGroupData.members) : [];
               if (membersToUpdate.length === 0) {
                  const snap = await get(ref(database, `groupChats/${groupId}/members`));
                  if (snap.exists()) membersToUpdate = Object.keys(snap.val());
               }
-              
               const updates: Record<string, any> = {};
               membersToUpdate.forEach(uid => {
                  const basePath = `userInboxes/${uid}/${groupId}`;
@@ -451,22 +426,17 @@ export const Inbox: React.FC = () => {
                  if (selectedChat.photoURL) updates[`${basePath}/photoURL`] = selectedChat.photoURL;
               });
               await update(ref(database), updates);
-              
               await Promise.all(membersToUpdate.map(uid => {
                   if (uid === user.uid) return Promise.resolve();
                   return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => (count || 0) + 1);
               }));
           }
-
-          // SUCCESS: Clear Input, Typing, and Reply state
           setInputText('');
           setReplyingTo(null);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           await update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
-
       } catch (error) {
           console.error("Failed to send message:", error);
-          // Do NOT clear input, let user retry
       }
   };
 
@@ -556,7 +526,6 @@ export const Inbox: React.FC = () => {
 
   const formatTime = (timestamp: number) => new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-  // Navigation Helper
   const goToProfile = (e: React.MouseEvent, targetUid: string) => {
       e.stopPropagation();
       navigate(`/profile/${targetUid}`);
@@ -564,7 +533,6 @@ export const Inbox: React.FC = () => {
 
   const renderMessageStatus = (msg: any) => {
       if (msg.senderUid !== user?.uid) return null;
-      
       let isSeen = false;
       if (selectedChat?.type === 'dm') {
           const friendSeen = lastSeenMap[selectedChat.id];
@@ -576,7 +544,6 @@ export const Inbox: React.FC = () => {
               isSeen = seenCount > 0;
           }
       }
-
       return isSeen 
         ? <CheckCheck size={11} className="text-indigo-200" />
         : <Check size={11} className="text-neutral-300" />;
@@ -599,7 +566,6 @@ export const Inbox: React.FC = () => {
                     </>
                 )}
             </div>
-            
             {viewMode === 'list' ? (
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     {loading ? <div className="p-4 text-center text-neutral-600 text-sm">Loading...</div> : chats.length === 0 ? <div className="p-8 text-center text-neutral-600 italic text-sm">No messages yet.</div> : (
@@ -610,15 +576,7 @@ export const Inbox: React.FC = () => {
                             return (
                                 <button key={chat.id} onClick={() => { setSelectedChat(chat); setShowSettings(false); }} className={`w-full py-4 px-5 flex items-center gap-4 hover:bg-neutral-900/30 transition-all border-b border-neutral-900/50 text-left relative group ${selectedChat?.id === chat.id ? 'bg-neutral-900/50' : ''}`}>
                                     <div className="relative shrink-0" onClick={(e) => chat.type === 'dm' && goToProfile(e, chat.id)}>
-                                        {chat.type === 'group' ? ( 
-                                            displayPhoto ? 
-                                            <img src={displayPhoto} className="w-14 h-14 rounded-2xl bg-neutral-800 object-cover shadow-sm" /> : 
-                                            <div className="w-14 h-14 rounded-2xl bg-neutral-800 flex items-center justify-center shadow-sm"><Users size={24} className="text-neutral-500" /></div> 
-                                        ) : (
-                                            displayPhoto ? 
-                                            <img src={displayPhoto} className="w-14 h-14 rounded-full bg-neutral-800 object-cover shadow-sm hover:opacity-80 transition-opacity" /> : 
-                                            <div className="w-14 h-14 rounded-full bg-indigo-600 flex items-center justify-center text-lg font-bold text-white shadow-sm hover:opacity-80 transition-opacity">{displayName.charAt(0)}</div>
-                                        )}
+                                        {chat.type === 'group' ? ( displayPhoto ? <img src={displayPhoto} className="w-14 h-14 rounded-2xl bg-neutral-800 object-cover shadow-sm" /> : <div className="w-14 h-14 rounded-2xl bg-neutral-800 flex items-center justify-center shadow-sm"><Users size={24} className="text-neutral-500" /></div> ) : ( displayPhoto ? <img src={displayPhoto} className="w-14 h-14 rounded-full bg-neutral-800 object-cover shadow-sm hover:opacity-80 transition-opacity" /> : <div className="w-14 h-14 rounded-full bg-indigo-600 flex items-center justify-center text-lg font-bold text-white shadow-sm hover:opacity-80 transition-opacity">{displayName.charAt(0)}</div>)}
                                         {isUnread && <span className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-500 border-[3px] border-neutral-950 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm">{chat.unreadCount}</span>}
                                     </div>
                                     <div className="flex-1 min-w-0 flex flex-col gap-1">
@@ -626,10 +584,7 @@ export const Inbox: React.FC = () => {
                                             <span className={`font-semibold text-base truncate ${isUnread ? 'text-white' : 'text-neutral-300 group-hover:text-white transition-colors'}`}>{displayName}</span>
                                             <span className={`text-xs ${isUnread ? 'text-indigo-400 font-medium' : 'text-neutral-600'}`}>{chat.timestamp ? new Date(chat.timestamp).toLocaleDateString([], {month:'short', day:'numeric'}) : ''}</span>
                                         </div>
-                                        <p className={`text-sm truncate leading-relaxed ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-500 group-hover:text-neutral-400 transition-colors'}`}>
-                                            {chat.lastMessage?.senderUid === user?.uid && <span className="text-neutral-600 mr-1">You:</span>}
-                                            {chat.lastMessage?.text || 'No messages'}
-                                        </p>
+                                        <p className={`text-sm truncate leading-relaxed ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-500 group-hover:text-neutral-400 transition-colors'}`}>{chat.lastMessage?.senderUid === user?.uid && <span className="text-neutral-600 mr-1">You:</span>}{chat.lastMessage?.text || 'No messages'}</p>
                                     </div>
                                 </button>
                             );
@@ -637,7 +592,6 @@ export const Inbox: React.FC = () => {
                     )}
                 </div>
             ) : (
-                /* CREATE GROUP FORM */
                 <div className="flex-1 flex flex-col">
                     <div className="p-4 space-y-4">
                         <input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="Group Name" className="w-full bg-neutral-900 border border-neutral-800 text-white px-4 py-3 rounded-xl focus:outline-none focus:border-indigo-500" />
@@ -649,11 +603,7 @@ export const Inbox: React.FC = () => {
                             return (
                                 <button key={friend.uid} onClick={() => { const n = new Set(selectedGroupMembers); n.has(friend.uid) ? n.delete(friend.uid) : n.add(friend.uid); setSelectedGroupMembers(n); }} className={`w-full p-3 flex items-center justify-between rounded-xl mb-1 ${isSelected ? 'bg-indigo-900/20 border border-indigo-500/20' : 'hover:bg-neutral-900 border border-transparent'}`}>
                                     <div className="flex items-center gap-3">
-                                        {friend.photoURL ? (
-                                            <img src={friend.photoURL} className="w-10 h-10 rounded-full" /> 
-                                        ) : (
-                                            <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">{friend.name?.charAt(0)}</div>
-                                        )}
+                                        {friend.photoURL ? <img src={friend.photoURL} className="w-10 h-10 rounded-full" /> : <div className="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">{friend.name?.charAt(0)}</div>}
                                         <span className={`text-base ${isSelected ? 'text-indigo-200' : 'text-neutral-300'}`}>{friend.name}</span>
                                     </div>
                                     {isSelected ? <CheckCircle2 size={20} className="text-indigo-500" /> : <Circle size={20} className="text-neutral-700" />}
@@ -680,11 +630,7 @@ export const Inbox: React.FC = () => {
                                 </button>
                                 <div className="flex flex-col">
                                     <span className="font-bold text-neutral-200 text-sm cursor-pointer hover:text-white transition-colors" onClick={(e) => selectedChat.type === 'dm' && goToProfile(e, selectedChat.id)}>{ (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }</span>
-                                    {selectedChat.type === 'group' ? (
-                                        <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span>
-                                    ) : (
-                                        typingText && <span className="text-[10px] text-indigo-400 animate-pulse font-medium">{typingText}</span>
-                                    )}
+                                    {selectedChat.type === 'group' ? ( <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span> ) : ( typingText && <span className="text-[10px] text-indigo-400 animate-pulse font-medium">{typingText}</span> )}
                                 </div>
                             </div>
                         </div>
@@ -709,7 +655,6 @@ export const Inbox: React.FC = () => {
                              <div className="pt-8 border-t border-neutral-800 space-y-3"><button onClick={leaveGroup} className="w-full p-3 bg-neutral-900 rounded-xl text-neutral-400 hover:text-white">Leave Group</button>{amIAdmin && <button onClick={deleteGroup} className="w-full p-3 bg-red-950/20 text-red-400 rounded-xl">Delete Group</button>}</div>
                         </div>
                     ) : (
-                        /* MESSAGES VIEW */
                         <>
                             <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-1" ref={scrollContainerRef} onScroll={handleScroll}>
                                 {messages.map((msg, idx) => {
@@ -718,101 +663,57 @@ export const Inbox: React.FC = () => {
                                     const isChain = prevMsg && prevMsg.senderUid === msg.senderUid && (msg.timestamp - prevMsg.timestamp < 60000);
                                     const isLatestMe = idx === latestMeIdx;
                                     const isHighlighted = highlightedMessageId === msg.id;
+                                    const reactions = allReactions[msg.id];
 
-                                    // Resolve Sender Photo for Group Chat
                                     let senderPhoto = null;
-                                    if (selectedChat.type === 'group' && !isMe) {
-                                        senderPhoto = memberLookup[msg.senderUid]?.photoURL;
-                                    } else if (selectedChat.type === 'dm' && !isMe) {
-                                        senderPhoto = selectedChat.photoURL;
-                                    }
+                                    if (selectedChat.type === 'group' && !isMe) senderPhoto = memberLookup[msg.senderUid]?.photoURL;
+                                    else if (selectedChat.type === 'dm' && !isMe) senderPhoto = selectedChat.photoURL;
 
                                     return (
-                                        <div 
-                                            key={msg.id} 
-                                            id={`msg-${msg.id}`}
-                                            className={`flex flex-col group/msg transition-all duration-500 ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'} ${isHighlighted ? 'bg-indigo-500/10 rounded-xl py-1' : ''}`}
-                                        >
-                                            {!isMe && !isChain && selectedChat.type === 'group' && (
-                                                <span className="text-[10px] text-neutral-500 ml-10 mb-1 cursor-pointer hover:text-neutral-300 transition-colors" onClick={() => navigate(`/profile/${msg.senderUid}`)}>
-                                                    {msg.senderName}
-                                                </span>
-                                            )}
-                                            
+                                        <div key={msg.id} id={`msg-${msg.id}`} className={`flex flex-col group/msg transition-all duration-500 ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'} ${isHighlighted ? 'bg-indigo-500/10 rounded-xl py-1' : ''}`}>
+                                            {!isMe && !isChain && selectedChat.type === 'group' && ( <span className="text-[10px] text-neutral-500 ml-10 mb-1 cursor-pointer hover:text-neutral-300 transition-colors" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName}</span> )}
                                             <div className={`flex gap-2 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                                                {/* Avatar Area */}
                                                 {!isMe && (
                                                     <div className="w-8 flex-shrink-0 flex items-end">
-                                                        {!isChain ? (
-                                                            senderPhoto ? (
-                                                                <img 
-                                                                    src={senderPhoto} 
-                                                                    className="w-8 h-8 rounded-full object-cover cursor-pointer hover:opacity-80 transition-opacity bg-neutral-800 border border-neutral-800/50 shadow-sm"
-                                                                    onClick={() => navigate(`/profile/${msg.senderUid}`)}
-                                                                    alt={msg.senderName}
-                                                                />
-                                                            ) : (
-                                                                selectedChat.type === 'group' ? (
-                                                                    <div className="w-8 h-8 rounded-full bg-indigo-900/30 flex items-center justify-center text-[10px] font-bold text-indigo-300 border border-indigo-500/20 cursor-pointer hover:opacity-80 transition-opacity shadow-sm" onClick={() => navigate(`/profile/${msg.senderUid}`)}>
-                                                                        {msg.senderName?.charAt(0)}
-                                                                    </div>
-                                                                ) : (
-                                                                    <div className="w-8 h-8 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-80 transition-opacity shadow-sm" onClick={() => navigate(`/profile/${msg.senderUid}`)}>
-                                                                        {selectedChat.name.charAt(0)}
-                                                                    </div>
-                                                                )
-                                                            )
-                                                        ) : <div className="w-8" />}
+                                                        {!isChain ? ( senderPhoto ? ( <img src={senderPhoto} className="w-8 h-8 rounded-full object-cover cursor-pointer hover:opacity-80 transition-opacity bg-neutral-800 border border-neutral-800/50 shadow-sm" onClick={() => navigate(`/profile/${msg.senderUid}`)} alt={msg.senderName} /> ) : ( selectedChat.type === 'group' ? ( <div className="w-8 h-8 rounded-full bg-indigo-900/30 flex items-center justify-center text-[10px] font-bold text-indigo-300 border border-indigo-500/20 cursor-pointer hover:opacity-80 transition-opacity shadow-sm" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName?.charAt(0)}</div> ) : ( <div className="w-8 h-8 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-80 transition-opacity shadow-sm" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{selectedChat.name.charAt(0)}</div> ) ) ) : <div className="w-8" />}
                                                     </div>
                                                 )}
-
                                                 <div className="flex flex-col relative group/bubble">
-                                                    {/* Reply Preview in Bubble */}
                                                     {msg.replyTo && (
-                                                        <div 
-                                                            onClick={() => scrollToMessage(msg.replyTo.messageId)}
-                                                            className={`mb-1 p-2 rounded-xl text-[11px] cursor-pointer border backdrop-blur-sm truncate max-w-[200px] ${
-                                                                isMe 
-                                                                ? 'bg-white/10 border-white/10 text-indigo-100 self-end' 
-                                                                : 'bg-neutral-900/50 border-neutral-700/50 text-neutral-400 self-start'
-                                                            }`}
-                                                        >
-                                                            <div className="font-bold mb-0.5 flex items-center gap-1">
-                                                                <Reply size={10} /> {msg.replyTo.senderName}
-                                                            </div>
-                                                            <div className="truncate opacity-70 italic">{msg.replyTo.previewText}</div>
+                                                        <div onClick={() => scrollToMessage(msg.replyTo.messageId)} className={`mb-1 p-2 rounded-xl text-[11px] cursor-pointer border backdrop-blur-sm truncate max-w-[200px] ${isMe ? 'bg-white/10 border-white/10 text-indigo-100 self-end' : 'bg-neutral-900/50 border-neutral-700/50 text-neutral-400 self-start'}`}><div className="font-bold mb-0.5 flex items-center gap-1"><Reply size={10} /> {msg.replyTo.senderName}</div><div className="truncate opacity-70 italic">{msg.replyTo.previewText}</div></div>
+                                                    )}
+                                                    <div className={`relative px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap shadow-sm transition-all overflow-hidden ${isMe ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`}`}><div className="pr-1 inline">{msg.text}</div><div className="inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none"><span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>{formatTime(msg.timestamp)}</span>{isLatestMe && renderMessageStatus(msg)}</div></div>
+                                                    
+                                                    {/* Reactions Pills */}
+                                                    {reactions && (
+                                                        <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                                            {Object.entries(reactions).map(([emoji, users]: [string, any]) => {
+                                                                const count = Object.keys(users).length;
+                                                                const hasReacted = users[user?.uid || ''];
+                                                                return (
+                                                                    <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] border transition-colors ${hasReacted ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-200' : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:bg-neutral-800'}`}>
+                                                                        <span>{emoji}</span>
+                                                                        <span className="font-bold">{count}</span>
+                                                                    </button>
+                                                                );
+                                                            })}
                                                         </div>
                                                     )}
 
-                                                    {/* Message Bubble */}
-                                                    <div className={`relative px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap shadow-sm transition-all overflow-hidden ${
-                                                        isMe 
-                                                        ? `bg-indigo-600 text-white ${isChain ? 'rounded-tr-md' : 'rounded-tr-sm'}` 
-                                                        : `bg-neutral-800/90 text-neutral-100 border border-neutral-700/30 ${isChain ? 'rounded-tl-md' : 'rounded-tl-sm'}`
-                                                    }`}>
-                                                        <div className="pr-1 inline">{msg.text}</div>
-                                                        {/* Meta Info Integrated */}
-                                                        <div className="inline-flex items-center gap-1.5 ml-2 mt-1 -mr-1 align-bottom select-none">
-                                                            <span className={`text-[9px] font-medium tracking-tight ${isMe ? 'text-indigo-200/70' : 'text-neutral-400'}`}>
-                                                                {formatTime(msg.timestamp)}
-                                                            </span>
-                                                            {isLatestMe && renderMessageStatus(msg)}
+                                                    {/* Actions Bar */}
+                                                    <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/bubble:opacity-100 transition-all z-20 ${isMe ? '-left-20' : '-right-20'}`}>
+                                                        <button onClick={() => { setReplyingTo(msg); inputRef.current?.focus(); }} className="p-2 rounded-full bg-neutral-900/80 text-neutral-400 hover:text-white border border-neutral-800" title="Reply"><Reply size={14} /></button>
+                                                        <div className="relative">
+                                                            <button onClick={() => setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id)} className={`p-2 rounded-full bg-neutral-900/80 border border-neutral-800 transition-colors ${activeReactionPickerId === msg.id ? 'text-indigo-400 bg-indigo-900/20 border-indigo-500/50' : 'text-neutral-400 hover:text-white'}`} title="React"><SmilePlus size={14} /></button>
+                                                            {activeReactionPickerId === msg.id && (
+                                                                <div className={`absolute bottom-full mb-2 p-1.5 bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl flex gap-1 animate-in zoom-in-95 duration-200 z-50 ${isMe ? 'left-0' : 'right-0'}`}>
+                                                                    {REACTION_EMOJIS.map(emoji => (
+                                                                        <button key={emoji} onClick={() => toggleReaction(msg.id, emoji)} className="w-8 h-8 flex items-center justify-center text-lg hover:bg-neutral-800 rounded-lg transition-colors">{emoji}</button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </div>
-
-                                                    {/* Reply Action Button (Desktop Hover) */}
-                                                    <button 
-                                                        onClick={() => {
-                                                            setReplyingTo(msg);
-                                                            inputRef.current?.focus();
-                                                        }}
-                                                        className={`absolute top-1/2 -translate-y-1/2 p-2 rounded-full bg-neutral-900/80 text-neutral-400 hover:text-white border border-neutral-800 opacity-0 group-hover/bubble:opacity-100 transition-all z-20 ${
-                                                            isMe ? '-left-12' : '-right-12'
-                                                        }`}
-                                                        title="Reply"
-                                                    >
-                                                        <Reply size={14} />
-                                                    </button>
                                                 </div>
                                             </div>
                                         </div>
@@ -820,35 +721,8 @@ export const Inbox: React.FC = () => {
                                 })}
                                 <div ref={messagesEndRef} />
                             </div>
-                            
-                            {/* Typing Indicator Container (Above Input) */}
-                            {typingText && (
-                                <div className="px-6 py-1 text-[10px] text-indigo-400 font-bold uppercase tracking-wider animate-pulse bg-neutral-950/20 backdrop-blur-sm">
-                                    {typingText}
-                                </div>
-                            )}
-
-                            {/* Reply Preview Above Input */}
-                            {replyingTo && (
-                                <div className="mx-3 mt-1 px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-t-xl border-b-0 flex items-center justify-between animate-in slide-in-from-bottom-2">
-                                    <div className="flex-1 min-w-0 flex items-center gap-3">
-                                        <div className="p-1.5 bg-indigo-500/10 rounded-lg">
-                                            <CornerUpRight size={14} className="text-indigo-400" />
-                                        </div>
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="text-[10px] font-bold text-indigo-400 truncate uppercase tracking-tight">Replying to {replyingTo.senderName}</span>
-                                            <span className="text-xs text-neutral-500 truncate italic">{replyingTo.text}</span>
-                                        </div>
-                                    </div>
-                                    <button 
-                                        onClick={() => setReplyingTo(null)}
-                                        className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
-                                    >
-                                        <X size={14} />
-                                    </button>
-                                </div>
-                            )}
-
+                            {typingText && ( <div className="px-6 py-1 text-[10px] text-indigo-400 font-bold uppercase tracking-wider animate-pulse bg-neutral-950/20 backdrop-blur-sm">{typingText}</div> )}
+                            {replyingTo && ( <div className="mx-3 mt-1 px-4 py-2 bg-neutral-900 border border-neutral-800 rounded-t-xl border-b-0 flex items-center justify-between animate-in slide-in-from-bottom-2"><div className="flex-1 min-w-0 flex items-center gap-3"><div className="p-1.5 bg-indigo-500/10 rounded-lg"><CornerUpRight size={14} className="text-indigo-400" /></div><div className="flex flex-col min-w-0"><span className="text-[10px] font-bold text-indigo-400 truncate uppercase tracking-tight">Replying to {replyingTo.senderName}</span><span className="text-xs text-neutral-500 truncate italic">{replyingTo.text}</span></div></div><button onClick={() => setReplyingTo(null)} className="p-1.5 text-neutral-500 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"><X size={14} /></button></div> )}
                             <div className="p-3 bg-neutral-950 border-t border-neutral-900">
                                 <form onSubmit={handleSend} className={`flex gap-2 items-end bg-neutral-900 border border-neutral-800 px-2 py-2 focus-within:border-indigo-500/50 transition-colors ${replyingTo ? 'rounded-b-xl' : 'rounded-xl'}`}>
                                     <textarea ref={inputRef} value={inputText} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={`Message ${selectedChat.name}...`} rows={1} className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" style={{ minHeight: '40px' }} />
