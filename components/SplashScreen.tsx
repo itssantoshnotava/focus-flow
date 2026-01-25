@@ -23,13 +23,12 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       <div className="max-w-md w-full flex flex-col items-center animate-in fade-in zoom-in duration-700">
         
 {/* Logo */}
-<div className="mb-8">
-  <img
-    src="/logo.png"
-    alt="wishp"
-    className="w-24 h-24 rounded-3xl shadow-2xl shadow-indigo-900/30 rotate-3 hover:rotate-6 transition-transform"
-  />
-</div>
+<img
+  src="/logo.png"
+  alt="wishp"
+  className="w-20 h-20 mb-8 select-none"
+/>
+
 
 
         {/* Title & Tagline */}
