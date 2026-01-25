@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { 
     Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
-    LogOut, Save, Edit2, UserMinus, Loader2, X
+    LogOut, Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck
 } from 'lucide-react';
 
 interface ChatItem {
@@ -44,7 +44,11 @@ export const Inbox: React.FC = () => {
   // Data State
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number} | null>(null);
-  const [myFriends, setMyFriends] = useState<any[]>([]); 
+  const [myFriends, setMyFriends] = useState<any[]>([]);
+  
+  // Typing & Seen State
+  const [typingText, setTypingText] = useState('');
+  const [lastSeenMap, setLastSeenMap] = useState<Record<string, number>>({});
   
   // Inputs
   const [inputText, setInputText] = useState('');
@@ -64,17 +68,32 @@ export const Inbox: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Scroll & Typing Refs
   const isAutoScrollEnabled = useRef(true);
-  const lastChatIdRef = useRef<string | null>(null);
+  const isInitialLoadRef = useRef(false);
+  const typingTimeoutRef = useRef<number | null>(null);
 
   // Helper: DM Conversation ID
   const getDmConvoId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
 
-  // --- 0. Migration Helper (Run once to backfill userInboxes) ---
+  // Helper: Get Current Chat ID (Unified for DM/Group)
+  const currentChatId = useMemo(() => {
+    if (!user || !selectedChat) return null;
+    return selectedChat.type === 'dm' ? getDmConvoId(user.uid, selectedChat.id) : selectedChat.id;
+  }, [user, selectedChat]);
+
+  // Helper: Member Lookup for Group Avatars
+  const memberLookup = useMemo(() => {
+      const map: Record<string, any> = {};
+      groupMembersDetails.forEach(m => { map[m.uid] = m; });
+      return map;
+  }, [groupMembersDetails]);
+
+  // --- 0. Migration Helper ---
   const migrateLegacyData = async () => {
       if (!user) return;
-      // ... Legacy Migration logic ...
-      // Keeping it brief, assumes existing users are migrated or logic is same as before
+      // Legacy migration logic (omitted for brevity)
   };
 
   // --- 1. Real-time Inbox Listener ---
@@ -170,20 +189,30 @@ export const Inbox: React.FC = () => {
       }
   }, [user, viewMode, showAddMember]);
 
-  // --- 4. Messages Listener ---
+  // --- 4. Chat Reset on Switch ---
   useEffect(() => {
-      if (!user || !selectedChat) {
+      if (selectedChat) {
+          isInitialLoadRef.current = true; // Mark as initial load for scroll logic
+          setMessages([]); // Clear old messages instantly
+          setTypingText('');
+          setLastSeenMap({});
+          isAutoScrollEnabled.current = true;
+          
+          // Clear Unread
+          if (user) {
+              update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
+          }
+      }
+  }, [selectedChat?.id, user]);
+
+  // --- 5. Messages & Presence Listener ---
+  useEffect(() => {
+      if (!user || !selectedChat || !currentChatId) {
           setFriendPresence(null);
           return;
       }
-      
-      // Clear previous messages immediately to prevent scroll jumping on old content
-      setMessages([]);
 
-      const myInboxRef = ref(database, `userInboxes/${user.uid}/${selectedChat.id}`);
-      update(myInboxRef, { unreadCount: 0 });
-
-      let messagesPath = selectedChat.type === 'dm' ? `messages/${getDmConvoId(user.uid, selectedChat.id)}` : `groupMessages/${selectedChat.id}`;
+      let messagesPath = selectedChat.type === 'dm' ? `messages/${currentChatId}` : `groupMessages/${selectedChat.id}`;
       
       if (selectedChat.type === 'dm') {
           onValue(ref(database, `presence/${selectedChat.id}`), (snap) => setFriendPresence(snap.exists() ? snap.val() : null));
@@ -193,60 +222,121 @@ export const Inbox: React.FC = () => {
           if (snapshot.exists()) {
               const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
               setMessages(list);
+              
+              // Mark seen on new message arrival if chat is open
+              update(ref(database, `chatSeen/${currentChatId}/${user.uid}`), { timestamp: Date.now() });
           } else {
               setMessages([]);
           }
       });
       
+      // Focus Input
       setTimeout(() => inputRef.current?.focus(), 100);
-      return () => unsubMsg();
-  }, [user, selectedChat]);
 
-  // --- Auto Scroll Logic (Instant on Open, Smooth on New Message) ---
+      // --- Typing Listener ---
+      const typingRef = ref(database, `typing/${currentChatId}`);
+      const unsubTyping = onValue(typingRef, (snap) => {
+          if (snap.exists()) {
+              const data = snap.val();
+              const typers = Object.entries(data)
+                  .filter(([uid, isTyping]) => uid !== user.uid && isTyping === true)
+                  .map(([uid]) => uid);
+              
+              if (typers.length === 0) setTypingText('');
+              else if (selectedChat.type === 'dm') setTypingText('typing...');
+              else {
+                  if (typers.length === 1) {
+                      const name = groupMembersDetails.find(m => m.uid === typers[0])?.name || 'Someone';
+                      setTypingText(`${name} is typing...`);
+                  } else {
+                      setTypingText('Multiple people are typing...');
+                  }
+              }
+          } else {
+              setTypingText('');
+          }
+      });
+
+      // --- Last Seen Listener ---
+      const seenRef = ref(database, `chatSeen/${currentChatId}`);
+      // Mark initial seen
+      update(ref(database, `chatSeen/${currentChatId}/${user.uid}`), { timestamp: Date.now() });
+      
+      const unsubSeen = onValue(seenRef, (snap) => {
+          if (snap.exists()) {
+              const data = snap.val();
+              // Flatten structure if needed, currently assumes { uid: { timestamp: 123 } } or just { uid: 123 }
+              // Adjust based on write structure.
+              // We wrote: { timestamp: Date.now() }. So val is { uid: { timestamp: ... } }
+              const map: Record<string, number> = {};
+              Object.entries(data).forEach(([uid, val]: [string, any]) => {
+                   map[uid] = val.timestamp || val; 
+              });
+              setLastSeenMap(map);
+          }
+      });
+
+      return () => { unsubMsg(); unsubTyping(); unsubSeen(); };
+  }, [user, selectedChat, currentChatId, groupMembersDetails]);
+
+
+  // --- 6. Scroll Logic (LAYOUT EFFECT FOR INSTANT SCROLL) ---
   useLayoutEffect(() => {
-      if (!scrollContainerRef.current || !selectedChat) return;
+      if (!scrollContainerRef.current) return;
       const container = scrollContainerRef.current;
       
-      const isChatSwitch = selectedChat.id !== lastChatIdRef.current;
-      
-      if (isChatSwitch) {
-          // New Chat Session: If messages loaded, snap to bottom instantly
-          if (messages.length > 0) {
-              container.scrollTop = container.scrollHeight;
-              lastChatIdRef.current = selectedChat.id;
-              isAutoScrollEnabled.current = true;
-          }
-      } else {
-          // Same Chat: New message arrived
-          if (isAutoScrollEnabled.current) {
-              container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
-          }
+      // Instant jump on first load of messages
+      if (isInitialLoadRef.current && messages.length > 0) {
+          container.scrollTop = container.scrollHeight;
+          isInitialLoadRef.current = false; // Disable initial load flag
+      } 
+      // Smooth scroll for new messages if user is near bottom
+      else if (messages.length > 0 && isAutoScrollEnabled.current) {
+          container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
       }
-  }, [messages, selectedChat?.id]);
+  }, [messages, selectedChat?.id]); // Re-run when messages change or chat ID changes
 
   const handleScroll = () => {
       if (!scrollContainerRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-      // If user is near bottom (within 100px), enable auto-scroll for next message
+      // Enable auto-scroll only if near bottom (< 100px)
       isAutoScrollEnabled.current = (scrollHeight - scrollTop - clientHeight) < 100;
   };
 
   // --- Actions ---
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      setInputText(e.target.value);
+      if (!user || !currentChatId) return;
+
+      // Update typing status
+      update(ref(database, `typing/${currentChatId}/${user.uid}`), true);
+      
+      // Debounce clear
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = window.setTimeout(() => {
+          update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
+      }, 1500);
+  };
+
   const handleSend = async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
-      if (!inputText.trim() || !user || !selectedChat) return;
+      if (!inputText.trim() || !user || !selectedChat || !currentChatId) return;
+      
       const text = inputText.trim();
       const timestamp = Date.now();
       const msgData = { senderUid: user.uid, senderName: user.displayName || 'Unknown', text, timestamp };
 
-      // Force scroll to bottom when sending
+      // Force scroll
       isAutoScrollEnabled.current = true;
+      
+      // Clear typing
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
 
       if (selectedChat.type === 'dm') {
-          const convoId = getDmConvoId(user.uid, selectedChat.id);
           const friendUid = selectedChat.id;
-          await push(ref(database, `messages/${convoId}`), msgData);
-          await update(ref(database, `conversations/${convoId}`), { members: { [user.uid]: true, [friendUid]: true }, lastMessage: { ...msgData, seen: false } });
+          await push(ref(database, `messages/${currentChatId}`), msgData);
+          await update(ref(database, `conversations/${currentChatId}`), { members: { [user.uid]: true, [friendUid]: true }, lastMessage: { ...msgData, seen: false } });
           await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), { type: 'dm', name: selectedChat.name, photoURL: selectedChat.photoURL || null, lastMessage: msgData, lastMessageAt: timestamp });
           const friendInboxRef = ref(database, `userInboxes/${friendUid}/${user.uid}`);
           await runTransaction(friendInboxRef, (currentData) => {
@@ -346,7 +436,6 @@ export const Inbox: React.FC = () => {
   };
   const deleteGroup = async () => { 
       if(selectedChat && amIAdmin) {
-          // Logic to delete group for everyone (omitted for brevity, handled by UI cleanup mostly)
           await remove(ref(database, `groupChats/${selectedChat.id}`));
           setSelectedChat(null); 
       }
@@ -374,9 +463,32 @@ export const Inbox: React.FC = () => {
       navigate(`/profile/${targetUid}`);
   };
 
+  const renderMessageStatus = (msg: any) => {
+      if (msg.senderUid !== user?.uid) return null;
+      
+      let isSeen = false;
+      if (selectedChat?.type === 'dm') {
+          // DM: Seen if friend's lastSeen >= msg timestamp
+          // Friend's UID is selectedChat.id
+          const friendSeen = lastSeenMap[selectedChat.id];
+          isSeen = friendSeen >= msg.timestamp;
+      } else {
+          // Group: Seen if all other members seen
+          if (activeGroupData?.members) {
+              const otherMembers = Object.keys(activeGroupData.members).filter(id => id !== user?.uid);
+              const seenCount = otherMembers.filter(id => lastSeenMap[id] >= msg.timestamp).length;
+              isSeen = seenCount > 0; // Simple logic for groups: At least one person saw
+          }
+      }
+
+      return isSeen 
+        ? <CheckCheck size={14} className="text-indigo-400" />
+        : <Check size={14} className="text-neutral-500" />;
+  };
+
   return (
     <div className="flex h-full w-full bg-neutral-950">
-        {/* LIST - INCREASED WIDTH & SPACING */}
+        {/* LIST */}
         <div className={`w-full md:w-[350px] lg:w-[400px] border-r border-neutral-900 flex-none flex flex-col ${selectedChat ? 'hidden md:flex' : 'flex'}`}>
             <div className="p-4 border-b border-neutral-900 bg-neutral-950 flex justify-between items-center h-16 shrink-0">
                 {viewMode === 'list' ? (
@@ -470,14 +582,21 @@ export const Inbox: React.FC = () => {
                                     {selectedChat.type === 'group' ? ( (activeGroupData?.photoURL || selectedChat.photoURL) ? <img src={activeGroupData?.photoURL || selectedChat.photoURL} className="w-9 h-9 rounded-2xl bg-neutral-800 object-cover" /> : <div className="w-9 h-9 rounded-2xl bg-neutral-800 flex items-center justify-center"><Users size={16} className="text-neutral-500" /></div> ) : selectedChat.photoURL ? <img src={selectedChat.photoURL} className="w-9 h-9 rounded-full bg-neutral-800" /> : <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-sm font-bold text-white">{selectedChat.name.charAt(0)}</div>}
                                     {friendPresence && <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-neutral-950 ${friendPresence.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
                                 </button>
-                                <div className="flex flex-col"><span className="font-bold text-neutral-200 text-sm cursor-pointer hover:text-white transition-colors" onClick={(e) => selectedChat.type === 'dm' && goToProfile(e, selectedChat.id)}>{ (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }</span>{selectedChat.type === 'group' && <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span>}</div>
+                                <div className="flex flex-col">
+                                    <span className="font-bold text-neutral-200 text-sm cursor-pointer hover:text-white transition-colors" onClick={(e) => selectedChat.type === 'dm' && goToProfile(e, selectedChat.id)}>{ (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }</span>
+                                    {selectedChat.type === 'group' ? (
+                                        <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span>
+                                    ) : (
+                                        typingText && <span className="text-[10px] text-indigo-400 animate-pulse font-medium">{typingText}</span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                         {selectedChat.type === 'group' && <button onClick={() => setShowSettings(!showSettings)} className={`p-2 rounded-lg transition-colors ${showSettings ? 'bg-indigo-600 text-white' : 'text-neutral-500 hover:text-white'}`}><Settings size={20} /></button>}
                     </div>
 
                     {showSettings && activeGroupData ? (
-                        /* SETTINGS VIEW */
+                         /* SETTINGS VIEW (Keeping existing logic) */
                         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8 animate-in slide-in-from-right-4">
                              <div className="flex flex-col items-center gap-4">
                                    <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileChange} accept="image/*" />
@@ -502,24 +621,78 @@ export const Inbox: React.FC = () => {
                                     const isMe = msg.senderUid === user?.uid;
                                     const prevMsg = messages[idx - 1];
                                     const isChain = prevMsg && prevMsg.senderUid === msg.senderUid && (msg.timestamp - prevMsg.timestamp < 60000);
+                                    
+                                    // Resolve Sender Photo for Group Chat
+                                    let senderPhoto = null;
+                                    if (selectedChat.type === 'group' && !isMe) {
+                                        senderPhoto = memberLookup[msg.senderUid]?.photoURL;
+                                    } else if (selectedChat.type === 'dm' && !isMe) {
+                                        senderPhoto = selectedChat.photoURL;
+                                    }
+
                                     return (
-                                        <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'}`}>
-                                            {!isMe && !isChain && selectedChat.type === 'group' && <span className="text-[10px] text-neutral-500 ml-10 mb-0.5 cursor-pointer hover:text-neutral-300" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName}</span>}
-                                            <div className={`flex gap-2 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                                        <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-1' : 'mt-3'}`}>
+                                            {!isMe && !isChain && selectedChat.type === 'group' && (
+                                                <span className="text-[10px] text-neutral-500 ml-11 mb-1 cursor-pointer hover:text-neutral-300 transition-colors" onClick={() => navigate(`/profile/${msg.senderUid}`)}>
+                                                    {msg.senderName}
+                                                </span>
+                                            )}
+                                            
+                                            <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                                                {/* Avatar Area */}
                                                 <div className="w-8 flex-shrink-0 flex flex-col items-center">
-                                                    {!isMe && !isChain && ( selectedChat.type === 'group' ? <div className="w-8 h-8 rounded-full bg-indigo-900/50 flex items-center justify-center text-[10px] font-bold text-indigo-300 border border-indigo-500/20 cursor-pointer hover:opacity-80" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName?.charAt(0)}</div> : <div className="w-8 h-8 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-80" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{selectedChat.name.charAt(0)}</div> )}
+                                                    {!isMe && !isChain && (
+                                                        senderPhoto ? (
+                                                            <img 
+                                                                src={senderPhoto} 
+                                                                className="w-8 h-8 rounded-full object-cover cursor-pointer hover:opacity-80 transition-opacity bg-neutral-800"
+                                                                onClick={() => navigate(`/profile/${msg.senderUid}`)}
+                                                                alt={msg.senderName}
+                                                            />
+                                                        ) : (
+                                                            selectedChat.type === 'group' ? (
+                                                                <div className="w-8 h-8 rounded-full bg-indigo-900/30 flex items-center justify-center text-[10px] font-bold text-indigo-300 border border-indigo-500/20 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => navigate(`/profile/${msg.senderUid}`)}>
+                                                                    {msg.senderName?.charAt(0)}
+                                                                </div>
+                                                            ) : (
+                                                                <div className="w-8 h-8 rounded-full bg-indigo-600 text-[10px] flex items-center justify-center font-bold text-white cursor-pointer hover:opacity-80 transition-opacity" onClick={() => navigate(`/profile/${msg.senderUid}`)}>
+                                                                    {selectedChat.name.charAt(0)}
+                                                                </div>
+                                                            )
+                                                        )
+                                                    )}
                                                 </div>
-                                                <div className={`px-4 py-2 rounded-2xl text-sm break-words whitespace-pre-wrap leading-relaxed shadow-sm ${isMe ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-neutral-800 text-neutral-200 rounded-tl-sm'}`}>{msg.text}</div>
+
+                                                {/* Message Bubble */}
+                                                <div className={`px-3.5 py-1.5 rounded-2xl text-sm break-words whitespace-pre-wrap leading-relaxed shadow-sm ${
+                                                    isMe 
+                                                    ? 'bg-indigo-600 text-white rounded-tr-sm' 
+                                                    : 'bg-neutral-800 text-neutral-200 rounded-tl-sm'
+                                                }`}>
+                                                    {msg.text}
+                                                </div>
                                             </div>
-                                            <div className={`flex items-center gap-1 mt-1 px-11 ${isMe ? 'mr-0' : 'ml-0'}`}><span className="text-[10px] text-neutral-600">{formatTime(msg.timestamp)}</span></div>
+                                            
+                                            <div className={`flex items-center gap-1 mt-1 px-1 opacity-60 hover:opacity-100 transition-opacity ${isMe ? 'mr-1' : 'ml-12'}`}>
+                                                <span className="text-[10px] text-neutral-500">{formatTime(msg.timestamp)}</span>
+                                                {isMe && renderMessageStatus(msg)}
+                                            </div>
                                         </div>
                                     );
                                 })}
                                 <div ref={messagesEndRef} />
                             </div>
+                            
+                            {/* Typing Indicator Container (Above Input) */}
+                            {selectedChat.type === 'group' && typingText && (
+                                <div className="px-6 py-1 text-xs text-indigo-400 font-medium animate-pulse bg-neutral-950">
+                                    {typingText}
+                                </div>
+                            )}
+
                             <div className="p-3 bg-neutral-950 border-t border-neutral-900">
                                 <form onSubmit={handleSend} className="flex gap-2 items-end bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 focus-within:border-indigo-500/50 transition-colors">
-                                    <textarea ref={inputRef} value={inputText} onChange={e => setInputText(e.target.value)} onKeyDown={handleKeyDown} placeholder={`Message ${selectedChat.name}...`} rows={1} className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" style={{ minHeight: '40px' }} />
+                                    <textarea ref={inputRef} value={inputText} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={`Message ${selectedChat.name}...`} rows={1} className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" style={{ minHeight: '40px' }} />
                                     <button type="submit" disabled={!inputText.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:bg-neutral-800 text-white p-2.5 rounded-lg transition-colors mb-0.5"><Send size={16} /></button>
                                 </form>
                             </div>
