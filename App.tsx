@@ -1,6 +1,10 @@
 import React, { useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
+import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
+import { Inbox } from './components/Inbox';
+import { SearchPage } from './components/Search';
+import { NotificationsPage } from './components/Notifications';
 import { GroupStudy } from './components/GroupStudy';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
@@ -10,7 +14,6 @@ import { seedAccessCodes } from './utils/seeder';
 const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
 
-  // Run seeder once user is authenticated to avoid permission issues
   useEffect(() => {
     if (user && !loading) {
       seedAccessCodes();
@@ -36,7 +39,13 @@ const AppContent: React.FC = () => {
     <AccessGate>
       <HashRouter>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
+          <Route element={<Layout />}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/notifications" element={<NotificationsPage />} />
+          </Route>
+          
           <Route path="/group" element={<GroupStudy />} />
           <Route path="/group/:roomId" element={<GroupStudy />} />
         </Routes>
