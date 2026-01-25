@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Users, Plus, LogIn, LogOut } from 'lucide-react';
-import { ref, set, push, get, child, update } from "firebase/database";
+import { ref, set, push, get, child, update, onValue } from "firebase/database";
 import { database } from "../firebase";
 
 export const GroupStudy: React.FC = () => {
@@ -14,6 +14,22 @@ export const GroupStudy: React.FC = () => {
   const [userName, setUserName] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [isJoinMode, setIsJoinMode] = useState(false);
+  const [participants, setParticipants] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (roomId) {
+      const participantsRef = ref(database, `rooms/${roomId}/participants`);
+      const unsubscribe = onValue(participantsRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          setParticipants(Object.values(data));
+        } else {
+          setParticipants([]);
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, [roomId]);
 
   const handleCreateRoom = async () => {
     if (!userName.trim()) return;
@@ -87,6 +103,25 @@ export const GroupStudy: React.FC = () => {
              <p className="text-neutral-500 text-lg">
                 {mode === 'create' ? 'Room created successfully.' : mode === 'join' ? 'You joined the room.' : 'Welcome to the study room.'}
              </p>
+           </div>
+
+           {/* Participants List */}
+           <div className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 text-left">
+              <h3 className="text-neutral-500 text-xs font-medium uppercase tracking-wider mb-3">Participants</h3>
+              <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+                {participants.length > 0 ? (
+                  participants.map((p, index) => (
+                    <div key={index} className="flex items-center gap-3 p-2 bg-neutral-900 border border-neutral-800/50 rounded-lg">
+                      <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/20">
+                         {p.name ? p.name.charAt(0).toUpperCase() : '?'}
+                      </div>
+                      <span className="text-neutral-300 font-medium">{p.name || 'Unknown'}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-neutral-600 text-sm italic">Waiting for others...</div>
+                )}
+              </div>
            </div>
 
            <div className="pt-4">
