@@ -4,7 +4,7 @@ import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsLeaderboard } from './FriendsLeaderboard';
 import { EXAMS, getSubjectById } from '../constants';
-import { ProgressMap, Exam, UserProfile } from '../types';
+import { ProgressMap, Exam, UserProfile, StudySession } from '../types';
 import { Trophy, Flame, CalendarClock, Clock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimer } from '../contexts/TimerContext';
@@ -21,8 +21,8 @@ export const Dashboard: React.FC = () => {
     return saved ? JSON.parse(saved) : {};
   });
 
-  // --- State: User Profile Data (for Stream filtering) ---
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  // --- State: User Profile Data ---
+  const [userProfile, setUserProfile] = useState<any>(null);
 
   // --- Effects: Persistence ---
   useEffect(() => {
@@ -36,7 +36,7 @@ export const Dashboard: React.FC = () => {
               if (snap.exists()) setUserProfile(snap.val());
           });
       }
-  }, [user, isGuest]);
+  }, [user, isGuest, sessions]); // Refresh when sessions sync
 
   // --- Handlers ---
   const handleToggleProgress = useCallback((examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
@@ -76,20 +76,19 @@ export const Dashboard: React.FC = () => {
         totalHours: (totalSeconds / 3600).toFixed(1),
         todayHours: (todaySeconds / 3600).toFixed(1),
         weekHours: (weekSeconds / 3600).toFixed(1),
-        pomodoros
+        pomodoros,
+        streak: userProfile?.streaks?.current || 0
     };
-  }, [sessions]);
+  }, [sessions, userProfile]);
 
   // --- Filtered Exams Logic ---
   const filteredExams = useMemo(() => {
-      if (!userProfile) return EXAMS; // Default to all if loading or guest
+      if (!userProfile) return EXAMS;
       
       const { stream, selectedExams, selectedSubjects } = userProfile;
       const allExams = [...EXAMS];
-      const boards = allExams.find(e => e.id === 'boards')!;
 
       if (stream === 'Commerce') {
-          // Create custom commerce exam object
           const commerceExam: Exam = {
               id: 'boards-commerce',
               name: 'Class 12 Boards (Commerce)',
@@ -100,12 +99,10 @@ export const Dashboard: React.FC = () => {
       }
       
       if (stream === 'IIT') {
-          // Show Boards + JEE + BITSAT + VITEEE
           return allExams.filter(e => ['boards', 'jee', 'bitsat', 'viteee'].includes(e.id));
       }
 
       if (stream === 'PCM') {
-          // Boards + Selected
           const allowedIds = new Set(['boards', ...(selectedExams || [])]);
           return allExams.filter(e => allowedIds.has(e.id));
       }
@@ -123,21 +120,21 @@ export const Dashboard: React.FC = () => {
               <Timer />
 
               <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Flame size={12} className="text-orange-500" /> Today</span>
-                      <span className="text-2xl font-mono text-white">{stats.todayHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1 group hover:border-orange-500/30 transition-colors">
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Flame size={12} className="text-orange-500 group-hover:animate-pulse" /> Streak</span>
+                      <span className="text-2xl font-mono text-white">{stats.streak} <span className="text-xs text-neutral-600 font-sans">days</span></span>
                   </div>
                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><CalendarClock size={12} className="text-blue-500" /> Week</span>
-                      <span className="text-2xl font-mono text-white">{stats.weekHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Trophy size={12} className="text-yellow-500" /> Pomos</span>
+                      <span className="text-2xl font-mono text-white">{stats.pomodoros}</span>
                   </div>
                    <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Clock size={12} className="text-emerald-500" /> Total</span>
-                      <span className="text-2xl font-mono text-white">{stats.totalHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><CalendarClock size={12} className="text-blue-500" /> Week</span>
+                      <span className="text-2xl font-mono text-white">{stats.weekHours} <span className="text-xs text-neutral-600 font-sans">h</span></span>
                   </div>
                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Trophy size={12} className="text-yellow-500" /> Pomodoros</span>
-                      <span className="text-2xl font-mono text-white">{stats.pomodoros}</span>
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Clock size={12} className="text-emerald-500" /> Total</span>
+                      <span className="text-2xl font-mono text-white">{stats.totalHours} <span className="text-xs text-neutral-600 font-sans">h</span></span>
                   </div>
               </div>
 

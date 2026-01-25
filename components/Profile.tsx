@@ -8,7 +8,7 @@ import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { getZodiacSign } from '../utils/zodiac';
 import { 
   Camera, Edit2, Save, X, LogOut, Settings, 
-  MapPin, Calendar, Sparkles, Flame, User, ChevronRight
+  MapPin, Calendar, Sparkles, Flame, User, ChevronRight, Trophy
 } from 'lucide-react';
 
 export const Profile: React.FC = () => {
@@ -105,7 +105,6 @@ export const Profile: React.FC = () => {
         
         {/* MAIN PROFILE CARD */}
         <div className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-[32px] p-8 mb-6 shadow-2xl relative overflow-hidden">
-          {/* Subtle Inner Glow */}
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl"></div>
           
           <div className="flex flex-col items-center gap-8 relative z-10">
@@ -216,7 +215,7 @@ export const Profile: React.FC = () => {
                   <Flame size={24} className="text-orange-500 fill-orange-500" />
                 </div>
                 <div className="text-center">
-                  <div className="text-2xl font-black text-white leading-tight">{profileData.streak || 0}</div>
+                  <div className="text-2xl font-black text-white leading-tight">{profileData.streaks?.current || profileData.streak || 0}</div>
                   <div className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest">Day Streak</div>
                 </div>
               </div>
@@ -273,10 +272,24 @@ export const Profile: React.FC = () => {
         <div className="bg-white/[0.02] backdrop-blur-lg border border-white/[0.06] rounded-[32px] p-8 shadow-xl">
             <h3 className="text-[11px] font-black text-neutral-500 uppercase tracking-[0.2em] mb-8 flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-              Profile Details
+              Records & Stats
             </h3>
             
             <div className="space-y-6">
+                <div className="flex items-center justify-between group">
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 group-hover:text-indigo-400 transition-colors text-neutral-500">
+                          <Trophy size={20} />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Longest Streak</span>
+                          <span className="text-white font-semibold">{profileData.streaks?.longest || 0} Days</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="h-px bg-white/[0.04]"></div>
+
                 <div className="flex items-center justify-between group">
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 group-hover:text-indigo-400 transition-colors text-neutral-500">
@@ -296,22 +309,6 @@ export const Profile: React.FC = () => {
                                   {profileData.dob ? new Date(profileData.dob).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not shared'}
                               </span>
                           )}
-                        </div>
-                    </div>
-                </div>
-
-                <div className="h-px bg-white/[0.04]"></div>
-
-                <div className="flex items-center justify-between group">
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 group-hover:text-indigo-400 transition-colors text-neutral-500">
-                          <MapPin size={20} />
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Member Since</span>
-                          <span className="text-white font-semibold">
-                                {profileData.joinedAt ? new Date(profileData.joinedAt).getFullYear() : '2025'}
-                          </span>
                         </div>
                     </div>
                 </div>

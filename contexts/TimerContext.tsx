@@ -69,6 +69,67 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const intervalRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(Date.now());
 
+  // --- Streak Logic ---
+  const calculateStreak = useCallback((sessionList: StudySession[]) => {
+    const STREAK_THRESHOLD = 30 * 60; // 30 minutes in seconds
+    
+    // 1. Group total seconds by date
+    const dayTotals: Record<string, number> = {};
+    sessionList.forEach(s => {
+      const date = s.date.split('T')[0];
+      dayTotals[date] = (dayTotals[date] || 0) + s.duration;
+    });
+
+    // 2. Filter days that meet the threshold and sort descending
+    const activeDays = Object.keys(dayTotals)
+      .filter(date => dayTotals[date] >= STREAK_THRESHOLD)
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
+    if (activeDays.length === 0) return { current: 0, longest: 0 };
+
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+    // 3. Longest Streak calculation
+    let longest = 0;
+    let currentCount = 0;
+    const sortedAsc = [...activeDays].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    
+    if (sortedAsc.length > 0) {
+      currentCount = 1;
+      longest = 1;
+      for (let i = 1; i < sortedAsc.length; i++) {
+        const prev = new Date(sortedAsc[i - 1]);
+        const curr = new Date(sortedAsc[i]);
+        const diff = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+        if (Math.round(diff) === 1) {
+          currentCount++;
+        } else {
+          currentCount = 1;
+        }
+        longest = Math.max(longest, currentCount);
+      }
+    }
+
+    // 4. Current Streak calculation (Must include today or yesterday)
+    let currentStreak = 0;
+    if (activeDays[0] === today || activeDays[0] === yesterday) {
+      currentStreak = 1;
+      for (let i = 1; i < activeDays.length; i++) {
+        const curr = new Date(activeDays[i - 1]);
+        const prev = new Date(activeDays[i]);
+        const diff = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+        if (Math.round(diff) === 1) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    return { current: currentStreak, longest };
+  }, []);
+
   // --- Persistence Wrappers ---
   useEffect(() => {
     localStorage.setItem('focusflow_timer_mode', mode);
@@ -84,18 +145,24 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem('focusflow_sessions', JSON.stringify(sessions));
   }, [mode, isActive, seconds, initialTime, dailyTotal, sessions]);
 
-  // --- Sync Stats to Firebase ---
+  // --- Sync Stats & Streaks to Firebase ---
   useEffect(() => {
       if (user && !isGuest) {
-          // Calculate total stats from sessions to sync
+          const { current, longest } = calculateStreak(sessions);
+          
           let totalSeconds = 0;
           sessions.forEach(s => totalSeconds += s.duration);
           
           update(ref(database, `users/${user.uid}`), {
-              totalStudySeconds: totalSeconds
+              totalStudySeconds: totalSeconds,
+              streak: current, // For legacy Profile display
+              streaks: {
+                current,
+                longest
+              }
           }).catch(err => console.error("Failed to sync stats", err));
       }
-  }, [sessions, user, isGuest]);
+  }, [sessions, user, isGuest, calculateStreak]);
 
   // --- Session Management ---
   const saveSession = useCallback(() => {
@@ -163,7 +230,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   };
 
-  // --- Tick Logic (Restore on mount + Interval) ---
+  // --- Tick Logic ---
   useEffect(() => {
       const lastSavedTime = parseInt(localStorage.getItem('focusflow_last_tick') || '0');
       const wasActive = localStorage.getItem('focusflow_timer_active') === 'true';
@@ -172,7 +239,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const now = Date.now();
           const diff = Math.floor((now - lastSavedTime) / 1000);
           if (diff > 0) {
-              // Apply diff
               if (mode === TimerMode.STOPWATCH) {
                   setSeconds(s => s + diff);
                   setDailyTotal(d => d + diff);
@@ -180,7 +246,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   setSeconds(s => {
                       const next = s - diff;
                       if (next <= 0) {
-                          // Timer finished while away
                           setIsActive(false);
                           saveSession(); 
                           return 0;
@@ -206,7 +271,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           } else {
             if (prev <= 0) {
               setIsActive(false);
-              saveSession(); // Auto-complete
+              saveSession();
               return 0;
             }
             setDailyTotal(d => d + 1);
