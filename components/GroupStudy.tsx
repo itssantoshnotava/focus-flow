@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ArrowLeft, Users, Plus, LogIn, LogOut, Play, Pause, Clock } from 'lucide-react';
+import { ArrowLeft, Users, Plus, LogIn, LogOut, Play, Pause, Clock, Zap, Coffee, Settings, Check } from 'lucide-react';
 import { ref, set, push, get, child, update, onValue, onDisconnect, remove } from "firebase/database";
 import { database } from "../firebase";
 
@@ -10,6 +10,7 @@ export const GroupStudy: React.FC = () => {
   const location = useLocation();
   const mode = location.state?.mode; // 'create' | 'join'
   const myKey = location.state?.myKey;
+  const isHost = mode === 'create';
 
   // HOOKS MUST BE AT TOP LEVEL (Before any return statements)
   const [userName, setUserName] = useState('');
@@ -18,8 +19,22 @@ export const GroupStudy: React.FC = () => {
   const [participants, setParticipants] = useState<any[]>([]);
   
   // Timer State
-  const [timerState, setTimerState] = useState({ isRunning: false, startTime: 0, elapsed: 0 });
+  const [timerState, setTimerState] = useState({ 
+    isRunning: false, 
+    startTime: 0, 
+    elapsed: 0,
+    mode: 'stopwatch', // 'stopwatch' | '25/5' | '50/10' | 'custom'
+    phase: 'focus',    // 'focus' | 'break'
+    config: { focus: 25, break: 5 }
+  });
   const [displaySeconds, setDisplaySeconds] = useState(0);
+
+  // Custom Mode Inputs (Host Local State)
+  const [showCustom, setShowCustom] = useState(false);
+  const [customFocus, setCustomFocus] = useState(25);
+  const [customBreak, setCustomBreak] = useState(5);
+
+  const switchLock = useRef(false);
 
   // --- EFFECT: Fetch Participants & Timer Data ---
   useEffect(() => {
@@ -39,7 +54,15 @@ export const GroupStudy: React.FC = () => {
       const timerRef = ref(database, `rooms/${roomId}/timer`);
       const unsubTimer = onValue(timerRef, (snapshot) => {
         if (snapshot.exists()) {
-          setTimerState(snapshot.val());
+          const val = snapshot.val();
+          setTimerState({
+             isRunning: val.isRunning || false,
+             startTime: val.startTime || 0,
+             elapsed: val.elapsed || 0,
+             mode: val.mode || 'stopwatch',
+             phase: val.phase || 'focus',
+             config: val.config || { focus: 25, break: 5 }
+          });
         }
       });
 
@@ -50,18 +73,42 @@ export const GroupStudy: React.FC = () => {
     }
   }, [roomId]);
 
-  // --- EFFECT: Local Ticker ---
+  // --- EFFECT: Local Ticker & Auto-Switch Logic ---
   useEffect(() => {
     let interval: number;
     
     // Function to calculate and update display time
     const updateDisplay = () => {
-        if (timerState.isRunning) {
-            const now = Date.now();
-            const currentSession = Math.floor((now - timerState.startTime) / 1000);
-            setDisplaySeconds((timerState.elapsed || 0) + currentSession);
+        const now = Date.now();
+        const currentSession = timerState.isRunning ? Math.floor((now - timerState.startTime) / 1000) : 0;
+        const totalElapsed = (timerState.elapsed || 0) + currentSession;
+
+        if (timerState.mode === 'stopwatch') {
+            setDisplaySeconds(totalElapsed);
         } else {
-            setDisplaySeconds(timerState.elapsed || 0);
+            // Pomodoro Modes
+            const targetMin = timerState.phase === 'focus' ? timerState.config.focus : timerState.config.break;
+            const targetSec = targetMin * 60;
+            const remaining = Math.max(0, targetSec - totalElapsed);
+            
+            setDisplaySeconds(remaining);
+
+            // Host Logic: Auto-Switch Phase
+            if (isHost && remaining === 0 && timerState.isRunning && !switchLock.current) {
+                switchLock.current = true;
+                const nextPhase = timerState.phase === 'focus' ? 'break' : 'focus';
+                
+                // Update Firebase
+                update(ref(database, `rooms/${roomId}/timer`), {
+                    phase: nextPhase,
+                    startTime: Date.now(),
+                    elapsed: 0,
+                    // isRunning remains true
+                }).then(() => {
+                    // Unlock after 1s to prevent double-firing
+                    setTimeout(() => { switchLock.current = false; }, 1000);
+                });
+            }
         }
     };
 
@@ -69,10 +116,12 @@ export const GroupStudy: React.FC = () => {
 
     if (timerState.isRunning) {
       interval = window.setInterval(updateDisplay, 1000);
+    } else {
+        switchLock.current = false; // Reset lock if stopped
     }
 
     return () => clearInterval(interval);
-  }, [timerState]);
+  }, [timerState, isHost, roomId]);
 
   const handleCreateRoom = async () => {
     if (!userName.trim()) return;
@@ -95,12 +144,13 @@ export const GroupStudy: React.FC = () => {
 
         await set(roomRef, {
             host: userName,
-            isRunning: false, // Legacy field at root (optional/deprecated by timer node)
-            startTime: null,  // Legacy field at root
             timer: {          // New Shared Timer Node
                 isRunning: false,
                 startTime: 0,
-                elapsed: 0
+                elapsed: 0,
+                mode: 'stopwatch',
+                phase: 'focus',
+                config: { focus: 25, break: 5 }
             },
             participants: {
                 [newParticipantKey]: {
@@ -179,6 +229,24 @@ export const GroupStudy: React.FC = () => {
     }
   };
 
+  const setTimerMode = (mode: string, focus = 25, breakMins = 5) => {
+    if (!roomId) return;
+    update(ref(database, `rooms/${roomId}/timer`), {
+        mode: mode,
+        phase: 'focus',
+        elapsed: 0,
+        startTime: Date.now(),
+        isRunning: false,
+        config: { focus, break: breakMins }
+    });
+    if (mode !== 'custom') setShowCustom(false);
+  };
+
+  const applyCustomMode = () => {
+      setTimerMode('custom', customFocus, customBreak);
+      setShowCustom(false);
+  };
+
   const formatTime = (totalSeconds: number) => {
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
@@ -189,7 +257,8 @@ export const GroupStudy: React.FC = () => {
 
   // --- ROOM VIEW ---
   if (roomId) {
-    const isHost = mode === 'create';
+    const isPomodoro = timerState.mode !== 'stopwatch';
+    const isFocus = timerState.phase === 'focus';
 
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans flex flex-col items-center justify-center relative p-6 selection:bg-indigo-500/30">
@@ -207,30 +276,107 @@ export const GroupStudy: React.FC = () => {
            </div>
 
            {/* SHARED TIMER WIDGET */}
-           <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
-               {/* Glow Effect */}
-               <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none transition-opacity duration-700 ${timerState.isRunning ? 'opacity-100' : 'opacity-0'}`}></div>
+           <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 shadow-xl relative overflow-hidden transition-all duration-500">
+               {/* Glow Effect based on Phase */}
+               <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 rounded-full blur-3xl pointer-events-none transition-all duration-1000 ${
+                   timerState.isRunning 
+                     ? (isPomodoro && !isFocus ? 'bg-emerald-500/20' : 'bg-indigo-500/20')
+                     : 'opacity-0'
+               }`}></div>
 
                <div className="relative z-10 flex flex-col items-center gap-4">
+                   
+                   {/* Phase Badge */}
+                   {isPomodoro && (
+                       <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider flex items-center gap-2 border ${
+                           isFocus 
+                           ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' 
+                           : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                       }`}>
+                           {isFocus ? <Zap size={12} /> : <Coffee size={12} />}
+                           {isFocus ? 'Focus Phase' : 'Break Time'}
+                       </div>
+                   )}
+
                    <div className="text-6xl font-mono font-light tracking-tighter text-white tabular-nums">
                        {formatTime(displaySeconds)}
                    </div>
 
+                   {/* Main Timer Control */}
                    {isHost ? (
-                       <button 
-                           onClick={toggleTimer}
-                           className={`flex items-center gap-2 px-6 py-2.5 rounded-full font-medium transition-all ${
-                               timerState.isRunning 
-                               ? 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-700' 
-                               : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20'
-                           }`}
-                       >
-                           {timerState.isRunning ? <><Pause size={18} /> Pause Session</> : <><Play size={18} /> Start Session</>}
-                       </button>
+                       <div className="flex flex-col gap-4 w-full">
+                            <button 
+                                onClick={toggleTimer}
+                                className={`w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-medium transition-all ${
+                                    timerState.isRunning 
+                                    ? 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-700' 
+                                    : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20'
+                                }`}
+                            >
+                                {timerState.isRunning ? <><Pause size={18} /> Pause Timer</> : <><Play size={18} /> Start Timer</>}
+                            </button>
+
+                            {/* Mode Selector */}
+                            <div className="bg-neutral-950/50 p-1.5 rounded-lg grid grid-cols-4 gap-1">
+                                {[
+                                    { id: 'stopwatch', label: 'Clock', icon: Clock },
+                                    { id: '25/5', label: '25/5', icon: Zap },
+                                    { id: '50/10', label: '50/10', icon: Zap },
+                                    { id: 'custom', label: 'Set', icon: Settings },
+                                ].map((m) => (
+                                    <button
+                                        key={m.id}
+                                        onClick={() => m.id === 'custom' ? setShowCustom(!showCustom) : setTimerMode(m.id, m.id === '25/5' ? 25 : 50, m.id === '25/5' ? 5 : 10)}
+                                        className={`flex flex-col items-center justify-center py-2 rounded-md text-[10px] font-medium transition-all ${
+                                            (timerState.mode === m.id && m.id !== 'custom') || (m.id === 'custom' && showCustom)
+                                            ? 'bg-neutral-800 text-white shadow-sm' 
+                                            : 'text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800/50'
+                                        }`}
+                                    >
+                                        <m.icon size={14} className="mb-1" />
+                                        {m.label}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {/* Custom Mode Settings */}
+                            {showCustom && (
+                                <div className="flex items-center gap-2 bg-neutral-950 border border-neutral-800 p-2 rounded-lg animate-in slide-in-from-top-2">
+                                    <div className="flex-1">
+                                        <label className="text-[10px] text-neutral-500 uppercase font-bold ml-1">Focus</label>
+                                        <input 
+                                            type="number" 
+                                            value={customFocus} 
+                                            onChange={(e) => setCustomFocus(Number(e.target.value))}
+                                            className="w-full bg-neutral-900 border border-neutral-800 text-white text-sm px-2 py-1 rounded focus:outline-none focus:border-indigo-500" 
+                                        />
+                                    </div>
+                                    <div className="flex-1">
+                                        <label className="text-[10px] text-neutral-500 uppercase font-bold ml-1">Break</label>
+                                        <input 
+                                            type="number" 
+                                            value={customBreak} 
+                                            onChange={(e) => setCustomBreak(Number(e.target.value))}
+                                            className="w-full bg-neutral-900 border border-neutral-800 text-white text-sm px-2 py-1 rounded focus:outline-none focus:border-indigo-500" 
+                                        />
+                                    </div>
+                                    <button 
+                                        onClick={applyCustomMode}
+                                        className="mt-4 bg-indigo-600 hover:bg-indigo-500 text-white p-2 rounded-lg"
+                                    >
+                                        <Check size={16} />
+                                    </button>
+                                </div>
+                            )}
+                       </div>
                    ) : (
                        <div className="flex items-center gap-2 text-neutral-500 text-sm bg-neutral-950/50 px-3 py-1.5 rounded-full border border-neutral-800">
                            <Clock size={14} className={timerState.isRunning ? "text-indigo-400 animate-pulse" : ""} />
-                           <span>{timerState.isRunning ? "Session in progress" : "Timer paused by host"}</span>
+                           <span>
+                               {timerState.isRunning 
+                               ? (isPomodoro ? `${isFocus ? 'Focus' : 'Break'} time in progress` : "Session in progress") 
+                               : "Timer paused by host"}
+                           </span>
                        </div>
                    )}
                </div>
