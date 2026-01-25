@@ -29,20 +29,7 @@ const App: React.FC = () => {
     return { date: today, seconds: 0 };
   });
 
-  // --- Effects: Firebase Test ---
-useEffect(() => {
-  set(ref(database, "ping"), {
-    status: "connected",
-    time: Date.now()
-  })
-    .then(() => {
-      alert("PING SUCCESS");
-    })
-    .catch((err) => {
-      alert("PING FAIL: " + err.message);
-    });
-}, []);
-
+  
   // --- Effects: Persistence ---
   useEffect(() => {
     localStorage.setItem('focusflow_progress', JSON.stringify(progress));
