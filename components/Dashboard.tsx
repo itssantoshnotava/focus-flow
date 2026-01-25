@@ -142,11 +142,6 @@ export const Dashboard: React.FC = () => {
   // --- Effects: Sync Stats to Firebase ---
   useEffect(() => {
     if (user && !isGuest) {
-        // Debounce slightly to avoid excessive writes during rapid timer updates? 
-        // Actually handleAddStudyTime updates state every second, but sessions update less often.
-        // However, `stats` re-calculates on `sessions` change.
-        // `sessions` only changes when a session completes. 
-        // So this is efficient enough.
         const userStatsRef = ref(database, `users/${user.uid}`);
         update(userStatsRef, {
             totalStudySeconds: stats.rawTotalSeconds
@@ -155,13 +150,13 @@ export const Dashboard: React.FC = () => {
   }, [user, isGuest, stats.rawTotalSeconds]);
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30 flex flex-col">
       
       {/* Friends System Overlay */}
       {showFriends && <FriendsSystem onClose={() => setShowFriends(false)} />}
 
       {/* Top Navigation / Brand */}
-      <header className="border-b border-neutral-900/80 bg-neutral-950/50 backdrop-blur sticky top-0 z-50">
+      <header className="border-b border-neutral-900/80 bg-neutral-950/50 backdrop-blur sticky top-0 z-50 shrink-0">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-900/20">
@@ -219,13 +214,20 @@ export const Dashboard: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-7xl w-full mx-auto px-4 py-6 flex-1 flex flex-col min-h-0">
         
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:h-full">
           
-          {/* Left Column: Stats, Timer & Countdowns */}
-          <div className="lg:col-span-5 xl:col-span-4 flex flex-col gap-6">
+          {/* Left Column: Timer, Stats, Leaderboard */}
+          <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-4 lg:overflow-y-auto custom-scrollbar lg:pr-1 pb-4">
             
+            {/* Timer Widget */}
+            <Timer 
+              onAddStudyTime={handleAddStudyTime} 
+              dailyTotal={studyData.seconds} 
+              onSessionComplete={handleSessionComplete}
+            />
+
             {/* Stats Grid */}
             <div className="grid grid-cols-2 gap-3">
                 <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
@@ -254,39 +256,33 @@ export const Dashboard: React.FC = () => {
                 </div>
             </div>
 
-            {/* Timer Widget */}
-            <Timer 
-              onAddStudyTime={handleAddStudyTime} 
-              dailyTotal={studyData.seconds} 
-              onSessionComplete={handleSessionComplete}
-            />
-
-            {/* Friends Leaderboard (Visible only to logged in users) */}
+            {/* Friends Leaderboard */}
             {!isGuest && <FriendsLeaderboard />}
-
-            {/* Exam Countdowns Grid */}
-            <div>
-               <h3 className="text-neutral-500 text-xs uppercase font-medium tracking-wider mb-3">Exam Countdowns</h3>
-               <div className="grid grid-cols-2 gap-3">
-                  {EXAMS.map(exam => (
-                    <ExamCountdown 
-                      key={exam.id} 
-                      name={exam.name} 
-                      date={exam.date}
-                      sessions={exam.sessions}
-                    />
-                  ))}
-               </div>
-            </div>
           </div>
 
-          {/* Right Column: Syllabus Tracker */}
-          <div className="lg:col-span-7 xl:col-span-8 h-[calc(100vh-12rem)] min-h-[500px]">
-            <SyllabusTracker 
-              exams={EXAMS} 
-              progress={progress} 
-              onToggleProgress={handleToggleProgress} 
-            />
+          {/* Right Column: Exam Countdowns & Syllabus Tracker */}
+          <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-4 lg:h-full lg:overflow-hidden pb-4">
+            
+            {/* Exam Countdowns Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
+               {EXAMS.map(exam => (
+                 <ExamCountdown 
+                   key={exam.id} 
+                   name={exam.name} 
+                   date={exam.date}
+                   sessions={exam.sessions}
+                 />
+               ))}
+            </div>
+
+            {/* Syllabus Tracker */}
+            <div className="flex-1 min-h-[300px]">
+              <SyllabusTracker 
+                exams={EXAMS} 
+                progress={progress} 
+                onToggleProgress={handleToggleProgress} 
+              />
+            </div>
           </div>
 
         </div>
