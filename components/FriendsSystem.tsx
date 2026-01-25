@@ -30,7 +30,10 @@ export const FriendsSystem: React.FC<FriendsSystemProps> = ({ onClose }) => {
       if (snapshot.exists()) {
         const friendIds = Object.keys(snapshot.val());
         // Fetch details for each friend
-        const promises = friendIds.map(uid => get(ref(database, `users/${uid}`)).then(s => ({ uid, ...s.val() })));
+        const promises = friendIds.map(uid => get(ref(database, `users/${uid}`)).then(s => {
+             const val = s.val();
+             return { uid, name: val?.name, photoURL: val?.photoURL };
+        }));
         const friendsData = await Promise.all(promises);
         setFriends(friendsData.filter(f => f.name)); // Filter out potential nulls
       } else {
@@ -67,28 +70,40 @@ export const FriendsSystem: React.FC<FriendsSystemProps> = ({ onClose }) => {
     setLoading(true);
     try {
       const usersRef = ref(database, 'users');
+      // Ensure we fetch the latest user list
       const snapshot = await get(usersRef);
       
       if (snapshot.exists()) {
         const allUsers = snapshot.val();
+        
+        // FIX: Use Object.entries to preserve UID and map correctly
         const results = Object.entries(allUsers)
-          .map(([uid, data]: [string, any]) => ({ uid, ...data }))
+          .map(([uid, data]: [string, any]) => ({
+            uid,
+            name: data?.name,
+            photoURL: data?.photoURL
+          }))
           .filter(u => {
             // Filter conditions:
             // 1. Not myself
             // 2. Name matches query (case-insensitive)
             // 3. Not already a friend
+            // 4. Must have a valid name
             const isMe = u.uid === user.uid;
-            const matchesName = u.name?.toLowerCase().includes(searchQuery.toLowerCase());
+            const hasName = u.name && typeof u.name === 'string';
+            const matchesName = hasName && u.name.toLowerCase().includes(searchQuery.toLowerCase());
             const isFriend = friends.some(f => f.uid === u.uid);
+            
             return !isMe && matchesName && !isFriend;
           });
+          
         setSearchResults(results);
       } else {
         setSearchResults([]);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Search failed:", err);
+      setSearchResults([]);
     }
     setLoading(false);
   };
