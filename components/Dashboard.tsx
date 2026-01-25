@@ -11,13 +11,15 @@ import { FriendsLeaderboard } from './FriendsLeaderboard';
 import { Inbox } from './Inbox';
 import { EXAMS } from '../constants';
 import { ProgressMap, StudySession, TimerMode } from '../types';
-import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield, UserPlus, MessageCircle, Camera, Loader2 } from 'lucide-react';
+import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield, UserPlus, MessageCircle, Camera, Loader2, Home, Globe, User } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user, logout, isGuest } = useAuth();
+  
+  // Navigation State
   const [showFriends, setShowFriends] = useState(false);
   const [showInbox, setShowInbox] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -82,45 +84,26 @@ export const Dashboard: React.FC = () => {
     }
   }, [isGuest, user]);
 
-  // --- Effects: Unread Messages Listener for Badge ---
+  // --- Effects: Real-time Unread Badge Logic ---
   useEffect(() => {
       if(!user) return;
       
-      const getConvoId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
-
-      // Check friends to see if we have unread messages from them
-      const friendsRef = ref(database, `friends/${user.uid}`);
-      const unsub = onValue(friendsRef, async (snapshot) => {
-          if (!snapshot.exists()) {
-              setUnreadCount(0);
-              return;
-          }
-          
-          const friendIds = Object.keys(snapshot.val());
-          let count = 0;
-
-          // Note: In a production app, we would query conversations directly with an index.
-          // For this scale, iterating active friend convos is fine.
-          for (const fid of friendIds) {
-              const convoId = getConvoId(user.uid, fid);
-              const convoRef = ref(database, `conversations/${convoId}/lastMessage`);
-              
-              // We need a one-time check here, but realistically we should listen.
-              // To keep it simple and performant, we just listen to the conversations path once or assume 
-              // the Inbox component handles the detailed view. 
-              // For the dashboard badge, let's just do a simple check.
-              onValue(convoRef, (snap) => {
-                  const lastMsg = snap.val();
-                  if (lastMsg && lastMsg.senderUid !== user.uid && !lastMsg.seen) {
-                      setUnreadCount(prev => prev + 1); // This is a rough approximation for the demo
+      const inboxRef = ref(database, `userInboxes/${user.uid}`);
+      const unsub = onValue(inboxRef, (snapshot) => {
+          let totalUnread = 0;
+          if (snapshot.exists()) {
+              snapshot.forEach((child) => {
+                  const data = child.val();
+                  if (data.unreadCount) {
+                      totalUnread += data.unreadCount;
                   }
-              }, { onlyOnce: true });
+              });
           }
+          setUnreadCount(totalUnread);
       });
 
       return () => unsub();
   }, [user]);
-
 
   // --- Effects: Persistence ---
   useEffect(() => {
@@ -250,195 +233,237 @@ export const Dashboard: React.FC = () => {
     }
   }, [user, isGuest, stats.rawTotalSeconds]);
 
+  // --- UI Components ---
+  const NavItem = ({ icon: Icon, label, active, onClick, badge }: { icon: any, label: string, active?: boolean, onClick: () => void, badge?: number }) => (
+    <button 
+        onClick={onClick} 
+        className={`relative p-3 rounded-xl transition-all group ${active ? 'bg-neutral-800' : 'hover:bg-neutral-900'}`}
+        title={label}
+    >
+        <Icon size={24} className={active ? "text-indigo-500" : "text-neutral-500 group-hover:text-neutral-300 transition-colors"} />
+        {badge !== undefined && badge > 0 && (
+            <span className="absolute top-2 right-2 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-neutral-950 animate-in zoom-in">
+                {badge > 99 ? '99' : badge}
+            </span>
+        )}
+        <span className="sr-only">{label}</span>
+    </button>
+  );
+
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30 flex flex-col">
+    <div className="flex h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30 overflow-hidden">
       
       {/* Modals */}
       {showFriends && <FriendsSystem onClose={() => setShowFriends(false)} />}
       {showInbox && <Inbox onClose={() => setShowInbox(false)} />}
 
-      {/* Top Navigation / Brand */}
-      <header className="border-b border-neutral-900/80 bg-neutral-950/50 backdrop-blur sticky top-0 z-50 shrink-0">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-900/20">
-                <LayoutDashboard size={18} className="text-white" />
-             </div>
-             <h1 className="font-bold text-xl tracking-tight text-white">FocusFlow</h1>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            
-            {!isGuest && (
-               <>
-                  <button 
-                      onClick={() => setShowInbox(true)}
-                      className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all relative"
-                  >
-                      <MessageCircle size={14} />
-                      <span className="hidden sm:inline">Inbox</span>
-                      {unreadCount > 0 && (
-                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
-                      )}
-                  </button>
+      {/* --- LEFT SIDEBAR (Desktop) --- */}
+      <aside className="hidden md:flex w-20 flex-col items-center py-6 border-r border-neutral-900 bg-neutral-950 z-50 shrink-0">
+        
+        {/* Brand */}
+        <div className="mb-8">
+           <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/20">
+              <LayoutDashboard size={20} className="text-white" />
+           </div>
+        </div>
 
-                  <button 
-                      onClick={() => setShowFriends(true)}
-                      className="hidden sm:flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
-                  >
-                      <UserPlus size={14} />
-                      <span>Friends</span>
-                  </button>
-               </>
+        {/* Navigation */}
+        <div className="flex flex-col gap-4 flex-1 w-full items-center">
+           <NavItem 
+              icon={Home} 
+              label="Home" 
+              active={!showInbox && !showFriends} 
+              onClick={() => {setShowInbox(false); setShowFriends(false);}} 
+           />
+           {!isGuest && (
+             <>
+               <NavItem 
+                  icon={MessageCircle} 
+                  label="Inbox" 
+                  badge={unreadCount} 
+                  active={showInbox} 
+                  onClick={() => setShowInbox(true)} 
+               />
+               <NavItem 
+                  icon={Users} 
+                  label="Friends" 
+                  active={showFriends} 
+                  onClick={() => setShowFriends(true)} 
+               />
+             </>
+           )}
+           <NavItem 
+              icon={Globe} 
+              label="Group Study" 
+              onClick={() => navigate('/group')} 
+           />
+        </div>
+
+        {/* Bottom Actions */}
+        <div className="mt-auto flex flex-col gap-4 items-center">
+            {/* Profile / Upload */}
+            {!isGuest && (
+               <div className="relative group">
+                   <input 
+                      type="file" 
+                      ref={profileInputRef} 
+                      onChange={handleProfileUpload} 
+                      className="hidden" 
+                      accept="image/*"
+                   />
+                   <button 
+                      className="relative cursor-pointer w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-800 hover:border-neutral-600 transition-colors overflow-hidden"
+                      onClick={() => profileInputRef.current?.click()}
+                      title="Change Profile Picture"
+                   >
+                       {profileImage ? (
+                         <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
+                       ) : (
+                         <div className="text-xs font-bold text-neutral-400">
+                           {user?.displayName?.charAt(0) || <User size={16} />}
+                         </div>
+                       )}
+                       
+                       {/* Upload Indicator */}
+                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                           <Camera size={14} className="text-white" />
+                       </div>
+                       
+                       {/* Loader */}
+                       {isUploadingProfile && (
+                           <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
+                               <Loader2 size={14} className="text-indigo-400 animate-spin" />
+                           </div>
+                       )}
+                   </button>
+               </div>
             )}
 
-             <button 
-                onClick={() => navigate('/group')}
-                className="hidden sm:flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+            <button 
+                onClick={() => logout()}
+                className="p-3 text-neutral-600 hover:text-red-400 transition-colors rounded-xl hover:bg-neutral-900"
+                title={isGuest ? "Exit Guest Mode" : "Sign Out"}
             >
-                <Users size={14} />
-                <span>Group Study</span>
+                <LogOut size={20} />
             </button>
-            
-            <div className="h-6 w-[1px] bg-neutral-800 mx-1 hidden sm:block"></div>
-
-            <div className="flex items-center gap-3">
-               {isGuest && (
-                 <div className="flex items-center gap-1.5 bg-neutral-800/50 border border-neutral-700/50 text-neutral-400 px-2 py-1 rounded text-xs">
-                    <Shield size={10} />
-                    <span>Guest Mode</span>
-                 </div>
-               )}
-               
-               {/* User Avatar with Upload */}
-               {!isGuest ? (
-                   <div className="relative group">
-                       <input 
-                          type="file" 
-                          ref={profileInputRef} 
-                          onChange={handleProfileUpload} 
-                          className="hidden" 
-                          accept="image/*"
-                       />
-                       
-                       <div 
-                          className="relative cursor-pointer"
-                          onClick={() => profileInputRef.current?.click()}
-                          title="Change Profile Picture"
-                       >
-                           {profileImage ? (
-                             <img src={profileImage} alt="Profile" className="w-8 h-8 rounded-full border border-neutral-800 object-cover" />
-                           ) : (
-                             <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold text-white border border-neutral-800">
-                               {user?.displayName?.charAt(0) || 'U'}
-                             </div>
-                           )}
-                           
-                           {/* Hover Overlay */}
-                           <div className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                               <Camera size={12} className="text-white" />
-                           </div>
-
-                           {/* Loading Overlay */}
-                           {isUploadingProfile && (
-                               <div className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center z-10">
-                                   <Loader2 size={12} className="text-indigo-400 animate-spin" />
-                               </div>
-                           )}
-                       </div>
-                   </div>
-               ) : (
-                 <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-bold text-neutral-500 border border-neutral-800">
-                   G
-                 </div>
-               )}
-
-               <span className="text-sm font-medium text-white hidden md:block">{user?.displayName?.split(' ')[0]}</span>
-               <button 
-                  onClick={() => logout()}
-                  className="p-1.5 text-neutral-500 hover:text-white transition-colors"
-                  title={isGuest ? "Exit Guest Mode" : "Sign Out"}
-               >
-                 <LogOut size={16} />
-               </button>
-            </div>
-          </div>
         </div>
-      </header>
+      </aside>
 
-      <main className="max-w-7xl w-full mx-auto px-4 py-6 flex-1 flex flex-col min-h-0">
-        
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:h-full">
+
+      {/* --- MAIN CONTENT AREA --- */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-neutral-950 relative custom-scrollbar">
+        <div className="max-w-7xl w-full mx-auto px-4 py-8 pb-24 md:pb-8 flex-1 flex flex-col">
           
-          {/* Left Column: Timer, Stats, Leaderboard */}
-          <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-4 lg:overflow-y-auto custom-scrollbar lg:pr-1 pb-4">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:h-full">
             
-            {/* Timer Widget */}
-            <Timer 
-              onAddStudyTime={handleAddStudyTime} 
-              dailyTotal={studyData.seconds} 
-              onSessionComplete={handleSessionComplete}
-            />
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-2 gap-3">
-                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                        <Flame size={12} className="text-orange-500" /> Today
-                    </span>
-                    <span className="text-2xl font-mono text-white">{stats.todayHours} <span className="text-xs text-neutral-600">hrs</span></span>
-                </div>
-                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                        <CalendarClock size={12} className="text-blue-500" /> Week
-                    </span>
-                    <span className="text-2xl font-mono text-white">{stats.weekHours} <span className="text-xs text-neutral-600">hrs</span></span>
-                </div>
-                 <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                        <Clock size={12} className="text-emerald-500" /> Total
-                    </span>
-                    <span className="text-2xl font-mono text-white">{stats.totalHours} <span className="text-xs text-neutral-600">hrs</span></span>
-                </div>
-                <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                    <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
-                        <Trophy size={12} className="text-yellow-500" /> Pomodoros
-                    </span>
-                    <span className="text-2xl font-mono text-white">{stats.pomodoros}</span>
-                </div>
-            </div>
-
-            {/* Friends Leaderboard */}
-            {!isGuest && <FriendsLeaderboard />}
-          </div>
-
-          {/* Right Column: Exam Countdowns & Syllabus Tracker */}
-          <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-4 lg:h-full lg:overflow-hidden pb-4">
-            
-            {/* Exam Countdowns Grid */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
-               {EXAMS.map(exam => (
-                 <ExamCountdown 
-                   key={exam.id} 
-                   name={exam.name} 
-                   date={exam.date}
-                   sessions={exam.sessions}
-                 />
-               ))}
-            </div>
-
-            {/* Syllabus Tracker */}
-            <div className="flex-1 min-h-[300px]">
-              <SyllabusTracker 
-                exams={EXAMS} 
-                progress={progress} 
-                onToggleProgress={handleToggleProgress} 
+            {/* Left Column: Timer, Stats, Leaderboard */}
+            <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-4">
+              
+              {/* Timer Widget */}
+              <Timer 
+                onAddStudyTime={handleAddStudyTime} 
+                dailyTotal={studyData.seconds} 
+                onSessionComplete={handleSessionComplete}
               />
-            </div>
-          </div>
 
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                          <Flame size={12} className="text-orange-500" /> Today
+                      </span>
+                      <span className="text-2xl font-mono text-white">{stats.todayHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                  </div>
+                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                          <CalendarClock size={12} className="text-blue-500" /> Week
+                      </span>
+                      <span className="text-2xl font-mono text-white">{stats.weekHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                  </div>
+                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                          <Clock size={12} className="text-emerald-500" /> Total
+                      </span>
+                      <span className="text-2xl font-mono text-white">{stats.totalHours} <span className="text-xs text-neutral-600">hrs</span></span>
+                  </div>
+                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
+                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5">
+                          <Trophy size={12} className="text-yellow-500" /> Pomodoros
+                      </span>
+                      <span className="text-2xl font-mono text-white">{stats.pomodoros}</span>
+                  </div>
+              </div>
+
+              {/* Friends Leaderboard */}
+              {!isGuest && <FriendsLeaderboard />}
+            </div>
+
+            {/* Right Column: Exam Countdowns & Syllabus Tracker */}
+            <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-4">
+              
+              {/* Exam Countdowns Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
+                 {EXAMS.map(exam => (
+                   <ExamCountdown 
+                     key={exam.id} 
+                     name={exam.name} 
+                     date={exam.date}
+                     sessions={exam.sessions}
+                   />
+                 ))}
+              </div>
+
+              {/* Syllabus Tracker */}
+              <div className="flex-1 min-h-[300px]">
+                <SyllabusTracker 
+                  exams={EXAMS} 
+                  progress={progress} 
+                  onToggleProgress={handleToggleProgress} 
+                />
+              </div>
+            </div>
+
+          </div>
         </div>
       </main>
+
+      {/* --- BOTTOM NAV (Mobile) --- */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-20 bg-neutral-950 border-t border-neutral-900 flex items-center justify-around z-50 pb-2 px-2">
+         <NavItem 
+            icon={Home} 
+            label="Home" 
+            active={!showInbox && !showFriends} 
+            onClick={() => {setShowInbox(false); setShowFriends(false);}} 
+         />
+         {!isGuest && (
+           <>
+             <NavItem 
+                icon={MessageCircle} 
+                label="Inbox" 
+                badge={unreadCount} 
+                active={showInbox} 
+                onClick={() => setShowInbox(true)} 
+             />
+             <NavItem 
+                icon={Users} 
+                label="Friends" 
+                active={showFriends} 
+                onClick={() => setShowFriends(true)} 
+             />
+           </>
+         )}
+         <NavItem 
+            icon={Globe} 
+            label="Group" 
+            onClick={() => navigate('/group')} 
+         />
+         <button 
+             onClick={() => logout()}
+             className="relative p-3 rounded-xl transition-all text-neutral-500 hover:text-white"
+         >
+             <LogOut size={24} />
+         </button>
+      </nav>
 
     </div>
   );
