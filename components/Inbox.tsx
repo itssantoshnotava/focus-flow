@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ref, onValue, push, update, get, set, remove, runTransaction } from "firebase/database";
+import { ref, onValue, push, update, get, set, remove, runTransaction, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
@@ -124,7 +124,7 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       }
   };
 
-  // --- 1. Real-time Inbox Listener ---
+  // --- 1. Real-time Inbox Listener (Refactored for Instant Updates) ---
   useEffect(() => {
     if (!user) return;
     
@@ -134,32 +134,57 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
     get(inboxRef).then((snap) => {
         if (!snap.exists()) {
             migrateLegacyData();
-        }
-    });
-
-    const unsub = onValue(inboxRef, (snapshot) => {
-        if (snapshot.exists()) {
-            const data = snapshot.val();
-            const list: ChatItem[] = Object.entries(data).map(([key, val]: [string, any]) => ({
-                id: key,
-                type: val.type,
-                name: val.name,
-                photoURL: val.photoURL,
-                lastMessage: val.lastMessage,
-                timestamp: val.lastMessageAt || 0,
-                unreadCount: val.unreadCount || 0
-            }));
-            
-            // Sort by latest message
-            list.sort((a, b) => b.timestamp - a.timestamp);
-            setChats(list);
         } else {
-            setChats([]);
+            setLoading(false);
         }
-        setLoading(false);
     });
 
-    return () => unsub();
+    const handleInboxUpdate = (snapshot: any) => {
+        const val = snapshot.val();
+        const key = snapshot.key;
+        if (!key || !val) return;
+
+        const newItem: ChatItem = {
+            id: key,
+            type: val.type,
+            name: val.name,
+            photoURL: val.photoURL,
+            lastMessage: val.lastMessage,
+            timestamp: val.lastMessageAt || 0,
+            unreadCount: val.unreadCount || 0
+        };
+
+        setChats(prev => {
+            const existingIdx = prev.findIndex(c => c.id === key);
+            let newChats = [...prev];
+            
+            if (existingIdx >= 0) {
+                newChats[existingIdx] = newItem;
+            } else {
+                newChats.push(newItem);
+            }
+            
+            // Auto-sort by timestamp descending
+            return newChats.sort((a, b) => b.timestamp - a.timestamp);
+        });
+        setLoading(false);
+    };
+
+    const handleInboxRemove = (snapshot: any) => {
+        const key = snapshot.key;
+        if (!key) return;
+        setChats(prev => prev.filter(c => c.id !== key));
+    };
+
+    const unsubAdded = onChildAdded(inboxRef, handleInboxUpdate);
+    const unsubChanged = onChildChanged(inboxRef, handleInboxUpdate);
+    const unsubRemoved = onChildRemoved(inboxRef, handleInboxRemove);
+
+    return () => {
+        unsubAdded();
+        unsubChanged();
+        unsubRemoved();
+    };
   }, [user]);
 
   // --- 2. Active Group Details ---
@@ -279,7 +304,6 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
           });
 
           // 3. Update My Inbox (No unread increment)
-          // We assume selectedChat.name/photo is correct for the friend
           await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), {
               type: 'dm',
               name: selectedChat.name,
@@ -324,7 +348,6 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
 
           // 3. Fan-out to all members
           // Need to fetch members first to know who to update
-          // We can use activeGroupData if available, else fetch
           let membersToUpdate: string[] = [];
           if (activeGroupData?.members) {
               membersToUpdate = Object.keys(activeGroupData.members);
@@ -333,24 +356,20 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
               if (snap.exists()) membersToUpdate = Object.keys(snap.val());
           }
 
-          // Update each member's inbox
+          // Update each member's inbox (lastMessage & timestamp)
           const updates: Record<string, any> = {};
           membersToUpdate.forEach(uid => {
              const basePath = `userInboxes/${uid}/${groupId}`;
-             // Base update
              updates[`${basePath}/lastMessage`] = msgData;
              updates[`${basePath}/lastMessageAt`] = timestamp;
-             // Ensure metadata is consistent
              updates[`${basePath}/type`] = 'group';
-             updates[`${basePath}/name`] = selectedChat.name; // Keep group name fresh
+             updates[`${basePath}/name`] = selectedChat.name; 
              if (selectedChat.photoURL) updates[`${basePath}/photoURL`] = selectedChat.photoURL;
           });
 
           await update(ref(database), updates);
 
-          // Increment unread count for OTHERS (Transaction safer, but fan-out transaction is hard)
-          // For simplicity/performance in this architecture, we iterate transactions or individual updates
-          // Let's iterate transactions for correctness of unreadCount
+          // Increment unread count for OTHERS
           await Promise.all(membersToUpdate.map(uid => {
               if (uid === user.uid) return Promise.resolve(); // Don't increment for self
               return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => {
