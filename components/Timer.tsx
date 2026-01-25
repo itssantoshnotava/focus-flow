@@ -56,7 +56,8 @@ export const Timer: React.FC<TimerProps> = ({ onAddStudyTime, dailyTotal, onSess
   // Handle mode switching
   useEffect(() => {
     resetTimer();
-  }, [mode, resetTimer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   // Timer Tick
   useEffect(() => {

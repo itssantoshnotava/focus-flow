@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ref, set } from "firebase/database";
 import { database } from "../firebase";
@@ -7,12 +7,12 @@ import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { EXAMS } from '../constants';
 import { ProgressMap, StudySession, TimerMode } from '../types';
-import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut } from 'lucide-react';
+import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, isGuest } = useAuth();
 
   // --- State: Syllabus Progress ---
   const [progress, setProgress] = useState<ProgressMap>(() => {
@@ -37,13 +37,16 @@ export const Dashboard: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // --- Effects: Firebase Test ---
+  // --- Effects: Firebase Test (Skip for guest) ---
   useEffect(() => {
-    set(ref(database, "ping"), {
-      status: "connected",
-      time: Date.now()
-    });
-  }, []);
+    if (!isGuest) {
+        set(ref(database, "ping"), {
+          status: "connected",
+          time: Date.now(),
+          uid: user?.uid
+        });
+    }
+  }, [isGuest, user]);
 
   // --- Effects: Persistence ---
   useEffect(() => {
@@ -59,7 +62,7 @@ export const Dashboard: React.FC = () => {
   }, [sessions]);
 
   // --- Handlers ---
-  const handleToggleProgress = (examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
+  const handleToggleProgress = useCallback((examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
     const key = `${examId}-${subjectId}-${chapterId}`;
     setProgress(prev => ({
       ...prev,
@@ -68,9 +71,9 @@ export const Dashboard: React.FC = () => {
         [type]: !prev[key]?.[type]
       }
     }));
-  };
+  }, []);
 
-  const handleAddStudyTime = (addedSeconds: number) => {
+  const handleAddStudyTime = useCallback((addedSeconds: number) => {
     const today = new Date().toISOString().split('T')[0];
     setStudyData(prev => {
       if (prev.date !== today) {
@@ -78,9 +81,9 @@ export const Dashboard: React.FC = () => {
       }
       return { ...prev, seconds: prev.seconds + addedSeconds };
     });
-  };
+  }, []);
 
-  const handleSessionComplete = (sessionData: { duration: number; mode: TimerMode; completed: boolean }) => {
+  const handleSessionComplete = useCallback((sessionData: { duration: number; mode: TimerMode; completed: boolean }) => {
     const newSession: StudySession = {
         id: crypto.randomUUID(),
         date: new Date().toISOString(),
@@ -89,7 +92,7 @@ export const Dashboard: React.FC = () => {
         completed: sessionData.completed
     };
     setSessions(prev => [...prev, newSession]);
-  };
+  }, []);
 
   // --- Stats Calculation ---
   const stats = useMemo(() => {
@@ -157,18 +160,24 @@ export const Dashboard: React.FC = () => {
             <div className="h-6 w-[1px] bg-neutral-800 mx-1 hidden sm:block"></div>
 
             <div className="flex items-center gap-3">
+               {isGuest && (
+                 <div className="flex items-center gap-1.5 bg-neutral-800/50 border border-neutral-700/50 text-neutral-400 px-2 py-1 rounded text-xs">
+                    <Shield size={10} />
+                    <span>Guest Mode</span>
+                 </div>
+               )}
                {user?.photoURL ? (
                  <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-neutral-800" />
                ) : (
                  <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold text-white">
-                   {user?.displayName?.charAt(0) || 'U'}
+                   {user?.displayName?.charAt(0) || 'G'}
                  </div>
                )}
                <span className="text-sm font-medium text-white hidden md:block">{user?.displayName?.split(' ')[0]}</span>
                <button 
                   onClick={() => logout()}
                   className="p-1.5 text-neutral-500 hover:text-white transition-colors"
-                  title="Sign Out"
+                  title={isGuest ? "Exit Guest Mode" : "Sign Out"}
                >
                  <LogOut size={16} />
                </button>
