@@ -1,10 +1,68 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Users, Plus, LogIn } from 'lucide-react';
+import { ref, set, push, get, child } from "firebase/database";
+import { database } from "../firebase";
 
 export const GroupStudy: React.FC = () => {
   const navigate = useNavigate();
   const [userName, setUserName] = useState('');
+  const [roomCodeInput, setRoomCodeInput] = useState('');
+
+  const handleCreateRoom = async () => {
+    if (!userName.trim()) return;
+
+    // Generate random 6-character code
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let roomCode = '';
+    for (let i = 0; i < 6; i++) {
+      roomCode += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+
+    const roomRef = ref(database, `rooms/${roomCode}`);
+    const participantsRef = ref(database, `rooms/${roomCode}/participants`);
+    const newParticipantKey = push(participantsRef).key;
+
+    if (newParticipantKey) {
+        await set(roomRef, {
+            host: userName,
+            isRunning: false,
+            startTime: null,
+            participants: {
+                [newParticipantKey]: {
+                    name: userName,
+                    joinedAt: Date.now()
+                }
+            }
+        });
+        navigate(`/group/${roomCode}`);
+    }
+  };
+
+  const handleJoinRoom = async () => {
+    if (!userName.trim() || !roomCodeInput.trim()) return;
+
+    const dbRef = ref(database);
+    const code = roomCodeInput.trim();
+
+    try {
+        const snapshot = await get(child(dbRef, `rooms/${code}`));
+        if (snapshot.exists()) {
+             const participantsRef = ref(database, `rooms/${code}/participants`);
+             const newParticipantKey = push(participantsRef).key;
+             
+             if (newParticipantKey) {
+                 await set(ref(database, `rooms/${code}/participants/${newParticipantKey}`), {
+                     name: userName,
+                     joinedAt: Date.now()
+                 });
+                 navigate(`/group/${code}`);
+             }
+        }
+    } catch (error) {
+        console.error("Error joining room:", error);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans flex flex-col items-center justify-center relative p-6 selection:bg-indigo-500/30">
@@ -41,12 +99,29 @@ export const GroupStudy: React.FC = () => {
                 />
             </div>
 
+            <div className="space-y-2">
+                <label className="text-xs font-medium text-neutral-500 ml-1 uppercase tracking-wide">Room Code (To Join)</label>
+                <input 
+                    type="text" 
+                    value={roomCodeInput}
+                    onChange={(e) => setRoomCodeInput(e.target.value)}
+                    placeholder="Enter room code"
+                    className="w-full bg-neutral-900/50 border border-neutral-800 text-white px-4 py-3.5 rounded-xl focus:outline-none focus:border-indigo-500/50 focus:bg-neutral-900 transition-all placeholder:text-neutral-700"
+                />
+            </div>
+
             <div className="grid grid-cols-2 gap-3 pt-2">
-                <button className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3.5 rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-[0.98]">
+                <button 
+                    onClick={handleCreateRoom}
+                    className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3.5 rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-[0.98]"
+                >
                     <Plus size={18} />
                     <span>Create Room</span>
                 </button>
-                <button className="flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium py-3.5 rounded-xl border border-neutral-700 hover:border-neutral-600 transition-all active:scale-[0.98]">
+                <button 
+                    onClick={handleJoinRoom}
+                    className="flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium py-3.5 rounded-xl border border-neutral-700 hover:border-neutral-600 transition-all active:scale-[0.98]"
+                >
                     <LogIn size={18} />
                     <span>Join Room</span>
                 </button>
