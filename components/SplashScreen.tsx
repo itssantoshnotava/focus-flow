@@ -24,11 +24,11 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         
 {/* Logo */}
 <div className="flex flex-col items-center mb-10">
-  <img
-    src="/logo.png"
-    alt="wishp"
-    className="w-32 h-32 mb-4 select-none"
-  />
+<img
+  src="/logo.png"
+  alt="wishp"
+  className="w-48 h-auto mb-6 select-none"
+ /> 
 
   <h1 className="text-5xl font-bold text-white tracking-tight">
     wishp
