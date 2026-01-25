@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ref, set } from "firebase/database";
+import { ref, set, update } from "firebase/database";
 import { database } from "../firebase";
 import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsSystem } from './FriendsSystem';
+import { FriendsLeaderboard } from './FriendsLeaderboard';
 import { EXAMS } from '../constants';
 import { ProgressMap, StudySession, TimerMode } from '../types';
 import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut, Shield, UserPlus } from 'lucide-react';
@@ -130,12 +131,28 @@ export const Dashboard: React.FC = () => {
     });
 
     return {
+        rawTotalSeconds: totalSeconds,
         totalHours: (totalSeconds / 3600).toFixed(1),
         todayHours: (todaySeconds / 3600).toFixed(1),
         weekHours: (weekSeconds / 3600).toFixed(1),
         pomodoros
     };
   }, [sessions]);
+
+  // --- Effects: Sync Stats to Firebase ---
+  useEffect(() => {
+    if (user && !isGuest) {
+        // Debounce slightly to avoid excessive writes during rapid timer updates? 
+        // Actually handleAddStudyTime updates state every second, but sessions update less often.
+        // However, `stats` re-calculates on `sessions` change.
+        // `sessions` only changes when a session completes. 
+        // So this is efficient enough.
+        const userStatsRef = ref(database, `users/${user.uid}`);
+        update(userStatsRef, {
+            totalStudySeconds: stats.rawTotalSeconds
+        }).catch(err => console.error("Failed to sync stats", err));
+    }
+  }, [user, isGuest, stats.rawTotalSeconds]);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30">
@@ -243,6 +260,9 @@ export const Dashboard: React.FC = () => {
               dailyTotal={studyData.seconds} 
               onSessionComplete={handleSessionComplete}
             />
+
+            {/* Friends Leaderboard (Visible only to logged in users) */}
+            {!isGuest && <FriendsLeaderboard />}
 
             {/* Exam Countdowns Grid */}
             <div>
