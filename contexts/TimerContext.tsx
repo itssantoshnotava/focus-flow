@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { TimerMode, StudySession } from '../types';
 import { useAuth } from './AuthContext';
-import { ref, update } from "firebase/database";
+import { ref, update, get, push, set } from "firebase/database";
 import { database } from "../firebase";
 
 interface TimerContextType {
@@ -73,14 +73,12 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const calculateStreak = useCallback((sessionList: StudySession[]) => {
     const STREAK_THRESHOLD = 30 * 60; // 30 minutes in seconds
     
-    // 1. Group total seconds by date
     const dayTotals: Record<string, number> = {};
     sessionList.forEach(s => {
       const date = s.date.split('T')[0];
       dayTotals[date] = (dayTotals[date] || 0) + s.duration;
     });
 
-    // 2. Filter days that meet the threshold and sort descending
     const activeDays = Object.keys(dayTotals)
       .filter(date => dayTotals[date] >= STREAK_THRESHOLD)
       .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
@@ -90,7 +88,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const today = new Date().toISOString().split('T')[0];
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-    // 3. Longest Streak calculation
     let longest = 0;
     let currentCount = 0;
     const sortedAsc = [...activeDays].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
@@ -111,7 +108,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     }
 
-    // 4. Current Streak calculation (Must include today or yesterday)
     let currentStreak = 0;
     if (activeDays[0] === today || activeDays[0] === yesterday) {
       currentStreak = 1;
@@ -137,11 +133,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem('focusflow_timer_seconds', String(seconds));
     localStorage.setItem('focusflow_timer_initial', String(initialTime));
     
-    // Daily Total
     const today = new Date().toISOString().split('T')[0];
     localStorage.setItem('focusflow_study_data', JSON.stringify({ date: today, seconds: dailyTotal }));
-
-    // Sessions
     localStorage.setItem('focusflow_sessions', JSON.stringify(sessions));
   }, [mode, isActive, seconds, initialTime, dailyTotal, sessions]);
 
@@ -149,20 +142,58 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
       if (user && !isGuest) {
           const { current, longest } = calculateStreak(sessions);
-          
           let totalSeconds = 0;
           sessions.forEach(s => totalSeconds += s.duration);
           
           update(ref(database, `users/${user.uid}`), {
               totalStudySeconds: totalSeconds,
-              streak: current, // For legacy Profile display
-              streaks: {
-                current,
-                longest
-              }
+              streak: current,
+              streaks: { current, longest }
           }).catch(err => console.error("Failed to sync stats", err));
       }
   }, [sessions, user, isGuest, calculateStreak]);
+
+  // --- Social Auto-Post Logic ---
+  const postStudyUpdate = useCallback(async (duration: number, timerMode: string) => {
+    if (!user || isGuest || duration < 600) return; // Minimum 10 minutes
+
+    const mins = Math.floor(duration / 60);
+    const hrs = Math.floor(mins / 60);
+    const rMins = mins % 60;
+    const durStr = hrs > 0 ? `${hrs}h ${rMins}m` : `${mins} min`;
+    const isPomo = timerMode.toLowerCase().includes('pomodoro') || timerMode.includes('25/') || timerMode.includes('50/');
+    const emoji = isPomo ? '💪🔥' : '📚⏱️';
+    const text = isPomo 
+        ? `${user.displayName} completed a ${durStr} Pomodoro ${emoji}`
+        : `${user.displayName} studied for ${durStr} ${emoji}`;
+
+    // Find first available group to post to (Priority: Default/Most Recent Group)
+    try {
+        const inboxRef = ref(database, `userInboxes/${user.uid}`);
+        const snap = await get(inboxRef);
+        if (snap.exists()) {
+            const groups = Object.entries(snap.val())
+                .filter(([_, val]: any) => val.type === 'group')
+                .sort((a: any, b: any) => (b[1].lastMessageAt || 0) - (a[1].lastMessageAt || 0));
+            
+            if (groups.length > 0) {
+                const targetGroupId = groups[0][0];
+                const msgData = {
+                    type: 'system',
+                    text,
+                    senderUid: user.uid,
+                    timestamp: Date.now(),
+                    system: true
+                };
+                
+                await set(push(ref(database, `groupMessages/${targetGroupId}`)), msgData);
+                await update(ref(database, `groupChats/${targetGroupId}`), { lastMessage: msgData });
+            }
+        }
+    } catch (e) {
+        console.error("Auto-post failed", e);
+    }
+  }, [user, isGuest]);
 
   // --- Session Management ---
   const saveSession = useCallback(() => {
@@ -185,16 +216,15 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               completed: completed
           };
           setSessions(prev => [...prev, newSession]);
+          postStudyUpdate(duration, mode);
       }
-  }, [mode, seconds, initialTime]);
+  }, [mode, seconds, initialTime, postStudyUpdate]);
 
   // --- Actions ---
   const setMode = (newMode: TimerMode) => {
       if (mode === newMode) return;
       setIsActive(false);
       setModeState(newMode);
-      
-      // Defaults
       if (newMode === TimerMode.STOPWATCH) {
           setSeconds(0);
           setInitialTime(0);
@@ -213,12 +243,10 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const resetTimer = () => {
-      // Save current progress before reset
       if (isActive || (mode !== TimerMode.STOPWATCH && seconds !== initialTime) || (mode === TimerMode.STOPWATCH && seconds > 0)) {
           saveSession();
       }
       setIsActive(false);
-      
       if (mode === TimerMode.STOPWATCH) {
           setSeconds(0);
       } else if (mode === TimerMode.POMODORO) {
@@ -234,7 +262,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
       const lastSavedTime = parseInt(localStorage.getItem('focusflow_last_tick') || '0');
       const wasActive = localStorage.getItem('focusflow_timer_active') === 'true';
-      
       if (wasActive && lastSavedTime > 0) {
           const now = Date.now();
           const diff = Math.floor((now - lastSavedTime) / 1000);
@@ -256,14 +283,13 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               }
           }
       }
-  }, []); // Run once on mount
+  }, []);
 
   useEffect(() => {
     if (isActive) {
       intervalRef.current = window.setInterval(() => {
         const now = Date.now();
         localStorage.setItem('focusflow_last_tick', String(now));
-        
         setSeconds(prev => {
           if (mode === TimerMode.STOPWATCH) {
             setDailyTotal(d => d + 1);
@@ -283,10 +309,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (intervalRef.current) clearInterval(intervalRef.current);
       localStorage.setItem('focusflow_last_tick', '0');
     }
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isActive, mode, saveSession]);
 
   return (

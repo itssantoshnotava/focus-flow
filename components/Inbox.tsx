@@ -22,6 +22,7 @@ interface ChatItem {
     senderUid: string;
     senderName?: string;
     seen?: boolean;
+    system?: boolean;
   };
   timestamp: number;
   unreadCount?: number;
@@ -661,6 +662,17 @@ export const Inbox: React.FC = () => {
 
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-1" ref={scrollContainerRef} onScroll={handleScroll}>
                         {messages.map((msg, idx) => {
+                            // System Message Rendering
+                            if (msg.system || msg.type === 'system') {
+                                return (
+                                    <div key={msg.id} className="w-full flex justify-center my-4 px-4 animate-in fade-in duration-500">
+                                        <div className="bg-neutral-900/30 border border-neutral-800/50 rounded-full px-4 py-1.5 text-[11px] text-neutral-500 font-medium tracking-wide shadow-sm">
+                                            {msg.text}
+                                        </div>
+                                    </div>
+                                );
+                            }
+
                             const isMe = msg.senderUid === user?.uid;
                             const prevMsg = messages[idx - 1];
                             const isChain = prevMsg && prevMsg.senderUid === msg.senderUid && (msg.timestamp - prevMsg.timestamp < 60000);
