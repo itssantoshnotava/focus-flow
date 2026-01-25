@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { ArrowLeft, Users, Plus, LogIn, LogOut } from 'lucide-react';
+import { ArrowLeft, Users, Plus, LogIn, LogOut, Play, Pause, Clock } from 'lucide-react';
 import { ref, set, push, get, child, update, onValue, onDisconnect, remove } from "firebase/database";
 import { database } from "../firebase";
 
@@ -16,11 +16,17 @@ export const GroupStudy: React.FC = () => {
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [isJoinMode, setIsJoinMode] = useState(false);
   const [participants, setParticipants] = useState<any[]>([]);
+  
+  // Timer State
+  const [timerState, setTimerState] = useState({ isRunning: false, startTime: 0, elapsed: 0 });
+  const [displaySeconds, setDisplaySeconds] = useState(0);
 
+  // --- EFFECT: Fetch Participants & Timer Data ---
   useEffect(() => {
     if (roomId) {
+      // Listen for participants
       const participantsRef = ref(database, `rooms/${roomId}/participants`);
-      const unsubscribe = onValue(participantsRef, (snapshot) => {
+      const unsubParticipants = onValue(participantsRef, (snapshot) => {
         if (snapshot.exists()) {
           const data = snapshot.val();
           setParticipants(Object.values(data));
@@ -28,9 +34,45 @@ export const GroupStudy: React.FC = () => {
           setParticipants([]);
         }
       });
-      return () => unsubscribe();
+
+      // Listen for timer
+      const timerRef = ref(database, `rooms/${roomId}/timer`);
+      const unsubTimer = onValue(timerRef, (snapshot) => {
+        if (snapshot.exists()) {
+          setTimerState(snapshot.val());
+        }
+      });
+
+      return () => {
+        unsubParticipants();
+        unsubTimer();
+      };
     }
   }, [roomId]);
+
+  // --- EFFECT: Local Ticker ---
+  useEffect(() => {
+    let interval: number;
+    
+    // Function to calculate and update display time
+    const updateDisplay = () => {
+        if (timerState.isRunning) {
+            const now = Date.now();
+            const currentSession = Math.floor((now - timerState.startTime) / 1000);
+            setDisplaySeconds((timerState.elapsed || 0) + currentSession);
+        } else {
+            setDisplaySeconds(timerState.elapsed || 0);
+        }
+    };
+
+    updateDisplay(); // Initial update
+
+    if (timerState.isRunning) {
+      interval = window.setInterval(updateDisplay, 1000);
+    }
+
+    return () => clearInterval(interval);
+  }, [timerState]);
 
   const handleCreateRoom = async () => {
     if (!userName.trim()) return;
@@ -53,8 +95,13 @@ export const GroupStudy: React.FC = () => {
 
         await set(roomRef, {
             host: userName,
-            isRunning: false,
-            startTime: null,
+            isRunning: false, // Legacy field at root (optional/deprecated by timer node)
+            startTime: null,  // Legacy field at root
+            timer: {          // New Shared Timer Node
+                isRunning: false,
+                startTime: 0,
+                elapsed: 0
+            },
             participants: {
                 [newParticipantKey]: {
                     name: userName,
@@ -109,33 +156,100 @@ export const GroupStudy: React.FC = () => {
      navigate('/group');
   };
 
+  const toggleTimer = () => {
+    if (!roomId) return;
+    const timerRef = ref(database, `rooms/${roomId}/timer`);
+
+    if (timerState.isRunning) {
+        // PAUSE
+        const now = Date.now();
+        const currentSession = Math.floor((now - timerState.startTime) / 1000);
+        const totalElapsed = (timerState.elapsed || 0) + currentSession;
+
+        update(timerRef, {
+            isRunning: false,
+            elapsed: totalElapsed
+        });
+    } else {
+        // START
+        update(timerRef, {
+            isRunning: true,
+            startTime: Date.now()
+        });
+    }
+  };
+
+  const formatTime = (totalSeconds: number) => {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
   // --- ROOM VIEW ---
   if (roomId) {
+    const isHost = mode === 'create';
+
     return (
       <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans flex flex-col items-center justify-center relative p-6 selection:bg-indigo-500/30">
         <div className="text-center space-y-6 max-w-md w-full animate-in fade-in duration-500">
-           <div className="w-20 h-20 bg-neutral-900 rounded-3xl flex items-center justify-center mx-auto mb-6 border border-neutral-800 shadow-2xl">
-              <Users size={40} className="text-indigo-500" />
-           </div>
            
-           <div className="space-y-2">
-             <h1 className="text-4xl font-bold text-white tracking-tight">Room {roomId}</h1>
-             <p className="text-neutral-500 text-lg">
-                {mode === 'create' ? 'Room created successfully.' : mode === 'join' ? 'You joined the room.' : 'Welcome to the study room.'}
+           {/* Room Info Header */}
+           <div className="space-y-1">
+             <div className="flex items-center justify-center gap-2 text-indigo-500 mb-2">
+                <Users size={24} />
+             </div>
+             <h1 className="text-2xl font-bold text-white tracking-tight">Room {roomId}</h1>
+             <p className="text-neutral-500 text-sm">
+                {isHost ? 'You are the host.' : 'Study together.'}
              </p>
+           </div>
+
+           {/* SHARED TIMER WIDGET */}
+           <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+               {/* Glow Effect */}
+               <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-32 h-32 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none transition-opacity duration-700 ${timerState.isRunning ? 'opacity-100' : 'opacity-0'}`}></div>
+
+               <div className="relative z-10 flex flex-col items-center gap-4">
+                   <div className="text-6xl font-mono font-light tracking-tighter text-white tabular-nums">
+                       {formatTime(displaySeconds)}
+                   </div>
+
+                   {isHost ? (
+                       <button 
+                           onClick={toggleTimer}
+                           className={`flex items-center gap-2 px-6 py-2.5 rounded-full font-medium transition-all ${
+                               timerState.isRunning 
+                               ? 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700 hover:text-white border border-neutral-700' 
+                               : 'bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-900/20'
+                           }`}
+                       >
+                           {timerState.isRunning ? <><Pause size={18} /> Pause Session</> : <><Play size={18} /> Start Session</>}
+                       </button>
+                   ) : (
+                       <div className="flex items-center gap-2 text-neutral-500 text-sm bg-neutral-950/50 px-3 py-1.5 rounded-full border border-neutral-800">
+                           <Clock size={14} className={timerState.isRunning ? "text-indigo-400 animate-pulse" : ""} />
+                           <span>{timerState.isRunning ? "Session in progress" : "Timer paused by host"}</span>
+                       </div>
+                   )}
+               </div>
            </div>
 
            {/* Participants List */}
            <div className="w-full bg-neutral-900/50 border border-neutral-800 rounded-xl p-4 text-left">
-              <h3 className="text-neutral-500 text-xs font-medium uppercase tracking-wider mb-3">Participants</h3>
-              <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+              <h3 className="text-neutral-500 text-xs font-medium uppercase tracking-wider mb-3 flex items-center justify-between">
+                  <span>Participants</span>
+                  <span className="bg-neutral-800 text-neutral-400 px-1.5 py-0.5 rounded text-[10px]">{participants.length}</span>
+              </h3>
+              <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
                 {participants.length > 0 ? (
                   participants.map((p, index) => (
                     <div key={index} className="flex items-center gap-3 p-2 bg-neutral-900 border border-neutral-800/50 rounded-lg">
-                      <div className="w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/20">
+                      <div className="w-8 h-8 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center justify-center text-xs font-bold border border-indigo-500/20 shrink-0">
                          {p.name ? p.name.charAt(0).toUpperCase() : '?'}
                       </div>
-                      <span className="text-neutral-300 font-medium">{p.name || 'Unknown'}</span>
+                      <span className="text-neutral-300 font-medium truncate">{p.name || 'Unknown'}</span>
                     </div>
                   ))
                 ) : (
@@ -144,12 +258,12 @@ export const GroupStudy: React.FC = () => {
               </div>
            </div>
 
-           <div className="pt-4">
+           <div className="pt-2">
                <button 
                   onClick={handleLeaveRoom}
-                  className="flex items-center justify-center gap-2 w-full bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium py-3.5 rounded-xl border border-neutral-700 hover:border-neutral-600 transition-all active:scale-[0.98]"
+                  className="flex items-center justify-center gap-2 w-full text-neutral-500 hover:text-neutral-300 text-sm font-medium py-2 transition-colors"
               >
-                  <LogOut size={18} />
+                  <LogOut size={16} />
                   <span>Leave Room</span>
               </button>
            </div>
