@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Users, Plus, LogIn } from 'lucide-react';
-import { ref, set, push, get, child } from "firebase/database";
+import { ref, set, push, get, child, update } from "firebase/database";
 import { database } from "../firebase";
 
 export const GroupStudy: React.FC = () => {
@@ -52,10 +52,13 @@ export const GroupStudy: React.FC = () => {
              const newParticipantKey = push(participantsRef).key;
              
              if (newParticipantKey) {
-                 await set(ref(database, `rooms/${code}/participants/${newParticipantKey}`), {
+                 const updates: Record<string, any> = {};
+                 updates[newParticipantKey] = {
                      name: userName,
                      joinedAt: Date.now()
-                 });
+                 };
+                 
+                 await update(participantsRef, updates);
                  navigate(`/group/${code}`);
              }
         }
