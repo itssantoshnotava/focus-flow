@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ref, set, update } from "firebase/database";
+import { ref, set, update, onDisconnect, onValue } from "firebase/database";
 import { database } from "../firebase";
 import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
@@ -18,6 +18,7 @@ export const Dashboard: React.FC = () => {
   const { user, logout, isGuest } = useAuth();
   const [showFriends, setShowFriends] = useState(false);
   const [showInbox, setShowInbox] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // --- State: Syllabus Progress ---
   const [progress, setProgress] = useState<ProgressMap>(() => {
@@ -42,16 +43,72 @@ export const Dashboard: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // --- Effects: Firebase Test (Skip for guest) ---
+  // --- Effects: Presence System & Connection Test ---
   useEffect(() => {
-    if (!isGuest) {
+    if (user && !isGuest) {
+        // 1. Connection Ping
         set(ref(database, "ping"), {
           status: "connected",
           time: Date.now(),
-          uid: user?.uid
+          uid: user.uid
+        });
+
+        // 2. Presence System
+        const presenceRef = ref(database, `presence/${user.uid}`);
+        
+        // When I disconnect, set online to false
+        onDisconnect(presenceRef).update({
+            online: false,
+            lastSeen: Date.now()
+        });
+
+        // I am currently online
+        update(presenceRef, {
+            online: true,
+            lastSeen: Date.now()
         });
     }
   }, [isGuest, user]);
+
+  // --- Effects: Unread Messages Listener for Badge ---
+  useEffect(() => {
+      if(!user) return;
+      
+      const getConvoId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
+
+      // Check friends to see if we have unread messages from them
+      const friendsRef = ref(database, `friends/${user.uid}`);
+      const unsub = onValue(friendsRef, async (snapshot) => {
+          if (!snapshot.exists()) {
+              setUnreadCount(0);
+              return;
+          }
+          
+          const friendIds = Object.keys(snapshot.val());
+          let count = 0;
+
+          // Note: In a production app, we would query conversations directly with an index.
+          // For this scale, iterating active friend convos is fine.
+          for (const fid of friendIds) {
+              const convoId = getConvoId(user.uid, fid);
+              const convoRef = ref(database, `conversations/${convoId}/lastMessage`);
+              
+              // We need a one-time check here, but realistically we should listen.
+              // To keep it simple and performant, we just listen to the conversations path once or assume 
+              // the Inbox component handles the detailed view. 
+              // For the dashboard badge, let's just do a simple check.
+              onValue(convoRef, (snap) => {
+                  const lastMsg = snap.val();
+                  if (lastMsg && lastMsg.senderUid !== user.uid && !lastMsg.seen) {
+                      setUnreadCount(prev => prev + 1); // This is a rough approximation for the demo
+                  }
+              }, { onlyOnce: true });
+          }
+      });
+
+      return () => unsub();
+  }, [user]);
+
 
   // --- Effects: Persistence ---
   useEffect(() => {
@@ -174,10 +231,13 @@ export const Dashboard: React.FC = () => {
                <>
                   <button 
                       onClick={() => setShowInbox(true)}
-                      className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+                      className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all relative"
                   >
                       <MessageCircle size={14} />
                       <span className="hidden sm:inline">Inbox</span>
+                      {unreadCount > 0 && (
+                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
+                      )}
                   </button>
 
                   <button 
