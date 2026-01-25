@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { ArrowLeft, Users, Plus, LogIn, LogOut } from 'lucide-react';
-import { ref, set, push, get, child, update, onValue } from "firebase/database";
+import { ref, set, push, get, child, update, onValue, onDisconnect, remove } from "firebase/database";
 import { database } from "../firebase";
 
 export const GroupStudy: React.FC = () => {
@@ -9,6 +9,7 @@ export const GroupStudy: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const mode = location.state?.mode; // 'create' | 'join'
+  const myKey = location.state?.myKey;
 
   // HOOKS MUST BE AT TOP LEVEL (Before any return statements)
   const [userName, setUserName] = useState('');
@@ -43,9 +44,13 @@ export const GroupStudy: React.FC = () => {
 
     const roomRef = ref(database, `rooms/${roomCode}`);
     const participantsRef = ref(database, `rooms/${roomCode}/participants`);
-    const newParticipantKey = push(participantsRef).key;
+    const newParticipantRef = push(participantsRef);
+    const newParticipantKey = newParticipantRef.key;
 
     if (newParticipantKey) {
+        // Presence: Remove user on disconnect (tab close / refresh)
+        await onDisconnect(newParticipantRef).remove();
+
         await set(roomRef, {
             host: userName,
             isRunning: false,
@@ -57,7 +62,7 @@ export const GroupStudy: React.FC = () => {
                 }
             }
         });
-        navigate(`/group/${roomCode}`, { state: { mode: 'create' } });
+        navigate(`/group/${roomCode}`, { state: { mode: 'create', myKey: newParticipantKey } });
     }
   };
 
@@ -71,9 +76,13 @@ export const GroupStudy: React.FC = () => {
         const snapshot = await get(child(dbRef, `rooms/${code}`));
         if (snapshot.exists()) {
              const participantsRef = ref(database, `rooms/${code}/participants`);
-             const newParticipantKey = push(participantsRef).key;
+             const newParticipantRef = push(participantsRef);
+             const newParticipantKey = newParticipantRef.key;
              
              if (newParticipantKey) {
+                 // Presence: Remove user on disconnect (tab close / refresh)
+                 await onDisconnect(newParticipantRef).remove();
+
                  const updates: Record<string, any> = {};
                  updates[newParticipantKey] = {
                      name: userName,
@@ -81,12 +90,23 @@ export const GroupStudy: React.FC = () => {
                  };
                  
                  await update(participantsRef, updates);
-                 navigate(`/group/${code}`, { state: { mode: 'join' } });
+                 navigate(`/group/${code}`, { state: { mode: 'join', myKey: newParticipantKey } });
              }
         }
     } catch (error) {
         console.error("Error joining room:", error);
     }
+  };
+
+  const handleLeaveRoom = async () => {
+     if (roomId && myKey) {
+         try {
+             await remove(ref(database, `rooms/${roomId}/participants/${myKey}`));
+         } catch (e) {
+             console.error("Error leaving room:", e);
+         }
+     }
+     navigate('/group');
   };
 
   // --- ROOM VIEW ---
@@ -126,7 +146,7 @@ export const GroupStudy: React.FC = () => {
 
            <div className="pt-4">
                <button 
-                  onClick={() => navigate('/group')}
+                  onClick={handleLeaveRoom}
                   className="flex items-center justify-center gap-2 w-full bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium py-3.5 rounded-xl border border-neutral-700 hover:border-neutral-600 transition-all active:scale-[0.98]"
               >
                   <LogOut size={18} />
