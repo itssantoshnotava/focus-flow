@@ -13,13 +13,31 @@ export const AccessGate: React.FC<{ children: React.ReactNode }> = ({ children }
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    // Check local storage on mount
-    const storedAccess = localStorage.getItem('focusflow_access');
-    if (storedAccess === 'true') {
-      setHasAccess(true);
-    }
-    setChecking(false);
-  }, []);
+    const checkAccess = async () => {
+      // 1. Check local storage first for speed
+      const storedAccess = localStorage.getItem('focusflow_access');
+      if (storedAccess === 'true') {
+        setHasAccess(true);
+        setChecking(false);
+        return;
+      }
+
+      // 2. Check DB if user has access flag (cross-device support)
+      if (user) {
+         try {
+             const userRef = ref(database, `users/${user.uid}/accessGranted`);
+             const snap = await get(userRef);
+             if (snap.exists() && snap.val() === true) {
+                 localStorage.setItem('focusflow_access', 'true');
+                 setHasAccess(true);
+             }
+         } catch(e) { console.error(e); }
+      }
+      setChecking(false);
+    };
+
+    checkAccess();
+  }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,14 +67,22 @@ export const AccessGate: React.FC<{ children: React.ReactNode }> = ({ children }
         return;
       }
 
-      // Valid and unused: Mark as used
+      // Valid and unused: 
+      // 1. Mark code as used
       await update(codeRef, {
         used: true,
         usedBy: user?.uid || 'anonymous',
         usedAt: Date.now()
       });
 
-      // Grant access
+      // 2. Mark user as having access
+      if (user) {
+          await update(ref(database, `users/${user.uid}`), {
+              accessGranted: true
+          });
+      }
+
+      // Grant access locally
       localStorage.setItem('focusflow_access', 'true');
       setHasAccess(true);
 
@@ -68,7 +94,7 @@ export const AccessGate: React.FC<{ children: React.ReactNode }> = ({ children }
     }
   };
 
-  // While checking localStorage, render nothing or a simple loader to prevent flash
+  // While checking, render nothing to prevent flash
   if (checking) return null;
 
   // If access is granted, render the app

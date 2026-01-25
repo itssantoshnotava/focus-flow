@@ -3,11 +3,13 @@ import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsLeaderboard } from './FriendsLeaderboard';
-import { EXAMS } from '../constants';
-import { ProgressMap } from '../types';
+import { EXAMS, getSubjectById } from '../constants';
+import { ProgressMap, Exam, UserProfile } from '../types';
 import { Trophy, Flame, CalendarClock, Clock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimer } from '../contexts/TimerContext';
+import { ref, get } from 'firebase/database';
+import { database } from '../firebase';
 
 export const Dashboard: React.FC = () => {
   const { user, isGuest } = useAuth();
@@ -19,10 +21,22 @@ export const Dashboard: React.FC = () => {
     return saved ? JSON.parse(saved) : {};
   });
 
+  // --- State: User Profile Data (for Stream filtering) ---
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
   // --- Effects: Persistence ---
   useEffect(() => {
     localStorage.setItem('focusflow_progress', JSON.stringify(progress));
   }, [progress]);
+
+  // --- Effect: Fetch Profile ---
+  useEffect(() => {
+      if (user && !isGuest) {
+          get(ref(database, `users/${user.uid}`)).then(snap => {
+              if (snap.exists()) setUserProfile(snap.val());
+          });
+      }
+  }, [user, isGuest]);
 
   // --- Handlers ---
   const handleToggleProgress = useCallback((examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
@@ -66,6 +80,39 @@ export const Dashboard: React.FC = () => {
     };
   }, [sessions]);
 
+  // --- Filtered Exams Logic ---
+  const filteredExams = useMemo(() => {
+      if (!userProfile) return EXAMS; // Default to all if loading or guest
+      
+      const { stream, selectedExams, selectedSubjects } = userProfile;
+      const allExams = [...EXAMS];
+      const boards = allExams.find(e => e.id === 'boards')!;
+
+      if (stream === 'Commerce') {
+          // Create custom commerce exam object
+          const commerceExam: Exam = {
+              id: 'boards-commerce',
+              name: 'Class 12 Boards (Commerce)',
+              date: '2026-02-20',
+              subjects: (selectedSubjects || []).map(sid => getSubjectById(sid))
+          };
+          return [commerceExam];
+      }
+      
+      if (stream === 'IIT') {
+          // Show Boards + JEE + BITSAT + VITEEE
+          return allExams.filter(e => ['boards', 'jee', 'bitsat', 'viteee'].includes(e.id));
+      }
+
+      if (stream === 'PCM') {
+          // Boards + Selected
+          const allowedIds = new Set(['boards', ...(selectedExams || [])]);
+          return allExams.filter(e => allowedIds.has(e.id));
+      }
+
+      return allExams;
+  }, [userProfile]);
+
   return (
     <div className="flex-1 overflow-y-auto custom-scrollbar h-full bg-neutral-950 pb-20 md:pb-0">
         <div className="max-w-7xl w-full mx-auto px-4 py-8 flex flex-col gap-6">
@@ -100,12 +147,12 @@ export const Dashboard: React.FC = () => {
             {/* Right Column */}
             <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
-                 {EXAMS.map(exam => (
+                 {filteredExams.map(exam => (
                    <ExamCountdown key={exam.id} name={exam.name} date={exam.date} sessions={exam.sessions} />
                  ))}
               </div>
               <div className="flex-1 min-h-[300px]">
-                <SyllabusTracker exams={EXAMS} progress={progress} onToggleProgress={handleToggleProgress} />
+                <SyllabusTracker exams={filteredExams} progress={progress} onToggleProgress={handleToggleProgress} />
               </div>
             </div>
 

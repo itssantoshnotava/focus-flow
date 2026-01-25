@@ -17,7 +17,7 @@ export interface ExamSession {
 }
 
 export interface Exam {
-  id: ExamId;
+  id: string; // Changed from ExamId to string to support dynamic/commerce exams
   name: string;
   date: string | null; // ISO string or null if TBD
   sessions?: ExamSession[]; // For exams with multiple sessions
@@ -44,4 +44,20 @@ export interface StudySession {
   mode: string;
   roomCode?: string;
   completed?: boolean;
+}
+
+export type StreamType = 'PCM' | 'IIT' | 'Commerce';
+
+export interface UserProfile {
+    uid: string;
+    name: string;
+    photoURL?: string;
+    bio?: string;
+    dob?: string;
+    zodiacSign?: string;
+    stream?: StreamType;
+    selectedExams?: string[]; // IDs of selected competitive exams
+    selectedSubjects?: string[]; // IDs of selected commerce subjects
+    onboardingCompleted?: boolean;
+    accessGranted?: boolean;
 }
