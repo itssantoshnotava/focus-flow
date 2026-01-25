@@ -8,6 +8,7 @@ export const GroupStudy: React.FC = () => {
   const navigate = useNavigate();
   const [userName, setUserName] = useState('');
   const [roomCodeInput, setRoomCodeInput] = useState('');
+  const [isJoinMode, setIsJoinMode] = useState(false);
 
   const handleCreateRoom = async () => {
     if (!userName.trim()) return;
@@ -102,32 +103,55 @@ export const GroupStudy: React.FC = () => {
                 />
             </div>
 
-            <div className="space-y-2">
-                <label className="text-xs font-medium text-neutral-500 ml-1 uppercase tracking-wide">Room Code (To Join)</label>
-                <input 
-                    type="text" 
-                    value={roomCodeInput}
-                    onChange={(e) => setRoomCodeInput(e.target.value)}
-                    placeholder="Enter room code"
-                    className="w-full bg-neutral-900/50 border border-neutral-800 text-white px-4 py-3.5 rounded-xl focus:outline-none focus:border-indigo-500/50 focus:bg-neutral-900 transition-all placeholder:text-neutral-700"
-                />
-            </div>
+            {isJoinMode && (
+                <div className="space-y-2">
+                    <label className="text-xs font-medium text-neutral-500 ml-1 uppercase tracking-wide">Room Code</label>
+                    <input 
+                        type="text" 
+                        value={roomCodeInput}
+                        onChange={(e) => setRoomCodeInput(e.target.value)}
+                        placeholder="Enter room code"
+                        className="w-full bg-neutral-900/50 border border-neutral-800 text-white px-4 py-3.5 rounded-xl focus:outline-none focus:border-indigo-500/50 focus:bg-neutral-900 transition-all placeholder:text-neutral-700"
+                    />
+                </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3 pt-2">
-                <button 
-                    onClick={handleCreateRoom}
-                    className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3.5 rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-[0.98]"
-                >
-                    <Plus size={18} />
-                    <span>Create Room</span>
-                </button>
-                <button 
-                    onClick={handleJoinRoom}
-                    className="flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium py-3.5 rounded-xl border border-neutral-700 hover:border-neutral-600 transition-all active:scale-[0.98]"
-                >
-                    <LogIn size={18} />
-                    <span>Join Room</span>
-                </button>
+                {!isJoinMode ? (
+                    <>
+                        <button 
+                            onClick={handleCreateRoom}
+                            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3.5 rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-[0.98]"
+                        >
+                            <Plus size={18} />
+                            <span>Create Room</span>
+                        </button>
+                        <button 
+                            onClick={() => setIsJoinMode(true)}
+                            className="flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium py-3.5 rounded-xl border border-neutral-700 hover:border-neutral-600 transition-all active:scale-[0.98]"
+                        >
+                            <LogIn size={18} />
+                            <span>Join Room</span>
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <button 
+                            onClick={() => setIsJoinMode(false)}
+                            className="flex items-center justify-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white font-medium py-3.5 rounded-xl border border-neutral-700 hover:border-neutral-600 transition-all active:scale-[0.98]"
+                        >
+                            <ArrowLeft size={18} />
+                            <span>Back</span>
+                        </button>
+                         <button 
+                            onClick={handleJoinRoom}
+                            className="flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3.5 rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-[0.98]"
+                        >
+                            <LogIn size={18} />
+                            <span>Enter Room</span>
+                        </button>
+                    </>
+                )}
             </div>
 
         </div>
