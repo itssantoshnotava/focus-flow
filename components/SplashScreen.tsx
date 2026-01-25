@@ -23,21 +23,21 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       <div className="max-w-md w-full flex flex-col items-center animate-in fade-in zoom-in duration-700">
         
 {/* Logo */}
-<img
-  src="/logo.png"
-  alt="wishp"
-  className="w-40 h-40 mb-6 select-none"
-/>
+<div className="flex flex-col items-center mb-10">
+  <img
+    src="/logo.png"
+    alt="wishp"
+    className="w-32 h-32 mb-4 select-none"
+  />
 
+  <h1 className="text-5xl font-bold text-white tracking-tight">
+    wishp
+  </h1>
 
-
-
-
-        {/* Title & Tagline */}
-        <h1 className="text-4xl font-bold text-white tracking-tight mb-3">wishp</h1>
-<p className="text-neutral-400 text-lg mb-12 max-w-xs">
-  study. connect. stay consistent.
-</p>
+  <p className="text-neutral-400 text-base mt-2">
+    study. connect. stay consistent.
+  </p>
+</div>
 
 
         {/* Terms */}
