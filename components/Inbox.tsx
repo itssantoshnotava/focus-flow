@@ -560,8 +560,8 @@ export const Inbox: React.FC = () => {
   return (
     <div className="flex h-full w-full bg-neutral-950">
         {/* LIST */}
-        <div className={`w-full md:w-[350px] lg:w-[400px] border-r border-neutral-900 flex-none flex flex-col ${selectedChat ? 'hidden md:flex' : 'flex'} bg-neutral-950/20 backdrop-blur-sm`}>
-            <div className="p-4 border-b border-neutral-900 bg-transparent flex justify-between items-center h-16 shrink-0 backdrop-blur-md">
+        <div className={`w-full md:w-[350px] lg:w-[400px] border-r border-neutral-900 flex-none flex flex-col ${selectedChat ? 'hidden md:flex' : 'flex'} bg-[rgba(20,20,20,0.55)] backdrop-blur-[12px]`}>
+            <div className="p-4 border-b border-neutral-900 bg-transparent flex justify-between items-center h-16 shrink-0">
                 {viewMode === 'list' ? (
                     <>
                         <h2 className="text-white font-bold text-lg flex items-center gap-2"><MessageCircle size={20} className="text-indigo-500" /> Inbox</h2>
@@ -645,7 +645,7 @@ export const Inbox: React.FC = () => {
         <div className={`flex-1 flex flex-col bg-neutral-950 min-w-0 ${!selectedChat ? 'hidden md:flex' : 'flex'}`}>
             {selectedChat ? (
                 <>
-                    <div className="p-3 border-b border-neutral-900/50 bg-neutral-950/40 flex items-center justify-between h-16 shrink-0 backdrop-blur-md z-10">
+                    <div className="p-3 border-b border-neutral-900/50 bg-[rgba(20,20,20,0.55)] backdrop-blur-[12px] flex items-center justify-between h-16 shrink-0 z-10">
                         <div className="flex items-center gap-3">
                             <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 text-neutral-400 hover:text-white"><ArrowLeft size={20} /></button>
                             <div className="flex items-center gap-3">
@@ -766,7 +766,7 @@ export const Inbox: React.FC = () => {
                             )}
 
                             <div className="p-3 bg-neutral-950 border-t border-neutral-900">
-                                <form onSubmit={handleSend} className="flex gap-2 items-end bg-neutral-900/50 border border-neutral-800 rounded-xl px-2 py-2 focus-within:border-indigo-500/50 transition-colors">
+                                <form onSubmit={handleSend} className="flex gap-2 items-end bg-neutral-900 border border-neutral-800 rounded-xl px-2 py-2 focus-within:border-indigo-500/50 transition-colors">
                                     <textarea ref={inputRef} value={inputText} onChange={handleInputChange} onKeyDown={handleKeyDown} placeholder={`Message ${selectedChat.name}...`} rows={1} className="flex-1 bg-transparent text-white px-2 py-2 focus:outline-none text-sm resize-none custom-scrollbar max-h-32 placeholder:text-neutral-600" style={{ minHeight: '40px' }} />
                                     <button type="submit" disabled={!inputText.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:bg-neutral-800 text-white p-2.5 rounded-lg transition-colors mb-0.5"><Send size={16} /></button>
                                 </form>
