@@ -4,16 +4,19 @@ import { ArrowLeft, Users, Plus, LogIn, LogOut, Play, Pause, Clock, Zap, Coffee,
 import { ref, set, push, get, child, update, onValue, onDisconnect, remove } from "firebase/database";
 import { database } from "../firebase";
 import { StudySession } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 
 export const GroupStudy: React.FC = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth(); // Auth context
+
   const mode = location.state?.mode; // 'create' | 'join'
   const myKey = location.state?.myKey;
   
   // HOOKS MUST BE AT TOP LEVEL (Before any return statements)
-  const [userName, setUserName] = useState('');
+  const [userName, setUserName] = useState(user?.displayName || '');
   const [roomCodeInput, setRoomCodeInput] = useState('');
   const [isJoinMode, setIsJoinMode] = useState(false);
   const [participants, setParticipants] = useState<any[]>([]);

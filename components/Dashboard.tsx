@@ -7,10 +7,12 @@ import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { EXAMS } from '../constants';
 import { ProgressMap, StudySession, TimerMode } from '../types';
-import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock } from 'lucide-react';
+import { LayoutDashboard, Users, Trophy, Flame, CalendarClock, Clock, LogOut } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   // --- State: Syllabus Progress ---
   const [progress, setProgress] = useState<ProgressMap>(() => {
@@ -144,15 +146,32 @@ export const Dashboard: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
-            <button 
+             <button 
                 onClick={() => navigate('/group')}
-                className="flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+                className="hidden sm:flex items-center gap-2 bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
             >
                 <Users size={14} />
                 <span>Group Study</span>
             </button>
-            <div className="text-xs text-neutral-500 font-mono hidden sm:block">
-                {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            
+            <div className="h-6 w-[1px] bg-neutral-800 mx-1 hidden sm:block"></div>
+
+            <div className="flex items-center gap-3">
+               {user?.photoURL ? (
+                 <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full border border-neutral-800" />
+               ) : (
+                 <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-xs font-bold text-white">
+                   {user?.displayName?.charAt(0) || 'U'}
+                 </div>
+               )}
+               <span className="text-sm font-medium text-white hidden md:block">{user?.displayName?.split(' ')[0]}</span>
+               <button 
+                  onClick={() => logout()}
+                  className="p-1.5 text-neutral-500 hover:text-white transition-colors"
+                  title="Sign Out"
+               >
+                 <LogOut size={16} />
+               </button>
             </div>
           </div>
         </div>
