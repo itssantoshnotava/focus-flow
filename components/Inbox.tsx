@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ref, onValue, push, update, get, set, remove } from "firebase/database";
-import { database } from "../firebase";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { database, storage } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
     X, Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
-    LogOut, Save, Edit2, MoreVertical, UserMinus
+    LogOut, Save, Edit2, MoreVertical, UserMinus, Loader2
 } from 'lucide-react';
 
 interface InboxProps {
@@ -55,13 +56,15 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
   const [editGroupName, setEditGroupName] = useState('');
   const [editGroupPhoto, setEditGroupPhoto] = useState('');
   const [isEditingGroup, setIsEditingGroup] = useState(false);
-  const [showAddMember, setShowAddMember] = useState(false); // For adding inside settings
+  const [showAddMember, setShowAddMember] = useState(false); 
+  const [isUploading, setIsUploading] = useState(false);
 
   const [loading, setLoading] = useState(true);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const isAutoScrollEnabled = useRef(true);
 
   // Helper: DM Conversation ID
@@ -279,11 +282,43 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       setIsEditingGroup(false);
   };
 
-  const updateAvatarAsMember = async () => {
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0] && selectedChat) {
+      const file = e.target.files[0];
+      setIsUploading(true);
+      try {
+        const fileRef = storageRef(storage, `group_avatars/${selectedChat.id}/${Date.now()}_${file.name}`);
+        await uploadBytes(fileRef, file);
+        const url = await getDownloadURL(fileRef);
+        
+        // Immediate update as per requirements
+        await update(ref(database, `groupChats/${selectedChat.id}`), {
+            photoURL: url
+        });
+        
+        setEditGroupPhoto(url); // Sync local state
+      } catch (error) {
+        console.error("Upload failed", error);
+        alert("Failed to upload image. Please try again.");
+      } finally {
+        setIsUploading(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const removeGroupPhoto = async () => {
       if (!selectedChat) return;
-      await update(ref(database, `groupChats/${selectedChat.id}`), {
-        photoURL: editGroupPhoto || null
-      });
+      if (confirm("Remove group photo?")) {
+          await update(ref(database, `groupChats/${selectedChat.id}`), {
+              photoURL: null
+          });
+          setEditGroupPhoto('');
+      }
   };
 
   const promoteAdmin = async (uid: string) => {
@@ -293,7 +328,6 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
 
   const demoteAdmin = async (uid: string) => {
       if (!selectedChat || !amIAdmin) return;
-      // Prevent removing last admin
       const adminCount = Object.keys(activeGroupData.admins || {}).length;
       if (adminCount <= 1) {
           alert("Cannot remove the last admin.");
@@ -305,7 +339,6 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
   const removeMember = async (uid: string) => {
       if (!selectedChat || !amIAdmin) return;
       if (activeGroupData.admins?.[uid]) {
-          // If trying to remove an admin, check counts
           const adminCount = Object.keys(activeGroupData.admins || {}).length;
           if (adminCount <= 1) {
             alert("Cannot remove the last admin. Promote someone else first.");
@@ -314,7 +347,7 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       }
       const updates: any = {};
       updates[`groupChats/${selectedChat.id}/members/${uid}`] = null;
-      updates[`groupChats/${selectedChat.id}/admins/${uid}`] = null; // Remove admin status if any
+      updates[`groupChats/${selectedChat.id}/admins/${uid}`] = null; 
       updates[`users/${uid}/groupChats/${selectedChat.id}`] = null;
       await update(ref(database), updates);
   };
@@ -330,7 +363,6 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
   const deleteGroup = async () => {
       if (!selectedChat || !amIAdmin) return;
       if (confirm("Are you sure you want to delete this group? This action cannot be undone.")) {
-          // Remove for all members
           const updates: any = {};
           if (activeGroupData.members) {
              Object.keys(activeGroupData.members).forEach(uid => {
@@ -528,33 +560,33 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
                                
                                {/* Group Header Edit */}
                                <div className="flex flex-col items-center gap-4">
+                                   <input type="file" className="hidden" ref={fileInputRef} onChange={handleFileChange} accept="image/*" />
+                                   
                                    <div className="relative group">
                                        {editGroupPhoto ? (
                                            <img src={editGroupPhoto} className="w-24 h-24 rounded-3xl object-cover bg-neutral-800 border-2 border-neutral-800" />
                                        ) : (
                                            <div className="w-24 h-24 rounded-3xl bg-neutral-800 flex items-center justify-center border-2 border-neutral-800"><Users size={40} className="text-neutral-600" /></div>
                                        )}
-                                       {/* Any member can edit photo */}
-                                       <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-3xl transition-opacity">
-                                           <input 
-                                                type="text" 
-                                                className="absolute inset-0 opacity-0 cursor-pointer"
-                                                onClick={(e) => {
-                                                    e.preventDefault();
-                                                    const url = prompt("Enter Image URL for Group Avatar:", editGroupPhoto);
-                                                    if (url !== null) {
-                                                        setEditGroupPhoto(url);
-                                                        // Immediate save for non-admins if they change photo, or wait for save button?
-                                                        // Requirement: "Any member can update the group avatar."
-                                                        // Let's allow immediate update via prompt for simplicity or use the form below.
-                                                        // Actually, using the form state `editGroupPhoto` which saves on "Save Changes" for admins, 
-                                                        // OR "Update Avatar" button for non-admins.
-                                                    }
-                                                }}
-                                           />
+                                       
+                                       {/* Loading Overlay */}
+                                       {isUploading && (
+                                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-3xl z-20">
+                                                <Loader2 size={24} className="text-indigo-500 animate-spin" />
+                                            </div>
+                                       )}
+
+                                       {/* Change Photo Overlay */}
+                                       <div className={`absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-3xl transition-opacity cursor-pointer z-10`} onClick={handleAvatarClick}>
                                            <Camera className="text-white" size={24} />
                                        </div>
                                    </div>
+                                   
+                                   {editGroupPhoto && (
+                                       <button onClick={removeGroupPhoto} className="text-xs text-red-400 hover:text-red-300 hover:underline -mt-2">
+                                           Remove Photo
+                                       </button>
+                                   )}
 
                                    {amIAdmin ? (
                                        isEditingGroup ? (
@@ -575,9 +607,6 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
                                    ) : (
                                        <div className="flex flex-col items-center gap-2">
                                             <h1 className="text-2xl font-bold text-white">{activeGroupData.name}</h1>
-                                            {editGroupPhoto !== activeGroupData.photoURL && (
-                                                <button onClick={updateAvatarAsMember} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded-full">Save New Avatar</button>
-                                            )}
                                        </div>
                                    )}
                                </div>
