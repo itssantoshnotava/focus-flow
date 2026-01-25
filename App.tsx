@@ -6,6 +6,7 @@ import { Inbox } from './components/Inbox';
 import { SearchPage } from './components/Search';
 import { NotificationsPage } from './components/Notifications';
 import { GroupStudy } from './components/GroupStudy';
+import { GroupSettings } from './components/GroupSettings';
 import { Profile } from './components/Profile';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimerProvider } from './contexts/TimerContext';
@@ -21,21 +22,18 @@ const AppContent: React.FC = () => {
   const { user, loading, isGuest } = useAuth();
   
   // --- Flow State ---
-  // Initialize state from LocalStorage to avoid flicker and blocking
   const [splashSeen, setSplashSeen] = useState(() => localStorage.getItem('focusflow_splash_seen') === 'true');
   const [accessVerified, setAccessVerified] = useState(() => localStorage.getItem('focusflow_access') === 'true');
   const [onboardingComplete, setOnboardingComplete] = useState(() => localStorage.getItem('focusflow_onboarding_completed') === 'true');
   
   const [checkingProfile, setCheckingProfile] = useState(true);
 
-  // 1. Seed Codes (Admin utility - runs silently if user exists)
   useEffect(() => {
     if (user && !loading) {
       seedAccessCodes();
     }
   }, [user, loading]);
 
-  // 2. Sync Access & Check Onboarding (Once User is Logged In)
   useEffect(() => {
     const syncAndCheck = async () => {
         if (!user || isGuest) {
@@ -50,7 +48,6 @@ const AppContent: React.FC = () => {
             if (snap.exists()) {
                 const data = snap.val();
                 
-                // Sync Access Logic
                 if (data.accessGranted) {
                     if (!accessVerified) {
                         localStorage.setItem('focusflow_access', 'true');
@@ -60,14 +57,12 @@ const AppContent: React.FC = () => {
                     await update(userRef, { accessGranted: true });
                 }
 
-                // Check Onboarding Logic
                 if (data.onboardingCompleted) {
                     if (!onboardingComplete) {
                         localStorage.setItem('focusflow_onboarding_completed', 'true');
                         setOnboardingComplete(true);
                     }
                 } else {
-                    // DB says not complete. But if local says complete (just finished), prioritize local and sync to DB
                     if (onboardingComplete) {
                         await update(userRef, { onboardingCompleted: true });
                     } else {
@@ -75,8 +70,6 @@ const AppContent: React.FC = () => {
                     }
                 }
             } else {
-                // User record doesn't exist yet
-                // If local state says complete, we trust it and create/update profile
                 if (onboardingComplete) {
                     await update(userRef, { onboardingCompleted: true, accessGranted: accessVerified });
                 } else {
@@ -96,7 +89,7 @@ const AppContent: React.FC = () => {
     } else {
         setCheckingProfile(false);
     }
-  }, [user, isGuest]); // Removed dependencies that cause re-loops, handled inside logic
+  }, [user, isGuest]);
 
   const handleSplashComplete = () => {
       localStorage.setItem('focusflow_splash_seen', 'true');
@@ -104,7 +97,6 @@ const AppContent: React.FC = () => {
   };
 
   const handleAccessSuccess = () => {
-      // Local storage is set inside AccessGate, just update state
       setAccessVerified(true);
   };
 
@@ -113,9 +105,6 @@ const AppContent: React.FC = () => {
       setOnboardingComplete(true);
   };
 
-  // --- RENDERING FLOW ---
-
-  // 1. Global Loading (Auth Check)
   if (loading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-neutral-500 font-sans">
@@ -127,25 +116,18 @@ const AppContent: React.FC = () => {
     );
   }
 
-  // 2. Splash Screen (Always first if not seen)
   if (!splashSeen) {
       return <SplashScreen onComplete={handleSplashComplete} />;
   }
 
-  // 3. Access Gate (Strictly before Login)
   if (!accessVerified && !user) {
       return <AccessGate onSuccess={handleAccessSuccess} />;
   }
 
-  // 4. Login Screen
   if (!user) {
     return <Login />;
   }
 
-  // 5. Onboarding (Profile Setup)
-  // Logic: Show onboarding if NOT guest AND NOT complete.
-  // We use checkingProfile to avoid premature onboarding screen if data is fetching.
-  // BUT if local state already says complete, we skip the check and render app.
   if (!isGuest && !onboardingComplete) {
       if (checkingProfile) {
         return (
@@ -157,7 +139,6 @@ const AppContent: React.FC = () => {
       return <Onboarding onComplete={handleOnboardingComplete} />;
   }
 
-  // 6. Main App
   return (
     <TimerProvider>
     <HashRouter>
@@ -168,7 +149,7 @@ const AppContent: React.FC = () => {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/profile/:uid" element={<Profile />} />
-            {/* Redirect any stray login path or unknown routes to dashboard */}
+            <Route path="/group/:groupId/settings" element={<GroupSettings />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
