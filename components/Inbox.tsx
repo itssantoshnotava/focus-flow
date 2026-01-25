@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ref, onValue, push, update, get, set, remove } from "firebase/database";
+import { ref, onValue, push, update, get, set, remove, runTransaction } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { 
     X, Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Shield, ShieldAlert, Trash2, UserPlus, 
-    LogOut, Save, Edit2, MoreVertical, UserMinus, Loader2
+    LogOut, Save, Edit2, UserMinus, Loader2
 } from 'lucide-react';
 
 interface InboxProps {
@@ -22,6 +22,7 @@ interface ChatItem {
     text: string;
     timestamp: number;
     senderUid: string;
+    senderName?: string;
     seen?: boolean;
   };
   timestamp: number;
@@ -70,61 +71,98 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
   // Helper: DM Conversation ID
   const getDmConvoId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
 
-  // --- 1. Fetch Chats (DMs + Groups) ---
+  // --- 0. Migration Helper (Run once to backfill userInboxes) ---
+  const migrateLegacyData = async () => {
+      if (!user) return;
+      
+      // 1. Migrate Friends (DMs)
+      const friendsRef = ref(database, `friends/${user.uid}`);
+      const friendsSnap = await get(friendsRef);
+      if (friendsSnap.exists()) {
+          const friendIds = Object.keys(friendsSnap.val());
+          for (const fid of friendIds) {
+              const convoId = getDmConvoId(user.uid, fid);
+              const convoSnap = await get(ref(database, `conversations/${convoId}`));
+              const userSnap = await get(ref(database, `users/${fid}`));
+              
+              if (userSnap.exists()) {
+                  const userData = userSnap.val();
+                  const lastMsg = convoSnap.val()?.lastMessage;
+                  
+                  // Write to userInboxes
+                  await update(ref(database, `userInboxes/${user.uid}/${fid}`), {
+                      type: 'dm',
+                      name: userData.name || 'Unknown',
+                      photoURL: userData.photoURL || null,
+                      lastMessage: lastMsg || null,
+                      lastMessageAt: lastMsg?.timestamp || Date.now(),
+                      unreadCount: 0 // Default to 0 on migration
+                  });
+              }
+          }
+      }
+
+      // 2. Migrate Groups
+      const groupsRef = ref(database, `users/${user.uid}/groupChats`);
+      const groupsSnap = await get(groupsRef);
+      if (groupsSnap.exists()) {
+          const groupIds = Object.keys(groupsSnap.val());
+          for (const gid of groupIds) {
+              const gSnap = await get(ref(database, `groupChats/${gid}`));
+              if (gSnap.exists()) {
+                  const gData = gSnap.val();
+                  await update(ref(database, `userInboxes/${user.uid}/${gid}`), {
+                      type: 'group',
+                      name: gData.name,
+                      photoURL: gData.photoURL || null,
+                      lastMessage: gData.lastMessage || null,
+                      lastMessageAt: gData.lastMessage?.timestamp || gData.createdAt || Date.now(),
+                      unreadCount: 0
+                  });
+              }
+          }
+      }
+  };
+
+  // --- 1. Real-time Inbox Listener ---
   useEffect(() => {
     if (!user) return;
     
-    const friendsRef = ref(database, `friends/${user.uid}`);
-    const groupsRef = ref(database, `users/${user.uid}/groupChats`);
+    const inboxRef = ref(database, `userInboxes/${user.uid}`);
+    
+    // Check if empty and migrate
+    get(inboxRef).then((snap) => {
+        if (!snap.exists()) {
+            migrateLegacyData();
+        }
+    });
 
-    const fetchData = () => {
-       onValue(friendsRef, async (friendsSnap) => {
-           const friendIds = friendsSnap.exists() ? Object.keys(friendsSnap.val()) : [];
-           
-           const dmPromises = friendIds.map(async (fid) => {
-               const userSnap = await get(ref(database, `users/${fid}`));
-               const userData = userSnap.val();
-               const convoId = getDmConvoId(user.uid, fid);
-               const convoSnap = await get(ref(database, `conversations/${convoId}`));
-               const convoData = convoSnap.val();
-               return {
-                   id: fid,
-                   type: 'dm',
-                   name: userData?.name || 'Unknown',
-                   photoURL: userData?.photoURL,
-                   lastMessage: convoData?.lastMessage,
-                   timestamp: convoData?.lastMessage?.timestamp || 0
-               } as ChatItem;
-           });
+    const unsub = onValue(inboxRef, (snapshot) => {
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+            const list: ChatItem[] = Object.entries(data).map(([key, val]: [string, any]) => ({
+                id: key,
+                type: val.type,
+                name: val.name,
+                photoURL: val.photoURL,
+                lastMessage: val.lastMessage,
+                timestamp: val.lastMessageAt || 0,
+                unreadCount: val.unreadCount || 0
+            }));
+            
+            // Sort by latest message
+            list.sort((a, b) => b.timestamp - a.timestamp);
+            setChats(list);
+        } else {
+            setChats([]);
+        }
+        setLoading(false);
+    });
 
-           onValue(groupsRef, async (groupsSnap) => {
-               const groupIds = groupsSnap.exists() ? Object.keys(groupsSnap.val()) : [];
-               const groupPromises = groupIds.map(async (gid) => {
-                   const groupSnap = await get(ref(database, `groupChats/${gid}`));
-                   if (!groupSnap.exists()) return null;
-                   const groupData = groupSnap.val();
-                   return {
-                       id: gid,
-                       type: 'group',
-                       name: groupData.name,
-                       photoURL: groupData.photoURL,
-                       lastMessage: groupData.lastMessage,
-                       timestamp: groupData.lastMessage?.timestamp || groupData.createdAt || 0
-                   } as ChatItem;
-               });
-
-               const dms = await Promise.all(dmPromises);
-               const groups = (await Promise.all(groupPromises)).filter(g => g !== null) as ChatItem[];
-               const combined = [...dms, ...groups].sort((a, b) => b.timestamp - a.timestamp);
-               setChats(combined);
-               setLoading(false);
-           });
-       });
-    };
-    fetchData();
+    return () => unsub();
   }, [user]);
 
-  // --- 2. Fetch Active Group Details ---
+  // --- 2. Active Group Details ---
   useEffect(() => {
       if (selectedChat?.type === 'group') {
           const gRef = ref(database, `groupChats/${selectedChat.id}`);
@@ -143,7 +181,6 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
                       setGroupMembersDetails(members);
                   }
               } else {
-                  // Group was deleted
                   setSelectedChat(null);
                   setActiveGroupData(null);
               }
@@ -156,7 +193,7 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       }
   }, [selectedChat]);
 
-  // --- 3. Fetch Friends (Shared) ---
+  // --- 3. Friends Fetcher (for Create Group) ---
   useEffect(() => {
       if (!user) return;
       if (viewMode === 'create_group' || showAddMember) {
@@ -172,40 +209,32 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       }
   }, [user, viewMode, showAddMember]);
 
-  // --- 4. Chat Messages Listener ---
+  // --- 4. Messages Listener & Unread Clearing ---
   useEffect(() => {
       if (!user || !selectedChat) {
           setFriendPresence(null);
           return;
       }
+
+      // Clear unread count when opening a chat
+      const myInboxRef = ref(database, `userInboxes/${user.uid}/${selectedChat.id}`);
+      update(myInboxRef, { unreadCount: 0 });
+
       let messagesPath = selectedChat.type === 'dm' ? `messages/${getDmConvoId(user.uid, selectedChat.id)}` : `groupMessages/${selectedChat.id}`;
+      
       if (selectedChat.type === 'dm') {
           onValue(ref(database, `presence/${selectedChat.id}`), (snap) => setFriendPresence(snap.exists() ? snap.val() : null));
       }
+
       const unsubMsg = onValue(ref(database, messagesPath), (snapshot) => {
           if (snapshot.exists()) {
               const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
               setMessages(list);
-              // DM Seen Logic
-              if (selectedChat.type === 'dm') {
-                  const convoId = getDmConvoId(user.uid, selectedChat.id);
-                  const updates: Record<string, any> = {};
-                  let hasUnseen = false;
-                  list.forEach(msg => {
-                      if (msg.senderUid !== user.uid && !msg.seen) {
-                          updates[`messages/${convoId}/${msg.id}/seen`] = true;
-                          hasUnseen = true;
-                      }
-                  });
-                  if (hasUnseen) {
-                      update(ref(database), updates);
-                      update(ref(database, `conversations/${convoId}/lastMessage`), { seen: true });
-                  }
-              }
           } else {
               setMessages([]);
           }
       });
+      
       setTimeout(() => inputRef.current?.focus(), 100);
       isAutoScrollEnabled.current = true;
       return () => unsubMsg();
@@ -229,16 +258,107 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       const text = inputText.trim();
       const timestamp = Date.now();
       
+      const msgData = { 
+          senderUid: user.uid, 
+          senderName: user.displayName || 'Unknown', 
+          text, 
+          timestamp 
+      };
+
       if (selectedChat.type === 'dm') {
           const convoId = getDmConvoId(user.uid, selectedChat.id);
-          const msgData = { senderUid: user.uid, text, timestamp, seen: false };
+          const friendUid = selectedChat.id;
+
+          // 1. Push Message
           await push(ref(database, `messages/${convoId}`), msgData);
-          await update(ref(database, `conversations/${convoId}`), { members: { [user.uid]: true, [selectedChat.id]: true }, lastMessage: { ...msgData } });
+          
+          // 2. Update Conversation Meta (Legacy support)
+          await update(ref(database, `conversations/${convoId}`), { 
+              members: { [user.uid]: true, [friendUid]: true }, 
+              lastMessage: { ...msgData, seen: false } 
+          });
+
+          // 3. Update My Inbox (No unread increment)
+          // We assume selectedChat.name/photo is correct for the friend
+          await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), {
+              type: 'dm',
+              name: selectedChat.name,
+              photoURL: selectedChat.photoURL || null,
+              lastMessage: msgData,
+              lastMessageAt: timestamp,
+              // unreadCount: 0 // Keep as is (0)
+          });
+
+          // 4. Update Friend's Inbox (Increment unread)
+          const friendInboxRef = ref(database, `userInboxes/${friendUid}/${user.uid}`);
+          await runTransaction(friendInboxRef, (currentData) => {
+              if (currentData === null) {
+                  return {
+                      type: 'dm',
+                      name: user.displayName || 'Unknown',
+                      photoURL: user.photoURL || null,
+                      lastMessage: msgData,
+                      lastMessageAt: timestamp,
+                      unreadCount: 1
+                  };
+              }
+              return {
+                  ...currentData,
+                  name: user.displayName || 'Unknown', // Update in case name changed
+                  photoURL: user.photoURL || null,
+                  lastMessage: msgData,
+                  lastMessageAt: timestamp,
+                  unreadCount: (currentData.unreadCount || 0) + 1
+              };
+          });
+
       } else {
-          const msgData = { senderUid: user.uid, senderName: user.displayName || 'Unknown', text, timestamp };
-          await push(ref(database, `groupMessages/${selectedChat.id}`), msgData);
-          await update(ref(database, `groupChats/${selectedChat.id}`), { lastMessage: { ...msgData } });
+          // GROUP MESSAGE
+          const groupId = selectedChat.id;
+          
+          // 1. Push Message
+          await push(ref(database, `groupMessages/${groupId}`), msgData);
+          
+          // 2. Update Group Meta
+          await update(ref(database, `groupChats/${groupId}`), { lastMessage: msgData });
+
+          // 3. Fan-out to all members
+          // Need to fetch members first to know who to update
+          // We can use activeGroupData if available, else fetch
+          let membersToUpdate: string[] = [];
+          if (activeGroupData?.members) {
+              membersToUpdate = Object.keys(activeGroupData.members);
+          } else {
+              const snap = await get(ref(database, `groupChats/${groupId}/members`));
+              if (snap.exists()) membersToUpdate = Object.keys(snap.val());
+          }
+
+          // Update each member's inbox
+          const updates: Record<string, any> = {};
+          membersToUpdate.forEach(uid => {
+             const basePath = `userInboxes/${uid}/${groupId}`;
+             // Base update
+             updates[`${basePath}/lastMessage`] = msgData;
+             updates[`${basePath}/lastMessageAt`] = timestamp;
+             // Ensure metadata is consistent
+             updates[`${basePath}/type`] = 'group';
+             updates[`${basePath}/name`] = selectedChat.name; // Keep group name fresh
+             if (selectedChat.photoURL) updates[`${basePath}/photoURL`] = selectedChat.photoURL;
+          });
+
+          await update(ref(database), updates);
+
+          // Increment unread count for OTHERS (Transaction safer, but fan-out transaction is hard)
+          // For simplicity/performance in this architecture, we iterate transactions or individual updates
+          // Let's iterate transactions for correctness of unreadCount
+          await Promise.all(membersToUpdate.map(uid => {
+              if (uid === user.uid) return Promise.resolve(); // Don't increment for self
+              return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => {
+                  return (count || 0) + 1;
+              });
+          }));
       }
+
       isAutoScrollEnabled.current = true;
       setInputText('');
   };
@@ -250,17 +370,34 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       if (groupId) {
           const membersObj: any = { [user.uid]: true };
           selectedGroupMembers.forEach(uid => membersObj[uid] = true);
-          await set(newGroupRef, {
+          
+          const groupData = {
               name: newGroupName.trim(),
               createdBy: user.uid,
               createdAt: Date.now(),
               members: membersObj,
-              admins: { [user.uid]: true } // Creator is admin
-          });
+              admins: { [user.uid]: true }
+          };
+
+          await set(newGroupRef, groupData);
+          
+          // Add to userInboxes for all members immediately
+          const allMembers = [user.uid, ...Array.from(selectedGroupMembers)];
           const updates: any = {};
-          updates[`users/${user.uid}/groupChats/${groupId}`] = true;
-          selectedGroupMembers.forEach(uid => updates[`users/${uid}/groupChats/${groupId}`] = true);
+          
+          allMembers.forEach(uid => {
+             updates[`users/${uid}/groupChats/${groupId}`] = true; // Legacy
+             updates[`userInboxes/${uid}/${groupId}`] = {
+                 type: 'group',
+                 name: groupData.name,
+                 lastMessage: null,
+                 lastMessageAt: Date.now(),
+                 unreadCount: 0
+             };
+          });
+
           await update(ref(database), updates);
+          
           setViewMode('list');
           setNewGroupName('');
           setSelectedGroupMembers(new Set());
@@ -279,6 +416,12 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
           name: editGroupName,
           photoURL: editGroupPhoto || null
       });
+      // Also update inbox name for self immediately for responsiveness
+      // (The real sync happens on next message, but this helps)
+      await update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), {
+          name: editGroupName,
+          photoURL: editGroupPhoto || null
+      });
       setIsEditingGroup(false);
   };
 
@@ -293,12 +436,16 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       try {
         const url = await uploadImageToCloudinary(file);
         
-        // Immediate update as per requirements
         await update(ref(database, `groupChats/${selectedChat.id}`), {
             photoURL: url
         });
         
-        setEditGroupPhoto(url); // Sync local state
+        // Sync local inbox entry
+        await update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), {
+            photoURL: url
+        });
+        
+        setEditGroupPhoto(url); 
       } catch (error) {
         console.error("Upload failed", error);
         alert("Failed to upload image. Please try again.");
@@ -313,6 +460,10 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       if (!selectedChat) return;
       if (confirm("Remove group photo?")) {
           await update(ref(database, `groupChats/${selectedChat.id}`), {
+              photoURL: null
+          });
+           // Sync local inbox entry
+           await update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), {
               photoURL: null
           });
           setEditGroupPhoto('');
@@ -347,6 +498,7 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       updates[`groupChats/${selectedChat.id}/members/${uid}`] = null;
       updates[`groupChats/${selectedChat.id}/admins/${uid}`] = null; 
       updates[`users/${uid}/groupChats/${selectedChat.id}`] = null;
+      updates[`userInboxes/${uid}/${selectedChat.id}`] = null; // Remove from their inbox
       await update(ref(database), updates);
   };
 
@@ -355,6 +507,14 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
       const updates: any = {};
       updates[`groupChats/${selectedChat.id}/members/${uid}`] = true;
       updates[`users/${uid}/groupChats/${selectedChat.id}`] = true;
+      updates[`userInboxes/${uid}/${selectedChat.id}`] = {
+           type: 'group',
+           name: activeGroupData.name,
+           photoURL: activeGroupData.photoURL || null,
+           lastMessage: activeGroupData.lastMessage || null,
+           lastMessageAt: Date.now(),
+           unreadCount: 0
+      };
       await update(ref(database), updates);
   };
 
@@ -365,6 +525,7 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
           if (activeGroupData.members) {
              Object.keys(activeGroupData.members).forEach(uid => {
                  updates[`users/${uid}/groupChats/${selectedChat.id}`] = null;
+                 updates[`userInboxes/${uid}/${selectedChat.id}`] = null;
              });
           }
           await update(ref(database), updates);
@@ -388,6 +549,7 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
         updates[`groupChats/${selectedChat.id}/members/${user.uid}`] = null;
         updates[`groupChats/${selectedChat.id}/admins/${user.uid}`] = null;
         updates[`users/${user.uid}/groupChats/${selectedChat.id}`] = null;
+        updates[`userInboxes/${user.uid}/${selectedChat.id}`] = null;
         await update(ref(database), updates);
         setSelectedChat(null);
       }
@@ -443,10 +605,10 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
                            <div className="p-8 text-center text-neutral-600 italic text-sm">No messages yet.</div>
                        ) : (
                            chats.map(chat => {
-                               const isUnread = chat.lastMessage && chat.lastMessage.senderUid !== user?.uid && !chat.lastMessage.seen && chat.type === 'dm';
-                               // Use realtime name/photo if active group, else cached
+                               // Use local inbox data or realtime if active
                                const displayName = (chat.id === selectedChat?.id && activeGroupData) ? activeGroupData.name : chat.name;
                                const displayPhoto = (chat.id === selectedChat?.id && activeGroupData) ? activeGroupData.photoURL : chat.photoURL;
+                               const isUnread = (chat.unreadCount || 0) > 0;
 
                                return (
                                    <button 
@@ -470,11 +632,14 @@ export const Inbox: React.FC<InboxProps> = ({ onClose }) => {
                                                     {displayName.charAt(0)}
                                                 </div>
                                             )}
-                                            {isUnread && <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 bg-indigo-500 border-2 border-neutral-900 rounded-full"></span>}
+                                            
+                                            {/* Unread Badge */}
+                                            {isUnread && <span className="absolute -top-1 -right-1 w-4 h-4 bg-indigo-500 border-2 border-neutral-900 rounded-full flex items-center justify-center text-[8px] font-bold text-white">{chat.unreadCount}</span>}
                                        </div>
                                        <div className="flex-1 min-w-0">
                                            <div className="flex justify-between items-baseline mb-0.5">
                                                <span className={`font-medium text-sm truncate ${isUnread ? 'text-white' : 'text-neutral-300'} ${selectedChat?.id === chat.id ? 'text-indigo-300' : ''}`}>{displayName}</span>
+                                               <span className="text-[10px] text-neutral-600">{chat.timestamp ? new Date(chat.timestamp).toLocaleDateString([], {month:'short', day:'numeric'}) : ''}</span>
                                            </div>
                                            <p className={`text-xs truncate ${isUnread ? 'text-neutral-200 font-medium' : 'text-neutral-500'}`}>
                                                {chat.lastMessage?.text || 'No messages'}
