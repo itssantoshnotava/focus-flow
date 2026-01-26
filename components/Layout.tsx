@@ -63,6 +63,7 @@ export const Layout: React.FC = () => {
           return;
       }
 
+      // Live listeners for inbox and social constraints
       const unsubInbox = onValue(ref(database, `userInboxes/${user.uid}`), (snap) => {
           setInboxData(snap.val() || {});
       });
@@ -88,18 +89,20 @@ export const Layout: React.FC = () => {
   }, [user]);
 
   // Calculate distinct unread conversations based on visibility filters
+  // Resetting count when the relevant conversation is opened is handled by update(..., {unreadCount: 0}) in Inbox.tsx
   const inboxUnread = useMemo(() => {
       let count = 0;
       Object.entries(inboxData).forEach(([chatId, chat]: [string, any]) => {
+          if (!chat) return;
+
           const isGroup = chat.type === 'group';
           const isMutual = following[chatId] && followers[chatId];
           const isArchived = archivedChats[chatId];
 
-          // Visibility filter: Must be a group OR a DM between mutual followers
-          // Also check if it's not archived (standard badge behavior)
-          const isVisible = isGroup || (isMutual && !isArchived);
+          // Badge visibility rules: only show for items currently visible in the main inbox view
+          const isVisibleInMain = isGroup || (isMutual && !isArchived);
 
-          if (isVisible && chat.unreadCount && typeof chat.unreadCount === 'number' && chat.unreadCount > 0) {
+          if (isVisibleInMain && typeof chat.unreadCount === 'number' && chat.unreadCount > 0) {
               count++;
           }
       });
