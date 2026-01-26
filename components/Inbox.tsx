@@ -361,7 +361,7 @@ export const Inbox: React.FC = () => {
             <div className="flex items-center gap-2">{selectedChat.type === 'group' && <button onClick={() => navigate(`/group/${selectedChat.id}/settings`)} className="p-3 text-neutral-500 hover:text-white hover:bg-white/5 rounded-2xl transition-all"><Settings size={20} /></button>}<button className="p-3 text-neutral-500 hover:text-white hover:bg-white/5 rounded-2xl transition-all"><MoreVertical size={20} /></button></div>
           </div>
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-12" ref={scrollContainerRef}>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-16" ref={scrollContainerRef}>
             {messages.map((msg, index) => {
               if (msg.system) return <div key={msg.id} className="w-full flex justify-center py-2 animate-in fade-in slide-in-from-top-2 duration-300"><div className="bg-white/5 border border-white/5 rounded-full px-4 py-1 text-[10px] text-neutral-500 font-bold uppercase tracking-widest">{msg.text}</div></div>;
               const isMe = msg.senderUid === user?.uid;
@@ -383,56 +383,73 @@ export const Inbox: React.FC = () => {
               })();
 
               return (
-                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg animate-in ${isMe ? 'fade-in slide-in-from-right-4' : 'fade-in slide-in-from-left-4'} duration-200`}>
-                  <div className={`flex gap-3 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
+                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative`}>
+                  <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
                     {showAvatar && (
-                        <div className="w-8 h-8 rounded-lg bg-neutral-800 shrink-0 self-end mb-1 overflow-hidden">
-                            {groupMembersDetails.find(m => m.uid === msg.senderUid)?.photoURL ? <img src={groupMembersDetails.find(m => m.uid === msg.senderUid)?.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-neutral-500">{msg.senderName?.charAt(0)}</div>}
+                        <div className="w-7 h-7 rounded-lg bg-neutral-800 shrink-0 self-end mb-1 overflow-hidden">
+                            {groupMembersDetails.find(m => m.uid === msg.senderUid)?.photoURL ? <img src={groupMembersDetails.find(m => m.uid === msg.senderUid)?.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[9px] font-bold text-neutral-500">{msg.senderName?.charAt(0)}</div>}
                         </div>
                     )}
-                    <div className="flex flex-col min-w-0">
-                      {showSenderName && <span className="text-[10px] font-black text-indigo-400 mb-1 ml-3 uppercase tracking-wider">{msg.senderName}</span>}
+                    <div className="flex flex-col min-w-0 relative">
+                      {showSenderName && <span className="text-[10px] font-black text-indigo-400 mb-0.5 ml-3 uppercase tracking-wider">{msg.senderName}</span>}
                       
                       <div className="relative group/bubble">
-                        <div className={`px-4 pt-3 pb-2 rounded-2xl text-sm leading-relaxed shadow-sm transition-all break-words ${msg.deleted ? 'italic opacity-60 bg-white/5 border border-white/5 text-neutral-500' : isMe ? 'bg-indigo-600 text-white rounded-br-md' : 'bg-white/[0.04] text-neutral-200 rounded-bl-md border border-white/5'}`}>
+                        <div className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed shadow-sm transition-all break-words relative z-0 ${msg.deleted ? 'italic opacity-60 bg-neutral-900 border border-white/5 text-neutral-500 rounded-3xl' : isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}>
+                          
+                          {/* Lightweight Reply Preview */}
                           {!msg.deleted && msg.replyTo && (
-                            <div className={`mb-1 pl-2 border-l-2 border-indigo-500/50 flex flex-col gap-0.5 text-[11px] ${isMe ? 'text-white/60' : 'text-neutral-500'}`}>
-                              <span className="font-bold opacity-90">{msg.replyTo.senderName}</span>
+                            <div className={`mb-1.5 pl-2 border-l-2 border-white/20 flex flex-col gap-0.5 text-[11px] py-1 bg-black/10 rounded-r-lg ${isMe ? 'text-indigo-100' : 'text-neutral-400'}`}>
+                              <span className="font-black opacity-90 uppercase text-[9px] tracking-wider">{msg.replyTo.senderName}</span>
                               <span className="truncate italic opacity-80">{msg.replyTo.text}</span>
                             </div>
                           )}
-                          {!msg.deleted && msg.attachment && <div className="mb-2 rounded-xl overflow-hidden bg-black/20 border border-white/5">{msg.attachment.type === 'image' ? <img src={msg.attachment.url} className="max-w-full h-auto object-cover max-h-80" /> : <video src={msg.attachment.url} controls className="max-w-full h-auto max-h-80" />}</div>}
-                          <p>{msg.text}</p>
-                          <div className="flex items-center justify-end gap-2 mt-1 -mr-1">
-                            <span className="text-[9px] font-bold opacity-60 uppercase tracking-tighter">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                            {isLastSentByMe && <span className="text-[9px] font-black uppercase tracking-tighter opacity-80 animate-in fade-in slide-in-from-right-1">Seen</span>}
+
+                          {/* Media Rendering */}
+                          {!msg.deleted && msg.attachment && (
+                            <div className="mb-2 rounded-2xl overflow-hidden bg-black/20">
+                              {msg.attachment.type === 'image' ? (
+                                <img src={msg.attachment.url} className="max-w-full h-auto object-cover max-h-80 block" alt="Attachment" />
+                              ) : (
+                                <video src={msg.attachment.url} controls className="max-w-full h-auto max-h-80 block" />
+                              )}
+                            </div>
+                          )}
+
+                          <p className="inline-block whitespace-pre-wrap">{msg.text}</p>
+                          
+                          {/* Integrated Timestamp + Seen */}
+                          <div className={`flex items-center justify-end gap-1.5 mt-0.5 -mr-1 opacity-60 text-[9px] font-bold uppercase tracking-tighter ${isMe ? 'text-indigo-200' : 'text-neutral-500'}`}>
+                            <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            {isLastSentByMe && <span>· Seen</span>}
                           </div>
                         </div>
 
-                        {/* Reaction Display */}
+                        {/* Reaction Display - iMessage Floating Style */}
                         {Object.keys(aggregatedReactions).length > 0 && !msg.deleted && (
-                          <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`absolute -bottom-2 flex gap-0.5 z-10 scale-90 ${isMe ? 'right-2' : 'left-2'}`}>
                             {Object.entries(aggregatedReactions).map(([emoji, data]) => (
-                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold animate-reaction-bounce transition-all ${data.me ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-400' : 'bg-white/5 border-white/10 text-neutral-400'}`}>
-                                <span>{emoji}</span>
-                                {data.count > 1 && <span>{data.count}</span>}
+                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className={`flex items-center gap-1 px-1.5 py-1 rounded-full backdrop-blur-md border shadow-xl transition-all animate-in zoom-in-75 duration-200 ${data.me ? 'bg-indigo-600/80 border-indigo-400 text-white' : 'bg-neutral-800/80 border-white/10 text-neutral-300'}`}>
+                                <span className="text-xs">{emoji}</span>
+                                {data.count > 1 && <span className="text-[9px] font-black">{data.count}</span>}
                               </button>
                             ))}
                           </div>
                         )}
 
+                        {/* Action Buttons - Hidden until hover */}
                         {!msg.deleted && (
-                          <div className={`absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity px-2 z-10 ${isMe ? 'right-full' : 'left-full'}`}>
-                             <button onClick={() => setReplyingTo(msg)} className="p-1.5 bg-neutral-900 border border-white/10 rounded-lg text-neutral-500 hover:text-white transition-all"><Reply size={14} /></button>
-                             <button onClick={() => setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id)} className={`p-1.5 bg-neutral-900 border border-white/10 rounded-lg transition-all ${activeReactionPickerId === msg.id ? 'text-indigo-400 scale-110' : 'text-neutral-500 hover:text-white'}`}><Smile size={14} /></button>
-                             {isMe && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-1.5 bg-neutral-900 border border-white/10 rounded-lg text-neutral-500 hover:text-red-400 transition-all"><Trash2 size={14} /></button>}
+                          <div className={`absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity px-2 z-20 ${isMe ? 'right-full' : 'left-full'}`}>
+                             <button onClick={() => setReplyingTo(msg)} className="p-1.5 bg-neutral-900/80 backdrop-blur-md border border-white/10 rounded-full text-neutral-500 hover:text-white transition-all hover:scale-110"><Reply size={13} /></button>
+                             <button onClick={() => setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id)} className={`p-1.5 bg-neutral-900/80 backdrop-blur-md border border-white/10 rounded-full transition-all hover:scale-110 ${activeReactionPickerId === msg.id ? 'text-indigo-400 scale-110' : 'text-neutral-500 hover:text-white'}`}><Smile size={13} /></button>
+                             {isMe && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-1.5 bg-neutral-900/80 backdrop-blur-md border border-white/10 rounded-full text-neutral-500 hover:text-red-400 transition-all hover:scale-110"><Trash2 size={13} /></button>}
                           </div>
                         )}
 
+                        {/* Reaction Picker Overlay */}
                         {activeReactionPickerId === msg.id && (
-                          <div className={`absolute bottom-full mb-2 bg-neutral-900 border border-white/10 p-1 rounded-2xl shadow-2xl flex gap-1 z-50 animate-in fade-in zoom-in-95 duration-200 ${isMe ? 'right-0' : 'left-0'}`}>
+                          <div className={`absolute bottom-full mb-3 bg-neutral-900/95 backdrop-blur-xl border border-white/10 p-1 rounded-[24px] shadow-2xl flex gap-1 z-[60] animate-in fade-in zoom-in-95 duration-200 ${isMe ? 'right-0' : 'left-0'}`}>
                             {REACTION_EMOJIS.map(emoji => (
-                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className="p-2 hover:bg-white/5 rounded-xl transition-all hover:scale-125 text-lg">{emoji}</button>
+                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className="p-2.5 hover:bg-white/5 rounded-full transition-all hover:scale-125 text-xl leading-none">{emoji}</button>
                             ))}
                           </div>
                         )}
@@ -442,19 +459,29 @@ export const Inbox: React.FC = () => {
                 </div>
               );
             })}
-            {typingText && <div className="flex items-center gap-3 animate-in fade-in duration-300"><div className="px-5 py-3 bg-white/[0.03] border border-white/5 rounded-full rounded-tl-sm flex items-center gap-2"><div className="flex gap-1"><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot"></div><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot [animation-delay:0.2s]"></div><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot [animation-delay:0.4s]"></div></div><span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{typingText}</span></div></div>}
+            {typingText && (
+              <div className="flex items-center gap-2 animate-in fade-in duration-300 ml-2">
+                 <div className="px-4 py-3 bg-[#1f1f1f] border border-white/5 rounded-3xl rounded-bl-sm flex items-center gap-2">
+                    <div className="flex gap-1">
+                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot"></div>
+                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot [animation-delay:0.2s]"></div>
+                      <div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot [animation-delay:0.4s]"></div>
+                    </div>
+                 </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 
           {/* Unsend Confirmation Overlay */}
           {unsendConfirmId && (
-            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200 px-6">
                 <div className="bg-neutral-900 border border-white/10 p-6 rounded-[32px] shadow-2xl w-full max-w-[280px] text-center animate-in zoom-in-95 duration-200">
                     <div className="w-12 h-12 bg-red-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
                         <Trash2 className="text-red-500" size={24} />
                     </div>
-                    <h3 className="text-white font-bold text-lg mb-1">Unsend this message?</h3>
-                    <p className="text-neutral-500 text-sm mb-6">This will remove it for everyone.</p>
+                    <h3 className="text-white font-bold text-lg mb-1 tracking-tight">Unsend message?</h3>
+                    <p className="text-neutral-500 text-sm mb-6 leading-relaxed">This will remove it for everyone in the chat.</p>
                     <div className="flex flex-col gap-2">
                         <button onClick={() => unsendMessage(unsendConfirmId)} className="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-bold transition-all active:scale-95">Unsend</button>
                         <button onClick={() => setUnsendConfirmId(null)} className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 rounded-2xl font-bold transition-all">Cancel</button>
@@ -463,15 +490,61 @@ export const Inbox: React.FC = () => {
             </div>
           )}
 
-          <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-20">
-            {replyingTo && <div className="mb-4 p-4 bg-indigo-500/10 border-l-4 border-indigo-500 rounded-r-2xl flex items-center justify-between animate-in slide-in-from-bottom-2 duration-200"><div className="min-w-0"><p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-0.5">Replying to {replyingTo.senderName}</p><p className="text-sm text-neutral-400 truncate">{replyingTo.text}</p></div><button onClick={() => setReplyingTo(null)} className="p-2 text-neutral-500 hover:text-white transition-colors"><X size={18} /></button></div>}
-            <form onSubmit={sendMessage} className="flex gap-4 items-end max-w-5xl mx-auto">
-              <div className="flex-1 bg-white/[0.03] border border-white/10 rounded-[28px] p-2 flex items-end transition-all focus-within:border-indigo-500/50 focus-within:bg-white/[0.05]"><input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*" /><button type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploadingMedia} className="p-3 text-neutral-500 hover:text-indigo-400 transition-colors shrink-0 disabled:opacity-50">{isUploadingMedia ? <Loader2 size={20} className="animate-spin" /> : <Paperclip size={20} />}</button><textarea rows={1} value={inputText} onChange={handleInputChange} placeholder="Type a message..." className="flex-1 bg-transparent border-none text-white text-base px-2 py-3 focus:outline-none resize-none custom-scrollbar placeholder:text-neutral-600 font-medium" onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} /><button type="button" className="p-3 text-neutral-500 hover:text-indigo-400 transition-colors shrink-0"><SmilePlus size={20} /></button></div>
-              <button type="submit" disabled={!inputText.trim() && !isUploadingMedia} className="bg-indigo-600 text-white p-4 rounded-full shadow-lg shadow-indigo-900/40 hover:bg-indigo-500 transition-all active:scale-90 disabled:opacity-30 disabled:scale-100 disabled:shadow-none shrink-0"><Send size={24} /></button>
+          {/* Chat Input Area */}
+          <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
+            {replyingTo && (
+              <div className="mb-4 p-4 bg-indigo-500/10 border-l-4 border-indigo-500 rounded-r-2xl flex items-center justify-between animate-in slide-in-from-bottom-2 duration-200 max-w-5xl mx-auto">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-0.5">Replying to {replyingTo.senderName}</p>
+                  <p className="text-sm text-neutral-400 truncate">{replyingTo.text}</p>
+                </div>
+                <button onClick={() => setReplyingTo(null)} className="p-2 text-neutral-500 hover:text-white transition-colors"><X size={18} /></button>
+              </div>
+            )}
+            
+            <form onSubmit={sendMessage} className="flex gap-3 items-end max-w-5xl mx-auto">
+              <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end transition-all focus-within:bg-white/[0.06] focus-within:border-white/10">
+                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept="image/*,video/*" />
+                <button 
+                  type="button" 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingMedia}
+                  className="p-2.5 text-neutral-400 hover:text-indigo-400 transition-colors shrink-0 disabled:opacity-50"
+                >
+                  {isUploadingMedia ? <Loader2 size={22} className="animate-spin" /> : <Plus size={22} />}
+                </button>
+                <textarea 
+                  rows={1}
+                  value={inputText}
+                  onChange={handleInputChange}
+                  placeholder="iMessage"
+                  className="flex-1 bg-transparent border-none text-white text-[15px] px-2 py-2.5 focus:outline-none resize-none custom-scrollbar placeholder:text-neutral-600 font-medium"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                />
+                <button type="button" className="p-2.5 text-neutral-400 hover:text-indigo-400 transition-colors shrink-0"><SmilePlus size={22} /></button>
+              </div>
+              <button 
+                type="submit" 
+                disabled={!inputText.trim() && !isUploadingMedia}
+                className="bg-indigo-600 text-white p-3.5 rounded-full shadow-lg shadow-indigo-900/40 hover:bg-indigo-500 transition-all active:scale-90 disabled:opacity-30 disabled:scale-100 disabled:shadow-none shrink-0"
+              >
+                <Send size={20} />
+              </button>
             </form>
           </div>
         </div>
-      ) : <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-neutral-950 text-center px-12 relative overflow-hidden"><div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none"></div><div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-[150px] pointer-events-none"></div><div className="w-24 h-24 bg-neutral-900 border border-white/5 rounded-[32px] flex items-center justify-center mb-8 shadow-2xl relative z-10 rotate-3"><MessageCircle size={40} className="text-indigo-500" /></div><h2 className="text-3xl font-black text-white tracking-tight mb-3 relative z-10">Select a conversation</h2><p className="text-neutral-500 max-w-xs leading-relaxed relative z-10 font-medium">Choose a chat from the sidebar or start a new group study session with your friends.</p></div>}
+      ) : (
+        <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-neutral-950 text-center px-12 relative overflow-hidden">
+           <div className="absolute top-0 left-1/4 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] pointer-events-none"></div>
+           <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-500/5 rounded-full blur-[150px] pointer-events-none"></div>
+           
+           <div className="w-24 h-24 bg-neutral-900 border border-white/5 rounded-[32px] flex items-center justify-center mb-8 shadow-2xl relative z-10 rotate-3">
+              <MessageCircle size={40} className="text-indigo-500" />
+           </div>
+           <h2 className="text-3xl font-black text-white tracking-tight mb-3 relative z-10">Select a conversation</h2>
+           <p className="text-neutral-500 max-w-xs leading-relaxed relative z-10 font-medium">Choose a chat from the sidebar or start a new group study session with your friends.</p>
+        </div>
+      )}
     </div>
   );
 };
