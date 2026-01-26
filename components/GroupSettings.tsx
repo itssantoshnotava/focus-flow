@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ref, onValue, update, get, remove, set } from "firebase/database";
 import { database } from "../firebase";
@@ -25,10 +26,15 @@ export const GroupSettings: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number, y: number } | null>(null);
   const [showAddMember, setShowAddMember] = useState(false);
 
   const isHost = groupData?.hostUid === user?.uid;
   const isAdmin = groupData?.admins?.[user?.uid || ''] || isHost;
+
+  const activeMember = useMemo(() => 
+    membersDetails.find(m => m.uid === activeMenuId),
+  [activeMenuId, membersDetails]);
 
   useEffect(() => {
     if (!groupId) return;
@@ -96,11 +102,16 @@ export const GroupSettings: React.FC = () => {
     }
   };
 
+  const closeMenu = () => {
+    setActiveMenuId(null);
+    setMenuPos(null);
+  };
+
   const toggleAdmin = async (targetUid: string) => {
     if (!groupId || !isAdmin) return;
     const currentlyAdmin = groupData.admins?.[targetUid];
     await update(ref(database, `groupChats/${groupId}/admins`), { [targetUid]: currentlyAdmin ? null : true });
-    setActiveMenuId(null);
+    closeMenu();
   };
 
   const removeMember = async (targetUid: string) => {
@@ -112,14 +123,14 @@ export const GroupSettings: React.FC = () => {
     updates[`groupChats/${groupId}/admins/${targetUid}`] = null;
     updates[`userInboxes/${targetUid}/${groupId}`] = null;
     await update(ref(database), updates);
-    setActiveMenuId(null);
+    closeMenu();
   };
 
   const transferHost = async (targetUid: string) => {
     if (!groupId || !isHost) return;
     await update(ref(database, `groupChats/${groupId}`), { hostUid: targetUid });
     await update(ref(database, `groupChats/${groupId}/admins`), { [targetUid]: true });
-    setActiveMenuId(null);
+    closeMenu();
   };
 
   const deleteGroup = async () => {
@@ -338,64 +349,18 @@ export const GroupSettings: React.FC = () => {
 
                                 {isAdmin && member.uid !== user?.uid && (
                                     <button 
-                                        onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === member.uid ? null : member.uid); }}
-                                        className={`p-2 rounded-xl transition-colors relative z-30 ${activeMenuId === member.uid ? 'bg-indigo-600 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/10'}`}
+                                        onClick={(e) => { 
+                                          e.stopPropagation(); 
+                                          const rect = e.currentTarget.getBoundingClientRect();
+                                          setMenuPos({ x: rect.right, y: rect.bottom });
+                                          setActiveMenuId(member.uid);
+                                        }}
+                                        className={`p-2 rounded-xl transition-colors relative z-10 ${activeMenuId === member.uid ? 'bg-indigo-600 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/10'}`}
                                     >
                                         <MoreVertical size={20} />
                                     </button>
                                 )}
                             </div>
-
-                            {/* Actions Menu */}
-                            {activeMenuId === member.uid && (
-                                <>
-                                    {/* Backdrop to close on outside click */}
-                                    <div 
-                                        className="fixed inset-0 z-20 cursor-default" 
-                                        onClick={(e) => { e.stopPropagation(); setActiveMenuId(null); }}
-                                    />
-                                    <div className="absolute right-0 top-full mt-2 w-56 bg-neutral-900/95 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl overflow-hidden z-30 animate-in fade-in zoom-in-95 duration-200">
-                                        <div className="p-1.5 flex flex-col h-auto">
-                                            {!isMemberHost && (
-                                                <button 
-                                                    onClick={() => toggleAdmin(member.uid)}
-                                                    className="w-full flex items-center justify-between px-4 py-2.5 text-neutral-300 hover:bg-white/5 rounded-2xl text-sm font-bold transition-colors"
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        {isMemberAdmin ? <Shield size={18} /> : <ShieldCheck size={18} />}
-                                                        {isMemberAdmin ? 'Remove Admin' : 'Make Admin'}
-                                                    </div>
-                                                    <ChevronRight size={14} className="opacity-50" />
-                                                </button>
-                                            )}
-                                            {isHost && !isMemberHost && (
-                                                <button 
-                                                    onClick={() => transferHost(member.uid)}
-                                                    className="w-full flex items-center justify-between px-4 py-2.5 text-amber-400 hover:bg-amber-400/5 rounded-2xl text-sm font-bold transition-colors"
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <LogOut size={18} />
-                                                        Transfer Host
-                                                    </div>
-                                                    <ChevronRight size={14} className="opacity-50" />
-                                                </button>
-                                            )}
-                                            {!isMemberHost && (
-                                                <button 
-                                                    onClick={() => removeMember(member.uid)}
-                                                    className="w-full flex items-center justify-between px-4 py-2.5 text-red-400 hover:bg-red-400/5 rounded-2xl text-sm font-bold transition-colors"
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <UserMinus size={18} />
-                                                        Remove Member
-                                                    </div>
-                                                    <ChevronRight size={14} className="opacity-50" />
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                </>
-                            )}
                         </div>
                     );
                 })}
@@ -420,6 +385,72 @@ export const GroupSettings: React.FC = () => {
                 </button>
             )}
         </div>
+
+        {/* Member Action Menu Portal */}
+        {activeMenuId && menuPos && createPortal(
+            <div className="fixed inset-0 z-[9999] pointer-events-none">
+                {/* Full-screen Backdrop */}
+                <div 
+                    className="fixed inset-0 bg-transparent pointer-events-auto cursor-default" 
+                    onClick={closeMenu}
+                />
+                
+                {/* Floating Menu */}
+                <div 
+                    style={{ 
+                        position: 'fixed', 
+                        top: `${menuPos.y + 8}px`, 
+                        left: `${menuPos.x - 224}px`, // Align w-56 right edge to button right edge
+                        zIndex: 10000 
+                    }}
+                    className="w-56 bg-neutral-900/95 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 pointer-events-auto"
+                >
+                    <div className="p-1 flex flex-col h-auto">
+                        {activeMember && (
+                            <>
+                                {!(activeMember.uid === groupData.hostUid) && (
+                                    <button 
+                                        onClick={() => toggleAdmin(activeMember.uid)}
+                                        className="w-full flex items-center justify-between px-4 py-3 text-neutral-300 hover:bg-white/5 rounded-2xl text-sm font-bold transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            {groupData.admins?.[activeMember.uid] ? <Shield size={18} /> : <ShieldCheck size={18} />}
+                                            {groupData.admins?.[activeMember.uid] ? 'Remove Admin' : 'Make Admin'}
+                                        </div>
+                                        <ChevronRight size={14} className="opacity-50" />
+                                    </button>
+                                )}
+                                {isHost && !(activeMember.uid === groupData.hostUid) && (
+                                    <button 
+                                        onClick={() => transferHost(activeMember.uid)}
+                                        className="w-full flex items-center justify-between px-4 py-3 text-amber-400 hover:bg-amber-400/5 rounded-2xl text-sm font-bold transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <LogOut size={18} />
+                                            Transfer Host
+                                        </div>
+                                        <ChevronRight size={14} className="opacity-50" />
+                                    </button>
+                                )}
+                                {!(activeMember.uid === groupData.hostUid) && (
+                                    <button 
+                                        onClick={() => removeMember(activeMember.uid)}
+                                        className="w-full flex items-center justify-between px-4 py-3 text-red-400 hover:bg-red-400/5 rounded-2xl text-sm font-bold transition-colors"
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <UserMinus size={18} />
+                                            Remove Member
+                                        </div>
+                                        <ChevronRight size={14} className="opacity-50" />
+                                    </button>
+                                )}
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>,
+            document.body
+        )}
       </div>
     </div>
   );
