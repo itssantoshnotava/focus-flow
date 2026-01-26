@@ -10,7 +10,7 @@ import {
     Circle, Settings, Camera, Trash2, UserPlus, 
     Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
     SmilePlus, Paperclip, Play, Image as ImageIcon, Film, MoreVertical, Smile, AlertCircle,
-    VolumeX, Archive, Ban, Lock, Trash, UserCircle2, ShieldCheck, Crown
+    VolumeX, Archive, Ban, Lock, Trash, UserCircle2, ShieldCheck, Crown, ArchiveRestore
 } from 'lucide-react';
 
 interface ChatItem {
@@ -63,6 +63,8 @@ export const Inbox: React.FC = () => {
   const [unsendConfirmId, setUnsendConfirmId] = useState<string | null>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [sidebarMenuId, setSidebarMenuId] = useState<string | null>(null);
+  const [sidebarMenuPos, setSidebarMenuPos] = useState<{ x: number, y: number } | null>(null);
 
   const [isAdmin, setIsAdmin] = useState(false);
   const [isHost, setIsHost] = useState(false);
@@ -113,16 +115,13 @@ export const Inbox: React.FC = () => {
             setChats(list.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0)));
             
             list.forEach(chat => {
-                if (chat.type === 'dm') {
-                    // Constant profile pfp sync
-                    onValue(ref(database, `users/${chat.id}`), (uSnap) => {
-                        if (uSnap.exists()) setUserProfiles(prev => ({ ...prev, [chat.id]: uSnap.val() }));
-                    });
-                    // Constant presence sync
-                    onValue(ref(database, `presence/${chat.id}`), (pSnap) => {
-                        if (pSnap.exists()) setListPresences(prev => ({ ...prev, [chat.id]: pSnap.val() }));
-                    });
-                }
+                // Profile & Presence Sync
+                onValue(ref(database, `users/${chat.id}`), (uSnap) => {
+                    if (uSnap.exists()) setUserProfiles(prev => ({ ...prev, [chat.id]: uSnap.val() }));
+                });
+                onValue(ref(database, `presence/${chat.id}`), (pSnap) => {
+                    if (pSnap.exists()) setListPresences(prev => ({ ...prev, [chat.id]: pSnap.val() }));
+                });
             });
         } else { setChats([]); }
         setLoading(false);
@@ -215,6 +214,20 @@ export const Inbox: React.FC = () => {
     setUnsendConfirmId(null);
   };
 
+  const handleArchive = async (chatId: string) => {
+    if (!user) return;
+    const currentlyArchived = archivedChats[chatId];
+    await set(ref(database, `archivedChats/${user.uid}/${chatId}`), currentlyArchived ? null : true);
+    setSidebarMenuId(null);
+  };
+
+  const handleDeleteChat = async (chatId: string) => {
+    if (!user || !window.confirm("Delete entire chat history?")) return;
+    await remove(ref(database, `userInboxes/${user.uid}/${chatId}`));
+    setSidebarMenuId(null);
+    if (activeChatId === chatId) setActiveChatId(null);
+  };
+
   const handleReaction = async (msgId: string, emoji: string) => {
     const path = selectedChat?.type === 'dm' ? `messages/${currentConvoId}/${msgId}/reactions/${user!.uid}` : `groupMessages/${activeChatId}/${msgId}/reactions/${user!.uid}`;
     const snap = await get(ref(database, path));
@@ -222,6 +235,11 @@ export const Inbox: React.FC = () => {
     else await set(ref(database, path), emoji);
     setActiveReactionPickerId(null);
   };
+
+  const lastUserMessageId = useMemo(() => {
+    const fromMe = messages.filter(m => m.senderUid === user?.uid);
+    return fromMe.length > 0 ? fromMe[fromMe.length - 1].id : null;
+  }, [messages, user?.uid]);
 
   if (loading && !chats.length) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
@@ -252,24 +270,25 @@ export const Inbox: React.FC = () => {
             const photo = chat.type === 'dm' ? profile?.photoURL : chat.photoURL;
             const name = chat.type === 'dm' ? profile?.name || chat.name : chat.name;
             return (
-              <button 
-                key={chat.id} 
-                onClick={() => { setActiveChatId(chat.id); navigate(`/inbox?chatId=${chat.id}`, { replace: true }); }} 
-                className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10' : 'hover:bg-white/[0.04] border-transparent'}`}
-              >
-                <div className="relative shrink-0">
-                  {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name.charAt(0)}</div>}
-                  {chat.type === 'dm' && <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
-                  {chat.unreadCount ? <div className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full border-2 border-neutral-950 flex items-center justify-center text-[10px] font-black text-white">{chat.unreadCount}</div> : null}
-                </div>
-                <div className="flex-1 text-left min-w-0">
-                    <div className="flex justify-between items-center mb-0.5">
-                        <span className="font-bold text-white truncate">{name}</span>
-                        {chat.type === 'group' && <Users size={12} className="text-neutral-600" />}
+              <div key={chat.id} className="group/tile relative">
+                  <button 
+                    onClick={() => { setActiveChatId(chat.id); navigate(`/inbox?chatId=${chat.id}`, { replace: true }); }} 
+                    className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10' : 'hover:bg-white/[0.04] border-transparent'}`}
+                  >
+                    <div className="relative shrink-0">
+                      {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name.charAt(0)}</div>}
+                      <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>
+                      {chat.unreadCount ? <div className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full border-2 border-neutral-950 flex items-center justify-center text-[10px] font-black text-white">{chat.unreadCount}</div> : null}
                     </div>
-                    <p className={`text-sm truncate ${chat.unreadCount ? 'text-neutral-200 font-medium' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages'}</p>
-                </div>
-              </button>
+                    <div className="flex-1 text-left min-w-0">
+                        <div className="flex justify-between items-center mb-0.5">
+                            <span className="font-bold text-white truncate">{name}</span>
+                        </div>
+                        <p className={`text-sm truncate ${chat.unreadCount ? 'text-neutral-200 font-medium' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages'}</p>
+                    </div>
+                  </button>
+                  <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSidebarMenuPos({ x: r.right, y: r.bottom }); setSidebarMenuId(chat.id); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-neutral-500 hover:text-white opacity-0 group-hover/tile:opacity-100 transition-opacity"><MoreVertical size={16} /></button>
+              </div>
             );
           })}
         </div>
@@ -283,18 +302,18 @@ export const Inbox: React.FC = () => {
               <button onClick={() => setActiveChatId(null)} className="md:hidden p-2 text-neutral-500 hover:text-white"><ArrowLeft size={24} /></button>
               <div className="cursor-pointer relative" onClick={() => navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`)}>
                   { (selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL) ? <img src={selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL} className="w-11 h-11 rounded-full object-cover border border-white/5 shadow-lg" /> : <div className="w-11 h-11 rounded-full bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.name : selectedChat.name)?.charAt(0)}</div> }
-                  {selectedChat.type === 'dm' && friendPresence?.online && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950 shadow-sm animate-pulse"></div>}
+                  {friendPresence?.online && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950 shadow-sm animate-pulse"></div>}
               </div>
               <div className="flex flex-col min-w-0">
                   <span className="font-bold text-white truncate text-base md:text-lg">{selectedChat.type === 'dm' ? (userProfiles[activeChatId]?.name || selectedChat.name) : selectedChat.name}</span>
-                  <span className="text-[10px] uppercase font-black text-neutral-500 tracking-wider">{selectedChat.type === 'dm' ? (friendPresence?.online ? 'Online' : 'Offline') : `${Object.keys(selectedChat.members || {}).length} Members ${isAdmin ? '• Admin' : ''}`}</span>
+                  <span className="text-[10px] uppercase font-black text-neutral-500 tracking-wider">{friendPresence?.online ? 'Online' : 'Offline'}</span>
               </div>
             </div>
             <button onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)} className={`p-3 rounded-2xl transition-colors ${isHeaderMenuOpen ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}><MoreVertical size={20} /></button>
             {isHeaderMenuOpen && (
                 <div className="absolute right-6 top-20 w-48 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 z-50 animate-in zoom-in">
                     {selectedChat.type === 'group' && <button onClick={() => { setIsHeaderMenuOpen(false); navigate(`/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Settings size={18} /> Group Details</button>}
-                    <button onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><UserCircle2 size={18} /> View {selectedChat.type === 'dm' ? 'Profile' : 'Members'}</button>
+                    <button onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><UserCircle2 size={18} /> View Profile</button>
                 </div>
             )}
           </div>
@@ -304,6 +323,8 @@ export const Inbox: React.FC = () => {
               const isMe = msg.senderUid === user?.uid;
               const senderPfp = userProfiles[msg.senderUid]?.photoURL;
               const reactions = Object.entries(msg.reactions || {});
+              const isStatusMsg = lastUserMessageId === msg.id;
+              
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-2`}>
                    <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -313,19 +334,18 @@ export const Inbox: React.FC = () => {
                         </div>
                       )}
                       <div className="flex flex-col min-w-0 relative">
-                        {selectedChat.type === 'group' && !isMe && <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3 mb-1">{msg.senderName} {groupAdmins[msg.senderUid] && <ShieldCheck size={10} className="inline ml-1 text-indigo-400" />}</span>}
                         <div onDoubleClick={() => handleReaction(msg.id, '❤️')} className={`rounded-[22px] px-4 py-2.5 shadow-lg cursor-pointer relative ${isMe ? 'bg-indigo-600 text-white rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-bl-lg border border-white/5'}`}>
                             {msg.replyTo && (
-                                <div className="bg-white/5 rounded-lg py-1.5 px-2.5 mb-2 border-l-2 border-indigo-500/50 text-xs italic opacity-80 inline-block max-w-full">
-                                    <span className="block font-black uppercase text-[8px] not-italic text-indigo-400 mb-0.5">{msg.replyTo.senderName}</span>
+                                <div className="bg-white/5 rounded-lg py-1 px-2.5 mb-2 border-l-2 border-indigo-500/50 text-[11px] italic opacity-80 inline-block max-w-full truncate">
+                                    <span className="block font-black uppercase text-[7px] not-italic text-indigo-400 mb-0.5">{msg.replyTo.senderName}</span>
                                     {msg.replyTo.text}
                                 </div>
                             )}
                             <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
-                            {isMe && (
-                                <div className="absolute -bottom-5 right-0 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                                    <span className="text-[9px] font-black uppercase text-neutral-500 tracking-tighter">{msg.seen ? 'Seen' : 'Sent'}</span>
-                                    {msg.seen ? <CheckCheck size={12} className="text-indigo-500" /> : <Check size={12} className="text-neutral-600" />}
+                            {isMe && isStatusMsg && (
+                                <div className="absolute -bottom-5 right-0 flex items-center gap-1 opacity-100 transition-opacity">
+                                    <span className="text-[9px] font-black uppercase text-neutral-600 tracking-tighter">{msg.seen ? 'Seen' : 'Sent'}</span>
+                                    {msg.seen ? <CheckCheck size={11} className="text-indigo-500" /> : <Check size={11} className="text-neutral-700" />}
                                 </div>
                             )}
                         </div>
@@ -346,15 +366,15 @@ export const Inbox: React.FC = () => {
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
               <div className="max-w-5xl mx-auto flex flex-col gap-2 relative">
                   {replyingTo && (
-                    <div className="flex items-center justify-between bg-white/[0.04] backdrop-blur-3xl px-4 py-2.5 rounded-[18px] border border-white/5 mb-2 animate-in slide-in-from-bottom-2">
+                    <div className="flex items-center justify-between bg-white/[0.04] backdrop-blur-3xl px-4 py-2 rounded-[18px] border border-white/5 mb-2 animate-in slide-in-from-bottom-2">
                         <div className="flex items-center gap-3 overflow-hidden">
-                            <div className="w-1 h-6 bg-indigo-500 rounded-full shrink-0"></div>
+                            <div className="w-1 h-5 bg-indigo-500 rounded-full shrink-0"></div>
                             <div className="flex flex-col min-w-0">
-                                <span className="text-[10px] font-black uppercase text-indigo-400 tracking-widest">{replyingTo.senderName}</span>
-                                <span className="text-xs text-neutral-400 truncate opacity-80">{replyingTo.text}</span>
+                                <span className="text-[9px] font-black uppercase text-indigo-400 tracking-widest leading-none mb-0.5">{replyingTo.senderName}</span>
+                                <span className="text-[11px] text-neutral-400 truncate opacity-80 leading-tight">{replyingTo.text}</span>
                             </div>
                         </div>
-                        <button onClick={() => setReplyingTo(null)} className="p-1 text-neutral-500 hover:text-white bg-white/5 rounded-full"><X size={14} /></button>
+                        <button onClick={() => setReplyingTo(null)} className="p-1 text-neutral-500 hover:text-white bg-white/5 rounded-full"><X size={12} /></button>
                     </div>
                   )}
                   <div className="flex gap-3 items-end">
@@ -369,6 +389,10 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
       ) : ( <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-neutral-950 text-center px-12"><MessageCircle size={48} className="text-neutral-800 mb-4 opacity-50" /><h2 className="text-2xl font-black text-white mb-2">Select a conversation</h2><p className="text-neutral-600 text-sm">Choose a friend or group to start chatting.</p></div> )}
+
+      {sidebarMenuId && sidebarMenuPos && createPortal(
+          <div className="fixed inset-0 z-[1000]"><div className="absolute inset-0 bg-transparent" onClick={() => setSidebarMenuId(null)}></div><div style={{ position: 'fixed', top: `${sidebarMenuPos.y + 8}px`, left: `${sidebarMenuPos.x - 160}px` }} className="w-40 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 animate-in zoom-in">{archivedChats[sidebarMenuId] ? <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><ArchiveRestore size={16} /> Unarchive</button> : <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Archive size={16} /> Archive</button>}<button onClick={() => handleDeleteChat(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 rounded-xl"><Trash2 size={16} /> Delete</button></div></div>, document.body
+      )}
     </div>
   );
 };
