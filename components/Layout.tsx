@@ -56,15 +56,17 @@ export const Layout: React.FC = () => {
 
       const inboxRef = ref(database, `userInboxes/${user.uid}`);
       const unsubInbox = onValue(inboxRef, (snapshot) => {
-          let unreadChatsCount = 0;
+          let unreadConversations = 0;
           if (snapshot.exists()) {
               snapshot.forEach((child) => {
-                  if ((child.val().unreadCount || 0) > 0) {
-                      unreadChatsCount++;
+                  const data = child.val();
+                  // Count the number of DISTINCT conversations that have at least one unread message
+                  if (data && typeof data.unreadCount === 'number' && data.unreadCount > 0) {
+                      unreadConversations++;
                   }
               });
           }
-          setInboxUnread(unreadChatsCount);
+          setInboxUnread(unreadConversations);
       });
 
       return () => {

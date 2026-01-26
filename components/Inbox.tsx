@@ -84,7 +84,7 @@ export const Inbox: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- SCROLL MANAGEMENT FIX ---
+  // --- SCROLL MANAGEMENT ---
   const isInitialLoadRef = useRef(true);
   const prevActiveChatIdRef = useRef<string | null>(null);
 
@@ -277,10 +277,16 @@ export const Inbox: React.FC = () => {
         const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(list);
         list.forEach(m => { if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${messagesPath}/${m.id}`), { seen: true }); });
+        
+        // --- REAL-TIME UNREAD CLEARING ---
+        // Whenever messages arrive/update and we are viewing this chat, ensure unreadCount is 0 in the DB
+        update(ref(database, `userInboxes/${user.uid}/${activeChatId}`), { unreadCount: 0 });
       } else { setMessages([]); }
     });
-    // Reset unread count when chat is opened
+    
+    // Initial reset when chat is opened
     update(ref(database, `userInboxes/${user.uid}/${activeChatId}`), { unreadCount: 0 });
+    
     if (selectedChat?.type === 'dm') onValue(ref(database, `presence/${activeChatId}`), (snap) => setFriendPresence(snap.val()));
     return () => unsubMessages();
   }, [activeChatId, currentChatId, user, selectedChat?.type]);
