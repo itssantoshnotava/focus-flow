@@ -56,6 +56,7 @@ export const Inbox: React.FC = () => {
   const [unsendConfirmId, setUnsendConfirmId] = useState<string | null>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [messageMenuId, setMessageMenuId] = useState<string | null>(null);
+  const [listMenuId, setListMenuId] = useState<string | null>(null);
 
   // Block & Social States
   const [following, setFollowing] = useState<Record<string, boolean>>({});
@@ -221,6 +222,7 @@ export const Inbox: React.FC = () => {
   // Filter chats: Main view vs Archived view
   const filteredChats = useMemo(() => {
     return chats.filter(c => {
+        if (!c || !c.id) return false;
         const isArchived = archivedChats[c.id];
         if (showArchived) return isArchived;
         if (isArchived) return false;
@@ -277,6 +279,16 @@ export const Inbox: React.FC = () => {
     await set(ref(database, `archivedChats/${user.uid}/${selectedChat.id}`), isArchived ? null : true);
     if (!isArchived) setSelectedChat(null);
     setIsHeaderMenuOpen(false);
+  };
+
+  const handleRemoveChat = async (e: React.MouseEvent, chatId: string) => {
+      e.stopPropagation();
+      if (!user) return;
+      if (window.confirm("Remove this chat from your inbox? History remains but the entry will be cleared.")) {
+          await remove(ref(database, `userInboxes/${user.uid}/${chatId}`));
+          if (selectedChat?.id === chatId) setSelectedChat(null);
+          setListMenuId(null);
+      }
   };
 
   const handleTyping = (text: string) => {
@@ -409,20 +421,44 @@ export const Inbox: React.FC = () => {
             filteredChats.length > 0 ? (
                 filteredChats.map(chat => {
                 const isSelected = selectedChat?.id === chat.id;
+                const isMenuOpen = listMenuId === chat.id;
                 return (
-                  <button key={chat.id} onClick={() => setSelectedChat(chat)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] group transition-opacity ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl opacity-100' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}>
-                    <div className="relative shrink-0">
-                      {chat.photoURL ? <img src={chat.photoURL} className="w-14 h-14 rounded-full object-cover" /> : <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{chat.name.charAt(0)}</div>}
-                      {chat.unreadCount ? chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-neutral-950">{chat.unreadCount}</div> : null}
-                    </div>
-                    <div className="flex-1 text-left overflow-hidden">
-                      <div className="flex justify-between items-baseline mb-0.5">
-                        <span className={`font-bold truncate text-base ${isSelected ? 'text-white' : 'text-neutral-200'}`}>{chat.name}</span>
-                        <span className={`text-[10px] uppercase font-black shrink-0 ml-2 ${isSelected ? 'text-white/60' : 'text-neutral-500'}`}>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                      <p className={`text-sm truncate font-medium ${isSelected ? 'text-white/80' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages yet'}</p>
-                    </div>
-                  </button>
+                  <div key={chat.id} className="relative group/item">
+                      <button onClick={() => setSelectedChat(chat)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl opacity-100' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}>
+                        <div className="relative shrink-0">
+                          {chat.photoURL ? <img src={chat.photoURL} className="w-14 h-14 rounded-full object-cover" /> : <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{chat.name.charAt(0)}</div>}
+                          {chat.unreadCount ? chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-neutral-950">{chat.unreadCount}</div> : null}
+                        </div>
+                        <div className="flex-1 text-left overflow-hidden">
+                          <div className="flex justify-between items-baseline mb-0.5">
+                            <span className={`font-bold truncate text-base ${isSelected ? 'text-white' : 'text-neutral-200'}`}>{chat.name}</span>
+                            <span className={`text-[10px] uppercase font-black shrink-0 ml-2 ${isSelected ? 'text-white/60' : 'text-neutral-500'}`}>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
+                          <p className={`text-sm truncate font-medium ${isSelected ? 'text-white/80' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages yet'}</p>
+                        </div>
+                        
+                        <div className={`absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity`}>
+                             <button 
+                                onClick={(e) => { e.stopPropagation(); setListMenuId(isMenuOpen ? null : chat.id); }}
+                                className="p-2 bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-full border border-white/10"
+                             >
+                                 <MoreVertical size={16} />
+                             </button>
+                        </div>
+                      </button>
+                      
+                      {isMenuOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setListMenuId(null)}></div>
+                            <div className="absolute right-4 top-14 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl z-50 p-1 w-44 animate-in fade-in zoom-in-95 duration-200">
+                                <button onClick={(e) => handleRemoveChat(e, chat.id)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/10 rounded-xl transition-colors">
+                                    <Trash2 size={16} /> Remove Chat
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); setListMenuId(null); }} className="w-full px-4 py-2 text-[10px] font-black text-neutral-500 uppercase tracking-widest text-center hover:text-white transition-colors">Cancel</button>
+                            </div>
+                          </>
+                      )}
+                  </div>
                 );
               })
             ) : (
@@ -489,15 +525,15 @@ export const Inbox: React.FC = () => {
                             <div className="fixed inset-0 z-[90]" onClick={() => setIsHeaderMenuOpen(false)}></div>
                             <div className="absolute top-full right-0 mt-2 w-48 bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-[24px] shadow-2xl p-1 z-[100] animate-in fade-in zoom-in-95 duration-200">
                                 {selectedChat.type === 'dm' && (
-                                    <button onClick={handleBlock} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/10 rounded-2xl transition-colors">
-                                        <Ban size={18} /> {iBlockedThem[selectedChat.id] ? 'Unblock' : 'Block'}
+                                    <button onClick={handleBlock} className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/10 rounded-2xl transition-colors">
+                                        <div className="flex items-center gap-3"><Ban size={18} /> {iBlockedThem[selectedChat.id] ? 'Unblock' : 'Block'}</div>
                                     </button>
                                 )}
-                                <button onClick={handleMute} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
-                                    <VolumeX size={18} /> {mutedChats[selectedChat.id] ? 'Unmute' : 'Mute'}
+                                <button onClick={handleMute} className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
+                                    <div className="flex items-center gap-3"><VolumeX size={18} /> {mutedChats[selectedChat.id] ? 'Unmute' : 'Mute'}</div>
                                 </button>
-                                <button onClick={handleArchive} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
-                                    <Archive size={18} /> {archivedChats[selectedChat.id] ? 'Unarchive' : 'Archive'}
+                                <button onClick={handleArchive} className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
+                                    <div className="flex items-center gap-3"><Archive size={18} /> {archivedChats[selectedChat.id] ? 'Unarchive' : 'Archive'}</div>
                                 </button>
                                 <div className="h-px bg-white/5 my-1" />
                                 <button onClick={() => setIsHeaderMenuOpen(false)} className="w-full px-4 py-3 text-[10px] font-black text-neutral-600 uppercase tracking-widest hover:text-white text-center">Close</button>
@@ -629,10 +665,12 @@ export const Inbox: React.FC = () => {
 
                 {isCurrentChatBlocked || (selectedChat.type === 'dm' && !isCurrentChatMutual) ? (
                     <div className="flex items-center justify-center py-4 bg-neutral-900/50 border border-white/5 rounded-3xl gap-3">
-                        <Lock size={16} className="text-neutral-500" />
-                        <span className="text-neutral-500 text-sm font-bold uppercase tracking-widest">
-                            {isCurrentChatBlocked ? 'Relationship Blocked' : 'Mutual Follow Required'}
-                        </span>
+                        <div className="flex items-center gap-3">
+                            <Lock size={16} className="text-neutral-500" />
+                            <span className="text-neutral-500 text-sm font-bold uppercase tracking-widest">
+                                {isCurrentChatBlocked ? 'Relationship Blocked' : 'Mutual Follow Required'}
+                            </span>
+                        </div>
                         {!isCurrentChatBlocked && !isCurrentChatMutual && (
                             <button onClick={() => navigate(`/profile/${selectedChat.id}`)} className="text-indigo-500 text-xs font-bold hover:underline">View Profile</button>
                         )}

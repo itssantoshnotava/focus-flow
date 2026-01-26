@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ref, onValue, get, remove } from "firebase/database";
-import { database } from "../firebase";
+import { ref, onValue, get, remove, update, query, orderByChild, equalTo } from "firebase/database";
+import { deleteUser } from "firebase/auth";
+import { database, auth } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
   ArrowLeft, LogOut, ChevronRight, User, Bell, 
-  Shield, Globe, HelpCircle, Moon, Ban, Loader2, Unlock
+  Shield, Globe, HelpCircle, Moon, Ban, Loader2, Unlock, Trash2, AlertTriangle, ShieldAlert
 } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [view, setView] = useState<'main' | 'blocked_accounts'>('main');
+  const [view, setView] = useState<'main' | 'blocked_accounts' | 'privacy_security' | 'data_controls'>('main');
   const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   useEffect(() => {
     if (view === 'blocked_accounts' && user) {
@@ -45,20 +47,124 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const SettingItem = ({ icon: Icon, label, description, colorClass = "text-neutral-500", onClick }: { icon: any, label: string, description?: string, colorClass?: string, onClick?: () => void }) => (
-    <div onClick={onClick} className="flex items-center justify-between p-4 bg-white/[0.03] border border-white/[0.05] rounded-[24px] hover:bg-white/[0.06] transition-all cursor-pointer group">
+  const handleDeleteAccount = async () => {
+      if (!user) return;
+      
+      const confirmText = "DELETE";
+      const userInput = window.prompt("Type 'DELETE' to permanently remove your account and all associated data. This cannot be undone.");
+      
+      if (userInput !== confirmText) return;
+
+      setIsDeletingAccount(true);
+      const uid = user.uid;
+
+      try {
+          // 1. Reset Access Code
+          const codesRef = ref(database, 'accessCodes');
+          const codeQuery = query(codesRef, orderByChild('usedBy'), equalTo(uid));
+          const codeSnap = await get(codeQuery);
+          if (codeSnap.exists()) {
+              const codeUpdates: any = {};
+              Object.keys(codeSnap.val()).forEach(codeKey => {
+                  codeUpdates[`accessCodes/${codeKey}/used`] = false;
+                  codeUpdates[`accessCodes/${codeKey}/usedBy`] = null;
+                  codeUpdates[`accessCodes/${codeKey}/usedAt`] = null;
+              });
+              await update(ref(database), codeUpdates);
+          }
+
+          // 2. Cleanup Social Relationships
+          // Remove my following entries and their corresponding followers entries
+          const myFollowingSnap = await get(ref(database, `following/${uid}`));
+          if (myFollowingSnap.exists()) {
+              const followingList = Object.keys(myFollowingSnap.val());
+              const followUpdates: any = {};
+              followingList.forEach(targetId => {
+                  followUpdates[`followers/${targetId}/${uid}`] = null;
+              });
+              await update(ref(database), followUpdates);
+          }
+
+          // Remove entries from people following me
+          const myFollowersSnap = await get(ref(database, `followers/${uid}`));
+          if (myFollowersSnap.exists()) {
+              const followersList = Object.keys(myFollowersSnap.val());
+              const reverseFollowUpdates: any = {};
+              followersList.forEach(followerId => {
+                  reverseFollowUpdates[`following/${followerId}/${uid}`] = null;
+                  // Also remove from their inbox if it's a DM
+                  reverseFollowUpdates[`userInboxes/${followerId}/${uid}`] = null;
+              });
+              await update(ref(database), reverseFollowUpdates);
+          }
+
+          // 3. Cleanup Group Chats
+          const userGroupsRef = ref(database, `users/${uid}/groupChats`);
+          const groupsSnap = await get(userGroupsRef);
+          if (groupsSnap.exists()) {
+              const groupIds = Object.keys(groupsSnap.val());
+              const groupUpdates: any = {};
+              groupIds.forEach(gid => {
+                  groupUpdates[`groupChats/${gid}/members/${uid}`] = null;
+                  groupUpdates[`groupChats/${gid}/admins/${uid}`] = null;
+              });
+              await update(ref(database), groupUpdates);
+          }
+
+          // 4. Cleanup Core Nodes
+          await remove(ref(database, `users/${uid}`));
+          await remove(ref(database, `following/${uid}`));
+          await remove(ref(database, `followers/${uid}`));
+          await remove(ref(database, `userInboxes/${uid}`));
+          await remove(ref(database, `presence/${uid}`));
+          await remove(ref(database, `blocks/${uid}`));
+          await remove(ref(database, `mutedChats/${uid}`));
+          await remove(ref(database, `archivedChats/${uid}`));
+
+          // 5. Delete Firebase Auth User
+          if (auth.currentUser) {
+              await deleteUser(auth.currentUser);
+          }
+
+          localStorage.clear();
+          window.location.hash = '/login';
+
+      } catch (err: any) {
+          console.error("Account deletion failed", err);
+          if (err.code === 'auth/requires-recent-login') {
+              alert("Please log out and log back in to perform this sensitive operation.");
+          } else {
+              alert("Failed to delete account. Please try again later.");
+          }
+      } finally {
+          setIsDeletingAccount(false);
+      }
+  };
+
+  const SettingItem = ({ icon: Icon, label, description, colorClass = "text-neutral-500", onClick, destructive = false }: { icon: any, label: string, description?: string, colorClass?: string, onClick?: () => void, destructive?: boolean }) => (
+    <div onClick={onClick} className={`flex items-center justify-between p-4 bg-white/[0.03] border border-white/[0.05] rounded-[24px] hover:bg-white/[0.06] transition-all cursor-pointer group`}>
       <div className="flex items-center gap-4">
-        <div className={`p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 group-hover:text-indigo-400 transition-colors ${colorClass}`}>
+        <div className={`p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 transition-colors ${destructive ? 'group-hover:bg-red-500/10 group-hover:text-red-400' : 'group-hover:text-indigo-400'} ${colorClass}`}>
           <Icon size={20} />
         </div>
         <div className="flex flex-col">
-          <span className="text-sm font-bold text-white tracking-tight">{label}</span>
+          <span className={`text-sm font-bold tracking-tight ${destructive ? 'text-red-500' : 'text-white'}`}>{label}</span>
           {description && <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-tighter">{description}</span>}
         </div>
       </div>
       <ChevronRight size={18} className="text-neutral-600 group-hover:text-neutral-400 transition-colors" />
     </div>
   );
+
+  if (isDeletingAccount) {
+      return (
+          <div className="flex flex-col h-full items-center justify-center bg-neutral-950 p-6 text-center">
+              <Loader2 className="animate-spin text-red-500 mb-4" size={40} />
+              <h2 className="text-xl font-black text-white mb-2">Deleting Account...</h2>
+              <p className="text-neutral-500 text-sm">Please wait while we securely remove your data.</p>
+          </div>
+      );
+  }
 
   if (view === 'blocked_accounts') {
       return (
@@ -87,6 +193,53 @@ export const SettingsPage: React.FC = () => {
       );
   }
 
+  if (view === 'privacy_security') {
+      return (
+          <div className="flex-1 h-full bg-neutral-950 overflow-y-auto custom-scrollbar relative">
+               <div className="max-w-2xl mx-auto w-full pt-12 px-6 pb-24 relative z-10">
+                  <div className="flex items-center gap-4 mb-10">
+                      <button onClick={() => setView('main')} className="p-3 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white rounded-2xl border border-white/10 transition-all active:scale-90"><ArrowLeft size={20} /></button>
+                      <h1 className="text-3xl font-black text-white tracking-tight">Privacy & Security</h1>
+                  </div>
+                  <div className="space-y-3">
+                      <SettingItem icon={Ban} label="Blocked Accounts" description="Manage blocked users" onClick={() => setView('blocked_accounts')} />
+                      <SettingItem icon={ShieldAlert} label="Data Controls" description="Manage your personal data" onClick={() => setView('data_controls')} />
+                  </div>
+               </div>
+          </div>
+      );
+  }
+
+  if (view === 'data_controls') {
+      return (
+          <div className="flex-1 h-full bg-neutral-950 overflow-y-auto custom-scrollbar relative">
+               <div className="max-w-2xl mx-auto w-full pt-12 px-6 pb-24 relative z-10">
+                  <div className="flex items-center gap-4 mb-10">
+                      <button onClick={() => setView('privacy_security')} className="p-3 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white rounded-2xl border border-white/10 transition-all active:scale-90"><ArrowLeft size={20} /></button>
+                      <h1 className="text-3xl font-black text-white tracking-tight">Data Controls</h1>
+                  </div>
+                  <div className="space-y-4">
+                      <div className="p-6 bg-red-500/5 border border-red-500/10 rounded-[32px] space-y-4">
+                          <div className="flex items-center gap-3 text-red-500">
+                              <AlertTriangle size={24} />
+                              <h3 className="text-lg font-black uppercase tracking-tight">Danger Zone</h3>
+                          </div>
+                          <p className="text-neutral-400 text-sm leading-relaxed font-medium">
+                              Deleting your account is permanent. All your progress, streaks, messages, and followers will be removed forever. Your access code will be released for others to use.
+                          </p>
+                          <button 
+                            onClick={handleDeleteAccount}
+                            className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                          >
+                            <Trash2 size={18} /> Delete My Account
+                          </button>
+                      </div>
+                  </div>
+               </div>
+          </div>
+      );
+  }
+
   return (
     <div className="flex-1 h-full bg-neutral-950 overflow-y-auto custom-scrollbar relative">
       <div className="absolute top-0 left-1/4 w-64 h-64 bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none"></div>
@@ -101,9 +254,8 @@ export const SettingsPage: React.FC = () => {
                 <h3 className="text-[11px] font-black text-neutral-500 uppercase tracking-[0.2em] ml-2">Account</h3>
                 <div className="space-y-3">
                     <SettingItem icon={User} label="Profile Information" description="Name, Bio, Date of Birth" onClick={() => navigate(`/profile/${user?.uid}`)} />
-                    <SettingItem icon={Ban} label="Blocked Accounts" description="Manage blocked users" onClick={() => setView('blocked_accounts')} />
+                    <SettingItem icon={Shield} label="Privacy & Security" description="Password, Data controls" onClick={() => setView('privacy_security')} />
                     <SettingItem icon={Bell} label="Notifications" description="Manage alerts & sounds" />
-                    <SettingItem icon={Shield} label="Privacy & Security" description="Password, Data controls" />
                 </div>
             </div>
             <div className="space-y-4">
@@ -129,7 +281,7 @@ export const SettingsPage: React.FC = () => {
                 </button>
             </div>
         </div>
-        <div className="mt-16 text-center"><p className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.3em]">FocusFlow v1.0.4</p></div>
+        <div className="mt-16 text-center"><p className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.3em]">FocusFlow v1.0.5</p></div>
       </div>
     </div>
   );
