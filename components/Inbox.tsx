@@ -57,6 +57,7 @@ export const Inbox: React.FC = () => {
   }, [chats, activeChatId, tempChat]);
 
   const [userProfiles, setUserProfiles] = useState<Record<string, { name: string, photoURL?: string }>>({});
+  const [listPresences, setListPresences] = useState<Record<string, { online: boolean, lastSeen: number }>>({});
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number, activeChatId?: string} | null>(null);
   const [inputText, setInputText] = useState('');
@@ -133,6 +134,18 @@ export const Inbox: React.FC = () => {
     if (!user || !activeChatId || !selectedChat) return null;
     return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
   }, [user, activeChatId, selectedChat]);
+
+  // Real-time Presence Listeners for the sidebar list
+  useEffect(() => {
+    if (!chats.length) return;
+    const dms = chats.filter(c => c.type === 'dm');
+    const unsubs = dms.map(chat => {
+      return onValue(ref(database, `presence/${chat.id}`), (snap) => {
+        setListPresences(prev => ({ ...prev, [chat.id]: snap.val() }));
+      });
+    });
+    return () => unsubs.forEach(u => u());
+  }, [chats]);
 
   // Profile real-time sync
   useEffect(() => {
@@ -473,14 +486,22 @@ export const Inbox: React.FC = () => {
         newTimestamp = val.timestamp;
     }
 
-    // 3. Update inboxes for all participants
-    const participants = selectedChat.type === 'dm' ? [user.uid, activeChatId] : Object.keys(groupData.members);
+    // 3. Determine participants to update
+    let participants: string[] = [];
+    if (selectedChat.type === 'dm') {
+        participants = [user.uid, activeChatId];
+    } else {
+        const membersSnap = await get(ref(database, `groupChats/${activeChatId}/members`));
+        if (membersSnap.exists()) {
+            participants = Object.keys(membersSnap.val());
+        }
+    }
+
     const updates: any = {};
-    
     participants.forEach(pUid => {
-        // Only update the last message and timestamp, don't mess with unread counts here
-        updates[`userInboxes/${pUid}/${selectedChat.type === 'dm' ? (pUid === user.uid ? activeChatId : user.uid) : activeChatId}/lastMessage`] = newLastMsg;
-        updates[`userInboxes/${pUid}/${selectedChat.type === 'dm' ? (pUid === user.uid ? activeChatId : user.uid) : activeChatId}/lastMessageAt`] = newTimestamp;
+        const targetId = selectedChat.type === 'dm' ? (pUid === user.uid ? activeChatId : user.uid) : activeChatId;
+        updates[`userInboxes/${pUid}/${targetId}/lastMessage`] = newLastMsg;
+        updates[`userInboxes/${pUid}/${targetId}/lastMessageAt`] = newTimestamp;
     });
 
     await update(ref(database), updates);
@@ -509,13 +530,6 @@ export const Inbox: React.FC = () => {
     return myMessages.length > 0 ? myMessages[myMessages.length - 1] : null;
   }, [messages, user]);
 
-  const groupData = useMemo(() => {
-      if (selectedChat?.type !== 'group') return null;
-      // This is a placeholder since groupData state is complexly coupled in useEffect
-      // Real data comes from state `groupData` defined at top level
-      return null; 
-  }, [selectedChat]);
-
   if (loading && !chats.length) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
   return (
@@ -535,6 +549,7 @@ export const Inbox: React.FC = () => {
                 const isSelected = activeChatId === chat.id;
                 const unreadCount = chat.unreadCount || 0;
                 const profile = userProfiles[chat.id];
+                const presence = listPresences[chat.id];
                 const displayName = chat.type === 'dm' ? (profile?.name || chat.name) : chat.name;
                 const displayPhoto = chat.type === 'dm' ? (profile?.photoURL || chat.photoURL) : chat.photoURL;
                 const currentDraft = draftsStore[chat.id];
@@ -543,6 +558,9 @@ export const Inbox: React.FC = () => {
                       <button onClick={() => handleSelectChat(chat)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all relative ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}>
                         <div className="relative shrink-0">
                           {displayPhoto ? <img src={displayPhoto} className="w-14 h-14 rounded-full object-cover" /> : <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{displayName.charAt(0)}</div>}
+                          {chat.type === 'dm' && !iBlockedThem[chat.id] && !theyBlockedMe[chat.id] && (
+                            <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>
+                          )}
                         </div>
                         <div className="flex-1 flex flex-col text-left min-w-0 overflow-hidden">
                           <div className="flex justify-between items-center gap-2 mb-0.5 w-full">
