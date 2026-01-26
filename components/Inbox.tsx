@@ -32,6 +32,9 @@ interface ChatItem {
 
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉', '👀'];
 
+// Global store for drafts that persists as long as the app is loaded (cleared on reload)
+const draftsStore: Record<string, string> = {};
+
 export const Inbox: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -83,6 +86,24 @@ export const Inbox: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- DRAFT MANAGEMENT ---
+  // Sync local inputText with global draftsStore
+  useEffect(() => {
+    if (activeChatId) {
+      draftsStore[activeChatId] = inputText;
+    }
+  }, [inputText, activeChatId]);
+
+  // Load draft when activeChatId changes
+  useEffect(() => {
+    if (activeChatId) {
+      const draft = draftsStore[activeChatId] || '';
+      setInputText(draft);
+    } else {
+      setInputText('');
+    }
+  }, [activeChatId]);
 
   // --- SCROLL MANAGEMENT ---
   const isInitialLoadRef = useRef(true);
@@ -292,6 +313,9 @@ export const Inbox: React.FC = () => {
   }, [activeChatId, currentChatId, user, selectedChat?.type]);
 
   const handleSelectChat = (chat: ChatItem) => {
+      // Save current draft before switching
+      if (activeChatId) draftsStore[activeChatId] = inputText;
+      
       setActiveChatId(chat.id);
       navigate(`/inbox?chatId=${chat.id}`, { replace: true });
       // Reset unread on select
@@ -308,6 +332,7 @@ export const Inbox: React.FC = () => {
           }
           setListMenuId(null);
           setListMenuPos(null);
+          delete draftsStore[chatId];
       }
   };
 
@@ -428,7 +453,11 @@ export const Inbox: React.FC = () => {
 
     const msgText = inputText.trim();
     const timestamp = Date.now();
+    
+    // Clear draft and state
     setInputText('');
+    draftsStore[activeChatId] = '';
+    
     setReplyingTo(null);
     update(ref(database, `typing/${currentChatId}/${user.uid}`), { isTyping: false });
 
@@ -546,6 +575,9 @@ export const Inbox: React.FC = () => {
                 const profile = userProfiles[chat.id];
                 const displayName = chat.type === 'dm' ? (profile?.name || chat.name) : chat.name;
                 const displayPhoto = chat.type === 'dm' ? (profile?.photoURL || chat.photoURL) : chat.photoURL;
+                
+                // Check if this chat has a draft (and it's not currently selected or it matches)
+                const currentDraft = draftsStore[chat.id];
 
                 return (
                   <div key={chat.id} className="relative group/item">
@@ -576,7 +608,16 @@ export const Inbox: React.FC = () => {
                           </div>
                           <div className="flex justify-between items-center gap-2 w-full">
                              <p className={`text-sm truncate font-medium flex-1 ${isSelected ? 'text-white/80' : unreadCount > 0 ? 'text-white font-bold' : 'text-neutral-500'}`}>
-                                {chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages yet'}
+                                {currentDraft && !isSelected ? (
+                                    <>
+                                        <span className="text-red-500 font-black">Draft: </span>
+                                        <span className="italic">{currentDraft}</span>
+                                    </>
+                                ) : (
+                                    <>
+                                        {chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages yet'}
+                                    </>
+                                )}
                              </p>
                              {unreadCount > 0 && (
                                 <div className="min-w-[20px] h-5 px-1 bg-indigo-600 text-white text-[10px] font-black flex items-center justify-center rounded-full ml-2 shrink-0 animate-in zoom-in duration-300">
