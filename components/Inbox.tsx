@@ -55,7 +55,10 @@ export const Inbox: React.FC = () => {
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [pendingMedia, setPendingMedia] = useState<{ url: string, type: 'image' | 'video', duration?: number } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [justSentId, setJustSentId] = useState<string | null>(null);
+
+  // Animation Refs
+  const animatedMessagesRef = useRef<Set<string>>(new Set());
+  const sessionStartTimeRef = useRef<number>(Date.now());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -177,6 +180,11 @@ export const Inbox: React.FC = () => {
           setTypingText('');
           setLastSeenMap({});
           isAutoScrollEnabled.current = true;
+          
+          // Reset animation trackers for new chat
+          animatedMessagesRef.current.clear();
+          sessionStartTimeRef.current = Date.now();
+
           if (user) update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
       }
   }, [selectedChat?.id, user]);
@@ -326,11 +334,10 @@ export const Inbox: React.FC = () => {
       if (replyingTo) msgData.replyTo = { messageId: replyingTo.id, senderId: replyingTo.senderUid, senderName: replyingTo.senderName, previewText: replyingTo.media ? (replyingTo.type === 'image' ? 'Image' : 'Video') : replyingTo.text };
 
       try {
-          let newMessageRef;
           if (selectedChat.type === 'dm') {
               const friendUid = selectedChat.id;
               const messagesRef = ref(database, `messages/${currentChatId}`);
-              newMessageRef = push(messagesRef);
+              const newMessageRef = push(messagesRef);
               await set(newMessageRef, msgData);
               await update(ref(database, `conversations/${currentChatId}`), { members: { [user.uid]: true, [friendUid]: true }, lastMessage: { ...msgData, seen: false } });
               await update(ref(database, `userInboxes/${user.uid}/${friendUid}`), { type: 'dm', name: selectedChat.name, photoURL: selectedChat.photoURL || null, lastMessage: msgData, lastMessageAt: timestamp });
@@ -342,7 +349,7 @@ export const Inbox: React.FC = () => {
           } else {
               const groupId = selectedChat.id;
               const messagesRef = ref(database, `groupMessages/${groupId}`);
-              newMessageRef = push(messagesRef);
+              const newMessageRef = push(messagesRef);
               await set(newMessageRef, msgData);
               await update(ref(database, `groupChats/${groupId}`), { lastMessage: msgData });
               let membersToUpdate: string[] = activeGroupData?.members ? Object.keys(activeGroupData.members) : [];
@@ -360,10 +367,6 @@ export const Inbox: React.FC = () => {
                   if (uid === user.uid) return Promise.resolve();
                   return runTransaction(ref(database, `userInboxes/${uid}/${groupId}/unreadCount`), (count) => (count || 0) + 1);
               }));
-          }
-          if (newMessageRef?.key) {
-              setJustSentId(newMessageRef.key);
-              setTimeout(() => setJustSentId(null), 1000);
           }
           setInputText(''); setReplyingTo(null); setPendingMedia(null);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -530,8 +533,18 @@ export const Inbox: React.FC = () => {
                             const reactions = allReactions[msg.id];
                             const senderPhoto = selectedChat.type === 'group' && !isMe ? memberLookup[msg.senderUid]?.photoURL : (selectedChat.type === 'dm' && !isMe ? selectedChat.photoURL : null);
 
+                            // Animation Logic: Only animate if message is recent (session-wise) AND hasn't been animated yet
+                            const isNewlyArrived = msg.timestamp > sessionStartTimeRef.current && !animatedMessagesRef.current.has(msg.id);
+                            if (isNewlyArrived) {
+                                animatedMessagesRef.current.add(msg.id);
+                            }
+
                             return (
-                                <div key={msg.id} id={`msg-${msg.id}`} className={`flex flex-col group/msg transition-all duration-500 ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'} ${isHighlighted ? 'bg-indigo-500/10 rounded-xl py-1' : ''} ${justSentId === msg.id ? 'animate-message-pop' : ''}`}>
+                                <div 
+                                    key={msg.id} 
+                                    id={`msg-${msg.id}`} 
+                                    className={`flex flex-col group/msg transition-all duration-500 ${isMe ? 'items-end' : 'items-start'} ${isChain ? 'mt-0.5' : 'mt-4'} ${isHighlighted ? 'bg-indigo-500/10 rounded-xl py-1' : ''} ${isNewlyArrived ? (isMe ? 'animate-msg-sent' : 'animate-msg-received') : ''}`}
+                                >
                                     {!isMe && !isChain && selectedChat.type === 'group' && ( <span className="text-[10px] text-neutral-500 ml-10 mb-1 cursor-pointer hover:text-neutral-300 transition-colors" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{msg.senderName}</span> )}
                                     <div className={`flex gap-2 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                                         {!isMe && (
