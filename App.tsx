@@ -8,6 +8,7 @@ import { NotificationsPage } from './components/Notifications';
 import { GroupStudy } from './components/GroupStudy';
 import { GroupSettings } from './components/GroupSettings';
 import { Profile } from './components/Profile';
+import { SettingsPage } from './components/Settings';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimerProvider } from './contexts/TimerContext';
 import { Login } from './components/Login';
@@ -149,6 +150,7 @@ const AppContent: React.FC = () => {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/profile/:uid" element={<Profile />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/group/:groupId/settings" element={<GroupSettings />} />
             <Route path="/login" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />

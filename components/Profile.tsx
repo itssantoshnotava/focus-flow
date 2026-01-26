@@ -7,13 +7,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { getZodiacSign } from '../utils/zodiac';
 import { 
-  Camera, Edit2, Save, X, LogOut, Settings, 
-  MapPin, Calendar, Sparkles, Flame, User, ChevronRight, Trophy, MessageCircle, Loader2
+  Camera, Edit2, Save, X, Settings, 
+  Calendar, Sparkles, Flame, User, Trophy, MessageCircle, Loader2
 } from 'lucide-react';
 
 export const Profile: React.FC = () => {
   const { uid } = useParams();
-  const { user, logout, isGuest } = useAuth();
+  const { user, isGuest } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -21,7 +21,6 @@ export const Profile: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [isFriend, setIsFriend] = useState(false);
   const [isStartingChat, setIsStartingChat] = useState(false);
 
@@ -150,11 +149,6 @@ export const Profile: React.FC = () => {
     }
   };
 
-  const handleLogout = async () => {
-      await logout();
-      window.location.hash = '/login';
-  };
-
   if (loading) return <div className="flex h-full items-center justify-center bg-neutral-950"><div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>;
 
   if (!profileData) return <div className="flex h-full items-center justify-center text-neutral-500 bg-neutral-950">User not found.</div>;
@@ -166,6 +160,17 @@ export const Profile: React.FC = () => {
       {/* Ambient Background Glows */}
       <div className="absolute top-0 left-1/4 w-64 h-64 bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none"></div>
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-[120px] pointer-events-none"></div>
+
+      {/* FIXED SETTINGS ICON BUTTON */}
+      {isOwnProfile && (
+        <button 
+          onClick={() => navigate('/settings')}
+          className="absolute top-8 right-8 z-30 p-3 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white rounded-2xl border border-white/10 transition-all shadow-xl active:scale-90 backdrop-blur-xl"
+          title="Settings"
+        >
+          <Settings size={24} />
+        </button>
+      )}
 
       <div className="max-w-2xl mx-auto w-full pt-16 px-6 pb-24 relative z-10">
         
@@ -312,37 +317,6 @@ export const Profile: React.FC = () => {
                 </div>
               </div>
             </div>
-
-            {/* Action Bar (Settings/Logout) */}
-            {isOwnProfile && !isEditing && (
-              <div className="flex items-center gap-3">
-                <div className="relative">
-                  <button 
-                    onClick={() => setShowSettings(!showSettings)}
-                    className="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 text-neutral-300 hover:text-white rounded-2xl border border-white/10 transition-all font-semibold text-sm backdrop-blur-sm"
-                  >
-                    <Settings size={18} />
-                    Settings
-                  </button>
-                  {showSettings && (
-                    <div className="absolute top-full mt-3 right-0 w-56 bg-neutral-900/95 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
-                      <div className="p-2">
-                        <button 
-                          onClick={handleLogout}
-                          className="w-full flex items-center justify-between px-4 py-3 text-red-400 hover:bg-red-500/10 rounded-2xl text-sm font-bold transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <LogOut size={18} />
-                            Log Out
-                          </div>
-                          <ChevronRight size={14} className="opacity-50" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
