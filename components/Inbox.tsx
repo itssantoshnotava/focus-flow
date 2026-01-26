@@ -41,7 +41,19 @@ export const Inbox: React.FC = () => {
   const [viewMode, setViewMode] = useState<'list' | 'create_group'>('list');
   const [showArchived, setShowArchived] = useState(false);
   const [chats, setChats] = useState<ChatItem[]>([]);
-  const [selectedChat, setSelectedChat] = useState<ChatItem | null>(null);
+  
+  // --- STABLE SELECTION FIX ---
+  const [activeChatId, setActiveChatId] = useState<string | null>(urlChatId);
+  const [tempChat, setTempChat] = useState<ChatItem | null>(null);
+
+  const selectedChat = useMemo(() => {
+    if (!activeChatId) return null;
+    const fromList = chats.find(c => c.id === activeChatId);
+    if (fromList) return fromList;
+    if (tempChat && tempChat.id === activeChatId) return tempChat;
+    return null;
+  }, [chats, activeChatId, tempChat]);
+
   const [userProfiles, setUserProfiles] = useState<Record<string, { name: string, photoURL?: string }>>({});
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number, activeChatId?: string} | null>(null);
@@ -74,9 +86,9 @@ export const Inbox: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentChatId = useMemo(() => {
-    if (!user || !selectedChat) return null;
-    return selectedChat.type === 'dm' ? [user.uid, selectedChat.id].sort().join('_') : selectedChat.id;
-  }, [user, selectedChat]);
+    if (!user || !activeChatId || !selectedChat) return null;
+    return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
+  }, [user, activeChatId, selectedChat]);
 
   useEffect(() => {
     if (!user || !currentChatId) return;
@@ -93,7 +105,6 @@ export const Inbox: React.FC = () => {
     onValue(ref(database, `mutedChats/${user.uid}`), (snap) => setMutedChats(snap.val() || {}));
     onValue(ref(database, `archivedChats/${user.uid}`), (snap) => setArchivedChats(snap.val() || {}));
 
-    // Fetch mutual friends for group creation
     const friendsRef = ref(database, `friends/${user.uid}`);
     onValue(friendsRef, async (snapshot) => {
         if (snapshot.exists()) {
@@ -108,17 +119,17 @@ export const Inbox: React.FC = () => {
   }, [user]);
 
   useEffect(() => {
-    if (!user || !selectedChat || selectedChat.type !== 'dm') {
+    if (!user || !activeChatId || (selectedChat && selectedChat.type !== 'dm')) {
         setTheyBlockedMe({});
         return;
     }
-    const targetUid = selectedChat.id;
+    const targetUid = activeChatId;
     const refPath = ref(database, `blocks/${targetUid}/${user.uid}`);
     const unsub = onValue(refPath, (snap) => {
         setTheyBlockedMe(prev => ({ ...prev, [targetUid]: snap.exists() }));
     });
     return () => unsub();
-  }, [user, selectedChat]);
+  }, [user, activeChatId, selectedChat]);
 
   useEffect(() => {
     if (!user) return;
@@ -148,22 +159,25 @@ export const Inbox: React.FC = () => {
     get(inboxRef).then(() => setLoading(false));
   }, [user]);
 
+  // Deep Link & URL Sync Logic
   useEffect(() => {
-    if (urlChatId && chats.length > 0 && (!selectedChat || selectedChat.id !== urlChatId)) {
+    if (urlChatId && urlChatId !== activeChatId) {
         const found = chats.find(c => c.id === urlChatId);
         if (found) {
-            setSelectedChat(found);
+            setActiveChatId(urlChatId);
         } else {
             get(ref(database, `users/${urlChatId}`)).then(snap => {
                 if (snap.exists()) {
                     const u = snap.val();
-                    setSelectedChat({
+                    const newTemp: ChatItem = {
                         id: urlChatId,
                         type: 'dm',
                         name: u.name || 'User',
                         photoURL: u.photoURL || undefined,
                         timestamp: Date.now()
-                    });
+                    };
+                    setTempChat(newTemp);
+                    setActiveChatId(urlChatId);
                 }
             });
         }
@@ -190,9 +204,9 @@ export const Inbox: React.FC = () => {
   }, [selectedChat, iBlockedThem, theyBlockedMe]);
 
   const isCurrentChatBlocked = useMemo(() => {
-    if (!selectedChat || selectedChat.type !== 'dm') return false;
-    return iBlockedThem[selectedChat.id] || theyBlockedMe[selectedChat.id];
-  }, [selectedChat, iBlockedThem, theyBlockedMe]);
+    if (!activeChatId || !selectedChat || selectedChat.type !== 'dm') return false;
+    return iBlockedThem[activeChatId] || theyBlockedMe[activeChatId];
+  }, [activeChatId, selectedChat, iBlockedThem, theyBlockedMe]);
 
   const filteredChats = useMemo(() => {
     return chats.filter(c => {
@@ -206,8 +220,8 @@ export const Inbox: React.FC = () => {
   }, [chats, archivedChats, following, followers, showArchived]);
 
   useEffect(() => {
-    if (!user || !selectedChat || !currentChatId) return;
-    const messagesPath = selectedChat.type === 'dm' ? `messages/${currentChatId}` : `groupMessages/${selectedChat.id}`;
+    if (!user || !activeChatId || !currentChatId) return;
+    const messagesPath = selectedChat?.type === 'dm' ? `messages/${currentChatId}` : `groupMessages/${activeChatId}`;
     const unsubMessages = onValue(ref(database, messagesPath), (snapshot) => {
       if (snapshot.exists()) {
         const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
@@ -215,19 +229,26 @@ export const Inbox: React.FC = () => {
         list.forEach(m => { if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${messagesPath}/${m.id}`), { seen: true }); });
       } else { setMessages([]); }
     });
-    // Reset unread count when chat is selected
-    update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
-    if (selectedChat.type === 'dm') onValue(ref(database, `presence/${selectedChat.id}`), (snap) => setFriendPresence(snap.val()));
+    update(ref(database, `userInboxes/${user.uid}/${activeChatId}`), { unreadCount: 0 });
+    if (selectedChat?.type === 'dm') onValue(ref(database, `presence/${activeChatId}`), (snap) => setFriendPresence(snap.val()));
     return () => unsubMessages();
-  }, [selectedChat, currentChatId, user]);
+  }, [activeChatId, currentChatId, user, selectedChat?.type]);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+  const handleSelectChat = (chat: ChatItem) => {
+      setActiveChatId(chat.id);
+      navigate(`/inbox?chatId=${chat.id}`, { replace: true });
+  };
 
   const handleRemoveChat = async (chatId: string) => {
       if (!user) return;
       if (window.confirm("Remove this chat from your inbox? This only clears it from your list, no messages will be deleted.")) {
           await remove(ref(database, `userInboxes/${user.uid}/${chatId}`));
-          if (selectedChat?.id === chatId) setSelectedChat(null);
+          if (activeChatId === chatId) {
+              setActiveChatId(null);
+              navigate('/inbox', { replace: true });
+          }
           setListMenuId(null);
           setListMenuPos(null);
       }
@@ -305,7 +326,6 @@ export const Inbox: React.FC = () => {
           const updates: any = {};
           updates[`groupChats/${groupId}`] = groupData;
           
-          // Update host inbox
           updates[`userInboxes/${user.uid}/${groupId}`] = {
               type: 'group',
               name: groupData.name,
@@ -314,13 +334,12 @@ export const Inbox: React.FC = () => {
           };
           updates[`users/${user.uid}/groupChats/${groupId}`] = true;
 
-          // Update other members inboxes
           selectedMembers.forEach(mid => {
               updates[`userInboxes/${mid}/${groupId}`] = {
                   type: 'group',
                   name: groupData.name,
                   lastMessageAt: Date.now(),
-                  unreadCount: 1 // Start with 1 because there is technically a "group created" notification or just to show activity
+                  unreadCount: 1 
               };
               updates[`users/${mid}/groupChats/${groupId}`] = true;
           });
@@ -330,7 +349,7 @@ export const Inbox: React.FC = () => {
           setNewGroupName('');
           setSelectedMembers(new Set());
           setViewMode('list');
-          setSelectedChat({
+          handleSelectChat({
               id: groupId,
               type: 'group',
               name: groupData.name,
@@ -347,7 +366,7 @@ export const Inbox: React.FC = () => {
   const sendMessage = async (e?: React.FormEvent, attachment?: { url: string, type: 'image' | 'video' }) => {
     if (e) e.preventDefault();
     if (!inputText.trim() && !attachment) return;
-    if (!user || !selectedChat || !currentChatId) return;
+    if (!user || !activeChatId || !selectedChat || !currentChatId) return;
     if (selectedChat.type === 'dm' && isCurrentChatBlocked) return;
 
     const msgText = inputText.trim();
@@ -371,7 +390,7 @@ export const Inbox: React.FC = () => {
     await set(newMsgRef, msgData);
 
     const updateInbox = async (uid: string, chatName: string, chatPhoto?: string, incrementUnread = false) => {
-      const targetChatId = selectedChat.id;
+      const targetChatId = activeChatId;
       const inboxRef = ref(database, `userInboxes/${uid}/${targetChatId}`);
       const inboxSnap = await get(inboxRef);
       const currentUnread = (inboxSnap.exists() && incrementUnread) ? (inboxSnap.val().unreadCount || 0) : 0;
@@ -394,13 +413,10 @@ export const Inbox: React.FC = () => {
     };
 
     if (selectedChat.type === 'dm') {
-      // Update Sender (No unread increment)
       updateInbox(user!.uid, selectedChat.name, selectedChat.photoURL, false);
-      // Update Receiver (Increment unread)
-      updateInbox(selectedChat.id, user!.displayName || 'User', user!.photoURL || undefined, true);
+      updateInbox(activeChatId, user!.displayName || 'User', user!.photoURL || undefined, true);
     } else {
-      // Group Chat Inbox Updates
-      const membersSnap = await get(ref(database, `groupChats/${selectedChat.id}/members`));
+      const membersSnap = await get(ref(database, `groupChats/${activeChatId}/members`));
       if (membersSnap.exists()) {
           const members = Object.keys(membersSnap.val());
           members.forEach(memberId => {
@@ -412,14 +428,14 @@ export const Inbox: React.FC = () => {
   };
 
   const handleUnsend = async (msgId: string) => {
-    if (!currentChatId || !selectedChat) return;
+    if (!currentChatId || !activeChatId || !selectedChat) return;
     const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
     await remove(ref(database, `${basePath}/${currentChatId}/${msgId}`));
     setUnsendConfirmId(null);
   };
 
   const handleReaction = async (msgId: string, emoji: string) => {
-    if (!currentChatId || !selectedChat || !user) return;
+    if (!currentChatId || !activeChatId || !selectedChat || !user) return;
     const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
     const reactionRef = ref(database, `${basePath}/${currentChatId}/${msgId}/reactions/${user.uid}`);
     const snap = await get(reactionRef);
@@ -448,7 +464,7 @@ export const Inbox: React.FC = () => {
 
   return (
     <div className="flex h-full bg-neutral-950 overflow-hidden font-sans">
-      <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-col border-r border-neutral-900 bg-neutral-950 shrink-0`}>
+      <div className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-col border-r border-neutral-900 bg-neutral-950 shrink-0`}>
         <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/50 backdrop-blur-xl sticky top-0 z-20">
           <h1 className="text-2xl font-black text-white tracking-tight">{showArchived ? 'Archive' : 'Messages'}</h1>
           <div className="flex gap-2">
@@ -460,12 +476,13 @@ export const Inbox: React.FC = () => {
           {viewMode === 'list' ? (
             filteredChats.length > 0 ? (
                 filteredChats.map(chat => {
-                const isSelected = selectedChat?.id === chat.id;
+                // FIXED SELECTION LOGIC
+                const isSelected = activeChatId === chat.id;
                 const unreadCount = chat.unreadCount || 0;
                 return (
                   <div key={chat.id} className="relative group/item">
                       <button 
-                        onClick={() => setSelectedChat(chat)} 
+                        onClick={() => handleSelectChat(chat)} 
                         className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all relative ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl opacity-100' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}
                       >
                         <div className="relative shrink-0">
@@ -581,7 +598,7 @@ export const Inbox: React.FC = () => {
         </div>
       </div>
 
-      {selectedChat ? (
+      {activeChatId && selectedChat ? (
         <div className="flex-1 flex flex-col bg-neutral-950 relative overflow-hidden">
           {chatLoading ? (
               <div className="flex-1 flex items-center justify-center">
@@ -594,20 +611,20 @@ export const Inbox: React.FC = () => {
             <>
               <div className="p-4 md:p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/80 backdrop-blur-2xl z-20">
                 <div className="flex items-center gap-4 min-w-0">
-                  <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 text-neutral-500 hover:text-white transition-colors"><ArrowLeft size={24} /></button>
-                  <div className="relative cursor-pointer" onClick={() => navigate(selectedChat.type === 'dm' ? `/profile/${selectedChat.id}` : `/group/${selectedChat.id}/settings`)}>
-                    {(selectedChat.type === 'dm' ? userProfiles[selectedChat.id]?.photoURL : selectedChat.photoURL) ? (
-                      <img src={selectedChat.type === 'dm' ? userProfiles[selectedChat.id]?.photoURL : selectedChat.photoURL} className="w-10 h-10 md:w-11 md:h-11 rounded-full object-cover" />
+                  <button onClick={() => { setActiveChatId(null); navigate('/inbox', { replace: true }); }} className="md:hidden p-2 text-neutral-500 hover:text-white transition-colors"><ArrowLeft size={24} /></button>
+                  <div className="relative cursor-pointer" onClick={() => navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`)}>
+                    {(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL) ? (
+                      <img src={selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL} className="w-10 h-10 md:w-11 md:h-11 rounded-full object-cover" />
                     ) : (
                       <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-neutral-800 flex items-center justify-center text-lg font-bold text-neutral-500">
-                        {(selectedChat.type === 'dm' ? userProfiles[selectedChat.id]?.name : selectedChat.name)?.charAt(0) || '?'}
+                        {(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.name : selectedChat.name)?.charAt(0) || '?'}
                       </div>
                     )}
                     {selectedChat.type === 'dm' && friendPresence?.online && !isCurrentChatBlocked && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950"></div>}
                   </div>
                   <div className="flex flex-col min-w-0">
                     <span className="font-bold text-white truncate leading-tight text-base md:text-lg">
-                      {selectedChat.type === 'dm' ? (userProfiles[selectedChat.id]?.name || selectedChat.name) : selectedChat.name}
+                      {selectedChat.type === 'dm' ? (userProfiles[activeChatId]?.name || selectedChat.name) : selectedChat.name}
                     </span>
                     <span className="text-[9px] md:text-[10px] uppercase font-black text-neutral-500 tracking-wider">
                       {selectedChat.type === 'dm' ? (isCurrentChatBlocked ? 'Blocked' : friendPresence?.online ? 'Online' : 'Offline') : 'Group Chat'}
@@ -622,14 +639,14 @@ export const Inbox: React.FC = () => {
                     <div className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 z-[100] animate-in fade-in zoom-in-95">
                         {selectedChat.type === 'group' && (
                             <button 
-                                onClick={() => { setIsHeaderMenuOpen(false); navigate(`/group/${selectedChat.id}/settings`); }}
+                                onClick={() => { setIsHeaderMenuOpen(false); navigate(`/group/${activeChatId}/settings`); }}
                                 className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl transition-all"
                             >
                                 <Settings size={18} /> Group Settings
                             </button>
                         )}
                         <button 
-                            onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${selectedChat.id}` : `/group/${selectedChat.id}/settings`); }}
+                            onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`); }}
                             className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl transition-all"
                         >
                             <UserCircle2 size={18} /> View {selectedChat.type === 'dm' ? 'Profile' : 'Members'}
@@ -650,7 +667,6 @@ export const Inbox: React.FC = () => {
                   return (
                     <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-2`}>
                       <div className={`flex gap-3 max-w-[90%] md:max-w-[75%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-                        {/* SENDER AVATAR */}
                         {showSenderAvatar && (
                           <div className="shrink-0 self-end mb-1">
                             {senderProfile?.photoURL ? (
@@ -664,14 +680,12 @@ export const Inbox: React.FC = () => {
                         )}
 
                         <div className="flex flex-col min-w-0 relative">
-                            {/* SENDER NAME IN GROUPS */}
                             {selectedChat.type === 'group' && !isMe && (
                                 <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3 mb-1">
                                     {senderProfile?.name || msg.senderName}
                                 </span>
                             )}
 
-                            {/* REPLY PREVIEW INSIDE BUBBLE */}
                             <div className={`flex flex-col rounded-[22px] relative shadow-lg ${isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-bl-lg border border-white/5'}`}>
                                 {msg.replyTo && (
                                     <div className={`mx-1 mt-1 px-3 py-2 rounded-[18px] bg-black/20 backdrop-blur-sm border-l-4 border-indigo-400 mb-1`}>
@@ -680,7 +694,6 @@ export const Inbox: React.FC = () => {
                                     </div>
                                 )}
 
-                                {/* MEDIA CONTENT */}
                                 {msg.attachment && (
                                     <div className="p-1">
                                         {msg.attachment.type === 'image' ? (
@@ -705,14 +718,12 @@ export const Inbox: React.FC = () => {
                                     <p className="inline-block whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
                                 </div>
                                 
-                                {/* REACTION CHIPS (ATTACHED STYLE) */}
                                 {reactions.length > 0 && (
                                     <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex gap-1 bg-neutral-900 border border-white/10 rounded-full px-1.5 py-0.5 shadow-xl z-10 hover:bg-neutral-800 cursor-pointer`} onClick={(e) => openReactionPicker(e, msg.id, isMe)}>
                                         {reactions.map(([uid, emoji]) => <span key={uid} className="text-[10px] animate-reaction-bounce">{emoji as string}</span>)}
                                     </div>
                                 )}
 
-                                {/* ACTION TOOLBAR (VISIBLE ON HOVER) */}
                                 <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20 ${isMe ? 'right-full mr-2' : 'left-full ml-2'}`}>
                                     <button onClick={() => setReplyingTo(msg)} className="p-2 text-neutral-500 hover:text-white hover:bg-white/5 rounded-full transition-all" title="Reply"><Reply size={16} /></button>
                                     <button onClick={(e) => openReactionPicker(e, msg.id, isMe)} className="p-2 text-neutral-500 hover:text-white hover:bg-white/5 rounded-full transition-all" title="React"><SmilePlus size={16} /></button>
@@ -722,7 +733,6 @@ export const Inbox: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* SEEN/SENT INDICATOR */}
                       {isLastSentByMe && (
                           <div className="flex items-center gap-1 mt-1 mr-1 text-[10px] font-bold text-neutral-500 uppercase tracking-widest animate-in fade-in duration-500">
                             {msg.seen ? <><CheckCheck size={12} className="text-indigo-500" /> Seen</> : <><Check size={12} /> Sent</>}
@@ -734,10 +744,8 @@ export const Inbox: React.FC = () => {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* MESSAGE INPUT AREA */}
               <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
                 <div className="max-w-5xl mx-auto flex flex-col gap-2">
-                    {/* REPLY PREVIEW BAR */}
                     {replyingTo && (
                         <div className="flex items-center justify-between bg-white/5 px-4 py-2 rounded-2xl border border-white/5 mb-2 animate-in slide-in-from-bottom-2">
                             <div className="flex items-center gap-3 overflow-hidden">
@@ -753,7 +761,6 @@ export const Inbox: React.FC = () => {
 
                     <div className="flex gap-3 items-end">
                         <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end relative">
-                            {/* ATTACHMENT BUTTON */}
                             <button 
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={isUploadingMedia}
@@ -768,7 +775,6 @@ export const Inbox: React.FC = () => {
                                 value={inputText} 
                                 onChange={(e) => {
                                     setInputText(e.target.value);
-                                    // Auto-resize
                                     e.target.style.height = 'auto';
                                     e.target.style.height = e.target.scrollHeight + 'px';
                                 }} 
