@@ -13,13 +13,11 @@ export const Layout: React.FC = () => {
   const { user, isGuest } = useAuth();
   
   const [inboxUnread, setInboxUnread] = useState(0);
-  const [requestCount, setRequestCount] = useState(0);
   const [profileImage, setProfileImage] = useState(user?.photoURL);
 
   // Sync profile image
   useEffect(() => {
     if (user) {
-        // Realtime listen for photo updates (if changed in Profile page)
         const userRef = ref(database, `users/${user.uid}/photoURL`);
         const unsub = onValue(userRef, (snap) => {
             if (snap.exists()) setProfileImage(snap.val());
@@ -56,7 +54,6 @@ export const Layout: React.FC = () => {
   useEffect(() => {
       if (!user || isGuest) return;
 
-      // 1. Inbox Unread
       const inboxRef = ref(database, `userInboxes/${user.uid}`);
       const unsubInbox = onValue(inboxRef, (snapshot) => {
           let total = 0;
@@ -68,15 +65,8 @@ export const Layout: React.FC = () => {
           setInboxUnread(total);
       });
 
-      // 2. Friend Requests
-      const requestsRef = ref(database, `friendRequests/${user.uid}`);
-      const unsubRequests = onValue(requestsRef, (snapshot) => {
-          setRequestCount(snapshot.exists() ? Object.keys(snapshot.val()).length : 0);
-      });
-
       return () => {
           unsubInbox();
-          unsubRequests();
       };
   }, [user, isGuest]);
 
@@ -116,7 +106,7 @@ export const Layout: React.FC = () => {
              <>
                <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
                <NavItem icon={Search} path="/search" label="Search" />
-               <NavItem icon={Bell} path="/notifications" label="Notifications" badge={requestCount} />
+               <NavItem icon={Bell} path="/notifications" label="Notifications" />
              </>
            )}
            <NavItem icon={Globe} path="/group" label="Group Study" />
@@ -151,7 +141,7 @@ export const Layout: React.FC = () => {
            <>
              <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
              <NavItem icon={Search} path="/search" label="Search" />
-             <NavItem icon={Bell} path="/notifications" label="Notifications" badge={requestCount} />
+             <NavItem icon={Bell} path="/notifications" label="Notifications" />
            </>
          )}
          <NavItem icon={Globe} path="/group" label="Group" />
