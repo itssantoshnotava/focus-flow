@@ -75,12 +75,26 @@ export const Layout: React.FC = () => {
       return (
         <button 
             onClick={() => navigate(path)} 
-            className={`relative p-3 rounded-xl transition-all group ${isActive ? 'bg-neutral-800' : 'hover:bg-neutral-900'}`}
+            className={`relative p-3 rounded-2xl transition-all duration-200 group flex items-center justify-center
+              ${isActive ? 'scale-105 translate-z-0' : 'hover:bg-white/5 active:scale-95'}`}
             title={label}
         >
-            <Icon size={24} className={isActive ? "text-indigo-500" : "text-neutral-500 group-hover:text-neutral-300 transition-colors"} />
+            {/* Active Glow Backdrop */}
+            {isActive && (
+              <div className="absolute inset-0 bg-indigo-500/10 blur-xl rounded-full animate-pulse pointer-events-none"></div>
+            )}
+            
+            <Icon 
+              size={24} 
+              className={`transition-all duration-200 relative z-10 
+                ${isActive 
+                  ? "text-indigo-400 drop-shadow-[0_0_8px_rgba(99,102,241,0.5)]" 
+                  : "text-neutral-500 group-hover:text-neutral-300"
+                }`} 
+            />
+
             {badge !== undefined && badge > 0 && (
-                <span className="absolute top-2 right-2 w-4 h-4 bg-red-500 text-white text-[9px] font-bold flex items-center justify-center rounded-full border-2 border-neutral-950 animate-in zoom-in">
+                <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] bg-indigo-500 text-white text-[9px] font-black flex items-center justify-center rounded-full border-2 border-[#141414] shadow-lg animate-in zoom-in z-20">
                     {badge > 99 ? '99' : badge}
                 </span>
             )}
@@ -93,14 +107,14 @@ export const Layout: React.FC = () => {
     <div className="flex h-screen bg-neutral-950 text-neutral-200 font-sans selection:bg-indigo-500/30 overflow-hidden">
       
       {/* --- DESKTOP SIDEBAR --- */}
-      <aside className="hidden md:flex w-20 flex-col items-center py-6 border-r border-neutral-900 bg-neutral-950 z-50 shrink-0">
-        <div className="mb-8">
-           <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/20">
+      <aside className="hidden md:flex w-20 flex-col items-center py-8 border-r border-white/10 bg-[#1414148c] backdrop-blur-xl backdrop-saturate-[140%] z-50 shrink-0 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
+        <div className="mb-10">
+           <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-indigo-900/40 rotate-3 hover:rotate-0 transition-transform">
               <LayoutDashboard size={20} className="text-white" />
            </div>
         </div>
 
-        <div className="flex flex-col gap-4 flex-1 w-full items-center">
+        <div className="flex flex-col gap-5 flex-1 w-full items-center">
            <NavItem icon={Home} path="/" label="Home" />
            {!isGuest && (
              <>
@@ -116,14 +130,16 @@ export const Layout: React.FC = () => {
             {!isGuest && (
                <button 
                   onClick={() => navigate(`/profile/${user?.uid}`)}
-                  className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-800 hover:border-neutral-600 transition-colors overflow-hidden"
+                  className="w-11 h-11 rounded-full p-0.5 bg-gradient-to-tr from-white/10 to-transparent border border-white/10 hover:border-indigo-500/50 hover:shadow-[0_0_15px_rgba(99,102,241,0.3)] transition-all overflow-hidden group"
                   title="Profile"
                >
-                   {profileImage ? (
-                     <img src={profileImage} alt="Profile" className="w-full h-full object-cover" />
-                   ) : (
-                     <div className="text-xs font-bold text-neutral-400">{user?.displayName?.charAt(0) || <User size={16} />}</div>
-                   )}
+                   <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 flex items-center justify-center">
+                       {profileImage ? (
+                         <img src={profileImage} alt="Profile" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                       ) : (
+                         <div className="text-xs font-bold text-neutral-400">{user?.displayName?.charAt(0) || <User size={16} />}</div>
+                       )}
+                   </div>
                </button>
             )}
         </div>
@@ -135,7 +151,7 @@ export const Layout: React.FC = () => {
       </main>
 
       {/* --- MOBILE NAV --- */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-20 bg-neutral-950 border-t border-neutral-900 flex items-center justify-around z-50 pb-2 px-2">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 h-22 bg-[#1414148c] backdrop-blur-[24px] backdrop-saturate-[160%] border-t border-white/10 flex items-center justify-around z-50 pb-6 px-4 rounded-t-[32px] shadow-[0_-8px_30px_rgba(0,0,0,0.25)]">
          <NavItem icon={Home} path="/" label="Home" />
          {!isGuest && (
            <>
@@ -148,13 +164,17 @@ export const Layout: React.FC = () => {
          {!isGuest && (
             <button 
                 onClick={() => navigate(`/profile/${user?.uid}`)}
-                className="w-10 h-10 rounded-full overflow-hidden border border-neutral-800"
+                className="w-10 h-10 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-white/10 to-transparent border border-white/10 active:scale-90 transition-transform"
             >
-               {profileImage ? (
-                 <img src={profileImage} alt="Me" className="w-full h-full object-cover" />
-               ) : (
-                 <div className="w-full h-full bg-neutral-800 flex items-center justify-center text-xs"><User size={16} /></div>
-               )}
+               <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 flex items-center justify-center">
+                   {profileImage ? (
+                     <img src={profileImage} alt="Me" className="w-full h-full object-cover" />
+                   ) : (
+                     <div className="w-full h-full bg-neutral-900 flex items-center justify-center text-xs text-neutral-400 font-bold">
+                        {user?.displayName?.charAt(0) || <User size={16} />}
+                     </div>
+                   )}
+               </div>
             </button>
          )}
       </nav>
