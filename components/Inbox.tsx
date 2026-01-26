@@ -42,7 +42,6 @@ export const Inbox: React.FC = () => {
   const [showArchived, setShowArchived] = useState(false);
   const [chats, setChats] = useState<ChatItem[]>([]);
   
-  // --- STABLE SELECTION FIX ---
   const [activeChatId, setActiveChatId] = useState<string | null>(urlChatId);
   const [tempChat, setTempChat] = useState<ChatItem | null>(null);
 
@@ -89,6 +88,34 @@ export const Inbox: React.FC = () => {
     if (!user || !activeChatId || !selectedChat) return null;
     return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
   }, [user, activeChatId, selectedChat]);
+
+  // Real-time listener for all user profiles in the inbox list to sync PFP/Name
+  useEffect(() => {
+    if (!chats.length) return;
+    const unsubscribes: (() => void)[] = [];
+
+    chats.forEach(chat => {
+      if (chat.type === 'dm') {
+        const uRef = ref(database, `users/${chat.id}`);
+        const unsub = onValue(uRef, (snap) => {
+          if (snap.exists()) {
+            const data = snap.val();
+            const isBlocked = iBlockedThem[chat.id] || theyBlockedMe[chat.id];
+            setUserProfiles(prev => ({
+              ...prev,
+              [chat.id]: { 
+                name: isBlocked ? 'Wisp User' : data.name, 
+                photoURL: isBlocked ? undefined : data.photoURL 
+              }
+            }));
+          }
+        });
+        unsubscribes.push(unsub);
+      }
+    });
+
+    return () => unsubscribes.forEach(u => u());
+  }, [chats, iBlockedThem, theyBlockedMe]);
 
   useEffect(() => {
     if (!user || !currentChatId) return;
@@ -159,7 +186,6 @@ export const Inbox: React.FC = () => {
     get(inboxRef).then(() => setLoading(false));
   }, [user]);
 
-  // Deep Link & URL Sync Logic
   useEffect(() => {
     if (urlChatId && urlChatId !== activeChatId) {
         const found = chats.find(c => c.id === urlChatId);
@@ -184,24 +210,22 @@ export const Inbox: React.FC = () => {
     }
   }, [urlChatId, chats]);
 
+  // Listener for group members profiles if active chat is a group
   useEffect(() => {
-    if (!selectedChat) return;
-    const attachListener = (uid: string) => {
-      onValue(ref(database, `users/${uid}`), (snap) => {
+    if (!selectedChat || selectedChat.type !== 'group') return;
+    get(ref(database, `groupChats/${selectedChat.id}/members`)).then(snap => {
         if (snap.exists()) {
-          const data = snap.val();
-          const isBlocked = iBlockedThem[uid] || theyBlockedMe[uid];
-          setUserProfiles(prev => ({
-            ...prev, [uid]: { name: isBlocked ? 'Wisp User' : data.name, photoURL: isBlocked ? undefined : data.photoURL }
-          }));
+          Object.keys(snap.val()).forEach(mid => {
+            onValue(ref(database, `users/${mid}`), (uSnap) => {
+              if (uSnap.exists()) {
+                const uData = uSnap.val();
+                setUserProfiles(prev => ({ ...prev, [mid]: { name: uData.name, photoURL: uData.photoURL } }));
+              }
+            });
+          });
         }
-      });
-    };
-    if (selectedChat.type === 'dm') attachListener(selectedChat.id);
-    else get(ref(database, `groupChats/${selectedChat.id}/members`)).then(snap => {
-        if (snap.exists()) Object.keys(snap.val()).forEach(mid => attachListener(mid));
     });
-  }, [selectedChat, iBlockedThem, theyBlockedMe]);
+  }, [selectedChat]);
 
   const isCurrentChatBlocked = useMemo(() => {
     if (!activeChatId || !selectedChat || selectedChat.type !== 'dm') return false;
@@ -216,7 +240,7 @@ export const Inbox: React.FC = () => {
         if (isArchived) return false;
         if (c.type === 'group') return true;
         return following[c.id] && followers[c.id];
-    });
+    }).sort((a, b) => (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0));
   }, [chats, archivedChats, following, followers, showArchived]);
 
   useEffect(() => {
@@ -229,6 +253,7 @@ export const Inbox: React.FC = () => {
         list.forEach(m => { if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${messagesPath}/${m.id}`), { seen: true }); });
       } else { setMessages([]); }
     });
+    // Reset unread count when chat is opened
     update(ref(database, `userInboxes/${user.uid}/${activeChatId}`), { unreadCount: 0 });
     if (selectedChat?.type === 'dm') onValue(ref(database, `presence/${activeChatId}`), (snap) => setFriendPresence(snap.val()));
     return () => unsubMessages();
@@ -239,6 +264,8 @@ export const Inbox: React.FC = () => {
   const handleSelectChat = (chat: ChatItem) => {
       setActiveChatId(chat.id);
       navigate(`/inbox?chatId=${chat.id}`, { replace: true });
+      // Reset unread on select
+      update(ref(database, `userInboxes/${user!.uid}/${chat.id}`), { unreadCount: 0 });
   };
 
   const handleRemoveChat = async (chatId: string) => {
@@ -370,6 +397,7 @@ export const Inbox: React.FC = () => {
     if (selectedChat.type === 'dm' && isCurrentChatBlocked) return;
 
     const msgText = inputText.trim();
+    const timestamp = Date.now();
     setInputText('');
     setReplyingTo(null);
     update(ref(database, `typing/${currentChatId}/${user.uid}`), { isTyping: false });
@@ -378,7 +406,7 @@ export const Inbox: React.FC = () => {
         text: msgText, 
         senderUid: user?.uid, 
         senderName: user?.displayName, 
-        timestamp: Date.now(), 
+        timestamp: timestamp, 
         seen: false,
         replyTo: replyingTo ? { id: replyingTo.id, text: replyingTo.text, senderName: replyingTo.senderName } : null
     };
@@ -389,15 +417,19 @@ export const Inbox: React.FC = () => {
     const newMsgRef = push(ref(database, `${basePath}/${currentChatId}`));
     await set(newMsgRef, msgData);
 
-    const updateInbox = async (uid: string, chatName: string, chatPhoto?: string, incrementUnread = false) => {
-      const targetChatId = activeChatId;
-      const inboxRef = ref(database, `userInboxes/${uid}/${targetChatId}`);
+    const updateInbox = async (ownerUid: string, targetChatId: string, chatName: string, chatPhoto?: string, incrementUnread = false) => {
+      // For ownerUid's inbox, the chat entry is under 'targetChatId'
+      const inboxRef = ref(database, `userInboxes/${ownerUid}/${targetChatId}`);
       const inboxSnap = await get(inboxRef);
       const currentUnread = (inboxSnap.exists() && incrementUnread) ? (inboxSnap.val().unreadCount || 0) : 0;
       
       const inboxData: any = { 
-          lastMessage: { text: attachment ? (attachment.type === 'image' ? 'Image' : 'Video') : msgText, timestamp: Date.now(), senderUid: user?.uid }, 
-          lastMessageAt: Date.now(), 
+          lastMessage: { 
+            text: attachment ? (attachment.type === 'image' ? 'Image' : 'Video') : msgText, 
+            timestamp: timestamp, 
+            senderUid: user?.uid 
+          }, 
+          lastMessageAt: timestamp, 
           name: chatName, 
           photoURL: chatPhoto || null,
           type: selectedChat.type
@@ -413,15 +445,17 @@ export const Inbox: React.FC = () => {
     };
 
     if (selectedChat.type === 'dm') {
-      updateInbox(user!.uid, selectedChat.name, selectedChat.photoURL, false);
-      updateInbox(activeChatId, user!.displayName || 'User', user!.photoURL || undefined, true);
+      // Update My Inbox (No increment)
+      updateInbox(user.uid, activeChatId, selectedChat.name, selectedChat.photoURL, false);
+      // Update Recipient Inbox (Increment unread)
+      updateInbox(activeChatId, user.uid, user.displayName || 'User', user.photoURL || undefined, true);
     } else {
       const membersSnap = await get(ref(database, `groupChats/${activeChatId}/members`));
       if (membersSnap.exists()) {
           const members = Object.keys(membersSnap.val());
           members.forEach(memberId => {
               const isMe = memberId === user!.uid;
-              updateInbox(memberId, selectedChat.name, selectedChat.photoURL, !isMe);
+              updateInbox(memberId, activeChatId, selectedChat.name, selectedChat.photoURL, !isMe);
           });
       }
     }
@@ -476,9 +510,13 @@ export const Inbox: React.FC = () => {
           {viewMode === 'list' ? (
             filteredChats.length > 0 ? (
                 filteredChats.map(chat => {
-                // FIXED SELECTION LOGIC
                 const isSelected = activeChatId === chat.id;
                 const unreadCount = chat.unreadCount || 0;
+                // Prefer profile map data over stored inbox data for real-time sync
+                const profile = userProfiles[chat.id];
+                const displayName = chat.type === 'dm' ? (profile?.name || chat.name) : chat.name;
+                const displayPhoto = chat.type === 'dm' ? (profile?.photoURL || chat.photoURL) : chat.photoURL;
+
                 return (
                   <div key={chat.id} className="relative group/item">
                       <button 
@@ -486,15 +524,15 @@ export const Inbox: React.FC = () => {
                         className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all relative ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl opacity-100' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}
                       >
                         <div className="relative shrink-0">
-                          {chat.photoURL ? <img src={chat.photoURL} className="w-14 h-14 rounded-full object-cover" /> : <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{chat.name.charAt(0)}</div>}
+                          {displayPhoto ? <img src={displayPhoto} className="w-14 h-14 rounded-full object-cover" /> : <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{displayName.charAt(0)}</div>}
                         </div>
                         
                         <div className="flex-1 flex flex-col text-left min-w-0 overflow-hidden">
                           <div className="flex justify-between items-center gap-2 mb-0.5 w-full">
-                            <span className={`font-bold truncate text-base flex-1 ${isSelected ? 'text-white' : 'text-neutral-200'}`}>{chat.name}</span>
+                            <span className={`font-bold truncate text-base flex-1 ${isSelected ? 'text-white' : 'text-neutral-200'}`}>{displayName}</span>
                             <div className="flex items-center gap-2 shrink-0">
                                 <span className={`text-[10px] uppercase font-black ${isSelected ? 'text-white/60' : 'text-neutral-500'} whitespace-nowrap`}>
-                                    {new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {chat.lastMessage?.timestamp ? new Date(chat.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                 </span>
                                 <div className="opacity-0 group-hover/item:opacity-100 transition-opacity z-10">
                                      <button 
