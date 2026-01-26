@@ -1,14 +1,14 @@
+
 import React, { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ref, onValue, push, update, get, set, remove } from "firebase/database";
+import { ref, onValue, push, update, get, set, remove, onDisconnect } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
-import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
     Send, MessageCircle, ArrowLeft, Users, Plus, X, Check, CheckCheck, Reply,
     SmilePlus, Paperclip, MoreVertical, Smile, AlertCircle, Archive, Trash, 
-    UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings
+    UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings, Search
 } from 'lucide-react';
 
 interface ChatItem {
@@ -24,18 +24,29 @@ interface ChatItem {
     seen?: boolean;
     system?: boolean;
   };
-  timestamp: number;
+  lastMessageAt: number;
   unreadCount?: number;
   members?: Record<string, any>;
 }
 
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉', '👀'];
-const COMMON_EMOJIS = [
-  '😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '🥵', '🥶', '😷', '🤒', '🤕', '🤑', '🤠', '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '👋', '🤚', '🖐', '✋', '🖖', '👌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦵', '🦿', '🦶', '👂', '🦻', '👃', '🧠', '🦷', '🦴', '👀', '👁', '👅', '👄', '💋', '🩸', '💖', '💗', '💓', '💞', '💕', '💟', '❣️', '💔', '❤️', '🧡', '💛', '💚', '💙', '💜', '🤎', '🖤', '🤍', '💯', '💢', '💥', '💫', '💦', '💨', '🕳', '💣', '💬', '👁️‍🗨️', '🗨', '🗯', '💭', '💤'
-];
 
-// Persistent drafts between chat switches
-const draftsStore: Record<string, string> = {};
+const EMOJI_DATA = [
+  { char: '😀', name: 'smile happy' }, { char: '😃', name: 'smile happy' }, { char: '😄', name: 'smile happy' },
+  { char: '😂', name: 'laugh lol cry' }, { char: '🤣', name: 'rofl lol' }, { char: '😊', name: 'smile blush' },
+  { char: '😍', name: 'love heart eyes' }, { char: '🥰', name: 'love hearts' }, { char: '😘', name: 'kiss love' },
+  { char: '😋', name: 'yum tongue' }, { char: '😛', name: 'tongue' }, { char: '😜', name: 'wink tongue' },
+  { char: '🤨', name: 'raised eyebrow' }, { char: '😎', name: 'cool sunglasses' }, { char: '🥳', name: 'party celebrate' },
+  { char: '😒', name: 'unamused' }, { char: '😔', name: 'sad' }, { char: '😢', name: 'cry sad' },
+  { char: '😭', name: 'sob cry' }, { char: '😤', name: 'angry steam' }, { char: '😠', name: 'angry' },
+  { char: '🤯', name: 'mind blown' }, { char: '🥵', name: 'hot red' }, { char: '🥶', name: 'cold blue' },
+  { char: '😱', name: 'scream fear' }, { char: '🤔', name: 'think' }, { char: '🤫', name: 'shh quiet' },
+  { char: '🫠', name: 'melt' }, { char: '💩', name: 'poop' }, { char: '🔥', name: 'fire hot' },
+  { char: '✨', name: 'sparkles' }, { char: '💖', name: 'heart sparkle' }, { char: '❤️', name: 'heart red' },
+  { char: '💙', name: 'heart blue' }, { char: '👍', name: 'thumbs up' }, { char: '👎', name: 'thumbs down' },
+  { char: '🙏', name: 'please pray thanks' }, { char: '👏', name: 'clap' }, { char: '🙌', name: 'praise' },
+  { char: '💯', name: 'hundred 100' }, { char: '🚀', name: 'rocket' }, { char: '👀', name: 'eyes look' }
+];
 
 export const Inbox: React.FC = () => {
   const { user } = useAuth();
@@ -52,38 +63,112 @@ export const Inbox: React.FC = () => {
   const [listPresences, setListPresences] = useState<Record<string, { online: boolean, lastSeen: number }>>({});
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number, activeChatId?: string} | null>(null);
+  
+  // Typing state
+  const [typingUsers, setTypingUsers] = useState<any[]>([]);
+  // Fix: Using ReturnType<typeof setTimeout> instead of NodeJS.Timeout to avoid namespace error in browser environment
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [inputText, setInputText] = useState('');
-  const [newGroupName, setNewGroupName] = useState('');
-  const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
-  const [myFriends, setMyFriends] = useState<any[]>([]);
-  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
   const [reactionPickerPos, setReactionPickerPos] = useState<{ x: number, y: number, isMe: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [unsendConfirmId, setUnsendConfirmId] = useState<string | null>(null);
-  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [emojiSearch, setEmojiSearch] = useState('');
   const [sidebarMenuId, setSidebarMenuId] = useState<string | null>(null);
   const [sidebarMenuPos, setSidebarMenuPos] = useState<{ x: number, y: number } | null>(null);
 
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [isHost, setIsHost] = useState(false);
-  const [groupAdmins, setGroupAdmins] = useState<Record<string, boolean>>({});
   const [following, setFollowing] = useState<Record<string, boolean>>({});
   const [followers, setFollowers] = useState<Record<string, boolean>>({});
   const [archivedChats, setArchivedChats] = useState<Record<string, boolean>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
-  const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedChat = useMemo(() => {
     if (!activeChatId) return null;
     return chats.find(c => c.id === activeChatId) || null;
   }, [chats, activeChatId]);
+
+  const currentConvoId = useMemo(() => {
+    if (!user || !activeChatId || !selectedChat) return null;
+    return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
+  }, [user, activeChatId, selectedChat]);
+
+  // --- TYPING SYNC ---
+  useEffect(() => {
+    if (!user || !activeChatId || !currentConvoId || !selectedChat) return;
+
+    const typingPath = selectedChat.type === 'dm' 
+        ? `userTyping/${currentConvoId}` 
+        : `groupTyping/${activeChatId}`;
+    
+    const typingRef = ref(database, typingPath);
+    const unsub = onValue(typingRef, (snapshot) => {
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+            const users = Object.entries(data)
+                .filter(([uid, val]: [string, any]) => uid !== user.uid && val.typing)
+                .map(([uid]) => ({
+                    uid,
+                    name: userProfiles[uid]?.name || 'Someone',
+                    photoURL: userProfiles[uid]?.photoURL
+                }));
+            setTypingUsers(users);
+        } else {
+            setTypingUsers([]);
+        }
+    });
+
+    return () => unsub();
+  }, [user, activeChatId, currentConvoId, selectedChat, userProfiles]);
+
+  const setTypingStatus = (isTyping: boolean) => {
+    if (!user || !activeChatId || !currentConvoId || !selectedChat) return;
+
+    const typingPath = selectedChat.type === 'dm' 
+        ? `userTyping/${currentConvoId}/${user.uid}` 
+        : `groupTyping/${activeChatId}/${user.uid}`;
+    
+    const myTypingRef = ref(database, typingPath);
+    if (isTyping) {
+        update(myTypingRef, { typing: true, timestamp: Date.now() });
+        onDisconnect(myTypingRef).remove();
+    } else {
+        remove(myTypingRef);
+    }
+  };
+
+  const handleInputChange = (val: string) => {
+    setInputText(val);
+    
+    // Handle typing status
+    if (val.trim().length > 0) {
+        setTypingStatus(true);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(() => {
+            setTypingStatus(false);
+        }, 2500);
+    } else {
+        setTypingStatus(false);
+    }
+  };
+
+  // --- EMOJI PICKER OUTSIDE CLICK ---
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    if (showEmojiPicker) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEmojiPicker]);
 
   // --- AUTO FOCUS ON REPLY ---
   useEffect(() => {
@@ -94,15 +179,10 @@ export const Inbox: React.FC = () => {
 
   // --- SCROLL MANAGEMENT ---
   const isOpeningChat = useRef(false);
-
-  useEffect(() => {
-    if (activeChatId) {
-      isOpeningChat.current = true;
-    }
-  }, [activeChatId]);
+  useEffect(() => { if (activeChatId) isOpeningChat.current = true; }, [activeChatId]);
 
   useLayoutEffect(() => {
-    if (messages.length > 0 && messagesEndRef.current) {
+    if ((messages.length > 0 || typingUsers.length > 0) && messagesEndRef.current) {
       if (isOpeningChat.current) {
         messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
         isOpeningChat.current = false;
@@ -110,18 +190,16 @@ export const Inbox: React.FC = () => {
         messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }
     }
-  }, [messages]);
+  }, [messages, typingUsers]);
 
   // --- REAL-TIME DATA SYNC ---
   useEffect(() => {
     if (!user) return;
-    
     const unsubInbox = onValue(ref(database, `userInboxes/${user.uid}`), (snap) => {
         if (snap.exists()) {
             const data = snap.val();
             const list = Object.entries(data).map(([id, val]: [string, any]) => ({ id, ...val }));
             setChats(list.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0)));
-            
             list.forEach(chat => {
                 onValue(ref(database, `users/${chat.id}`), (uSnap) => {
                     if (uSnap.exists()) setUserProfiles(prev => ({ ...prev, [chat.id]: uSnap.val() }));
@@ -133,27 +211,18 @@ export const Inbox: React.FC = () => {
         } else { setChats([]); }
         setLoading(false);
     });
-
     onValue(ref(database, `following/${user.uid}`), (snap) => setFollowing(snap.val() || {}));
     onValue(ref(database, `followers/${user.uid}`), (snap) => setFollowers(snap.val() || {}));
     onValue(ref(database, `archivedChats/${user.uid}`), (snap) => setArchivedChats(snap.val() || {}));
-
     return () => unsubInbox();
   }, [user]);
 
   useEffect(() => {
     if (activeChatId && selectedChat?.type === 'dm') {
-        const unsub = onValue(ref(database, `presence/${activeChatId}`), (snap) => {
-            setFriendPresence(snap.val());
-        });
+        const unsub = onValue(ref(database, `presence/${activeChatId}`), (snap) => setFriendPresence(snap.val()));
         return () => unsub();
     }
   }, [activeChatId, selectedChat]);
-
-  const currentConvoId = useMemo(() => {
-    if (!user || !activeChatId || !selectedChat) return null;
-    return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
-  }, [user, activeChatId, selectedChat]);
 
   useEffect(() => {
     if (!user || !activeChatId || !currentConvoId) return;
@@ -174,23 +243,24 @@ export const Inbox: React.FC = () => {
   // --- DRAFT MANAGEMENT ---
   const handleSelectChat = (chatId: string) => {
     if (activeChatId) {
-        draftsStore[activeChatId] = inputText;
+        setDrafts(prev => ({ ...prev, [activeChatId]: inputText }));
+        setTypingStatus(false);
     }
-    setInputText(draftsStore[chatId] || '');
+    const savedDraft = drafts[chatId] || '';
+    setInputText(savedDraft);
     setActiveChatId(chatId);
     navigate(`/inbox?chatId=${chatId}`, { replace: true });
   };
 
   const addEmoji = (emoji: string) => {
-    setInputText(prev => prev + emoji);
-    setTimeout(() => {
-        if (messageInputRef.current) {
-            messageInputRef.current.focus();
-            const len = messageInputRef.current.value.length;
-            messageInputRef.current.setSelectionRange(len, len);
-        }
-    }, 0);
+    handleInputChange(inputText + emoji);
+    if (messageInputRef.current) messageInputRef.current.focus();
   };
+
+  const filteredEmojis = useMemo(() => {
+    if (!emojiSearch.trim()) return EMOJI_DATA;
+    return EMOJI_DATA.filter(e => e.name.toLowerCase().includes(emojiSearch.toLowerCase()));
+  }, [emojiSearch]);
 
   const sendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -198,8 +268,8 @@ export const Inbox: React.FC = () => {
     const msgText = inputText.trim();
     const ts = Date.now();
     
-    // Clear draft for this chat
-    delete draftsStore[activeChatId];
+    setTypingStatus(false);
+    setDrafts(prev => ({ ...prev, [activeChatId]: '' }));
     setInputText('');
     
     const msgData = { 
@@ -290,14 +360,12 @@ export const Inbox: React.FC = () => {
             const isSelected = activeChatId === chat.id;
             const profile = userProfiles[chat.id];
             const presence = listPresences[chat.id];
+            const hasDraft = (drafts[chat.id]?.trim().length > 0) || (chat.id === activeChatId && inputText.trim().length > 0);
             const photo = chat.type === 'dm' ? profile?.photoURL : chat.photoURL;
             const name = chat.type === 'dm' ? profile?.name || chat.name : chat.name;
             return (
               <div key={chat.id} className="group/tile relative">
-                  <button 
-                    onClick={() => handleSelectChat(chat.id)} 
-                    className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10 shadow-lg' : 'hover:bg-white/[0.04] border-transparent'}`}
-                  >
+                  <button onClick={() => handleSelectChat(chat.id)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10 shadow-lg' : 'hover:bg-white/[0.04] border-transparent'}`}>
                     <div className="relative shrink-0">
                       {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name.charAt(0)}</div>}
                       <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>
@@ -306,6 +374,7 @@ export const Inbox: React.FC = () => {
                     <div className="flex-1 text-left min-w-0">
                         <div className="flex justify-between items-center mb-0.5">
                             <span className="font-bold text-white truncate">{name}</span>
+                            {hasDraft && <span className="text-[9px] font-black uppercase text-indigo-400 bg-indigo-400/10 px-1.5 py-0.5 rounded tracking-widest">Draft</span>}
                         </div>
                         <p className={`text-sm truncate ${chat.unreadCount ? 'text-neutral-200 font-medium' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages'}</p>
                     </div>
@@ -332,22 +401,15 @@ export const Inbox: React.FC = () => {
                   <span className="text-[10px] uppercase font-black text-neutral-500 tracking-wider">{friendPresence?.online ? 'Online' : 'Offline'}</span>
               </div>
             </div>
-            <button onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)} className={`p-3 rounded-2xl transition-colors ${isHeaderMenuOpen ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}><MoreVertical size={20} /></button>
-            {isHeaderMenuOpen && (
-                <div className="absolute right-6 top-20 w-48 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 z-50 animate-in zoom-in">
-                    {selectedChat.type === 'group' && <button onClick={() => { setIsHeaderMenuOpen(false); navigate(`/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Settings size={18} /> Group Details</button>}
-                    <button onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><UserCircle2 size={18} /> View Profile</button>
-                </div>
-            )}
+            <button className={`p-3 rounded-2xl transition-colors text-neutral-500 hover:text-white hover:bg-white/5`}><MoreVertical size={20} /></button>
           </div>
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4" ref={scrollContainerRef}>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
             {messages.map((msg) => {
               const isMe = msg.senderUid === user?.uid;
               const senderPfp = userProfiles[msg.senderUid]?.photoURL;
               const reactions = Object.entries(msg.reactions || {});
               const isStatusMsg = lastUserMessageId === msg.id;
-              
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-2`}>
                    <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -360,7 +422,7 @@ export const Inbox: React.FC = () => {
                         <div onDoubleClick={() => handleReaction(msg.id, '❤️')} className={`rounded-[22px] px-4 py-2.5 shadow-lg cursor-pointer relative transition-all active:scale-[0.99] ${isMe ? 'bg-indigo-600 text-white rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-bl-lg border border-white/5'}`}>
                             {msg.replyTo && (
                                 <div className="bg-white/5 rounded-lg py-1 px-2.5 mb-2 border-l-2 border-indigo-500/50 text-[11px] italic opacity-80 inline-block max-w-full truncate">
-                                    <span className="block font-black uppercase text-[7px] not-italic text-indigo-400 mb-0.5">{msg.replyTo.senderName}</span>
+                                    <span className="block font-black uppercase text-[7px] text-indigo-400 mb-0.5">{msg.replyTo.senderName}</span>
                                     {msg.replyTo.text}
                                 </div>
                             )}
@@ -376,13 +438,57 @@ export const Inbox: React.FC = () => {
                         <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-all ${isMe ? 'right-full mr-3' : 'left-full ml-3'}`}>
                             <button onClick={() => setReplyingTo(msg)} className="p-2 text-neutral-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-full"><Reply size={16} /></button>
                             <button onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); setReactionPickerPos({ x: rect.left, y: rect.top, isMe }); setActiveReactionPickerId(msg.id); }} className="p-2 text-neutral-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-full"><SmilePlus size={16} /></button>
-                            {(isMe || isAdmin || isHost) && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-full"><Trash size={16} /></button>}
+                            {(isMe) && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-full"><Trash size={16} /></button>}
                         </div>
                       </div>
                    </div>
                 </div>
               );
             })}
+
+            {/* TYPING INDICATOR AREA */}
+            {typingUsers.length > 0 && (
+                <div className="flex items-center gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    {selectedChat.type === 'group' ? (
+                        <>
+                            <div className="flex -space-x-2.5 mr-1">
+                                {typingUsers.slice(0, 5).map((u, i) => (
+                                    <div key={u.uid} className="relative transition-transform hover:translate-y-[-2px]" style={{ zIndex: 10 - i }}>
+                                        {u.photoURL ? (
+                                            <img src={u.photoURL} className="w-6 h-6 rounded-full border-2 border-neutral-950 object-cover shadow-sm" alt={u.name} />
+                                        ) : (
+                                            <div className="w-6 h-6 rounded-full border-2 border-neutral-950 bg-neutral-800 flex items-center justify-center text-[8px] font-black text-neutral-500 uppercase">{u.name.charAt(0)}</div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest leading-none mb-1">
+                                    {typingUsers.length > 5 
+                                        ? 'Several people are typing...' 
+                                        : `${typingUsers.map(u => u.name.split(' ')[0]).join(', ')} ${typingUsers.length === 1 ? 'is' : 'are'} typing...`}
+                                </span>
+                                <div className="flex gap-1 ml-0.5">
+                                    <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot"></div>
+                                    <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.2s]"></div>
+                                    <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.4s]"></div>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <div className="flex flex-col ml-11">
+                            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest leading-none mb-1">
+                                {typingUsers[0].name} is typing...
+                            </span>
+                            <div className="flex gap-1 ml-0.5">
+                                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot"></div>
+                                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.2s]"></div>
+                                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.4s]"></div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 
@@ -390,13 +496,15 @@ export const Inbox: React.FC = () => {
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
               <div className="max-w-5xl mx-auto flex flex-col gap-2 relative">
                   {showEmojiPicker && (
-                    <div ref={emojiPickerRef} className="absolute bottom-full mb-4 right-0 w-80 h-96 bg-[#1a1a1a]/80 backdrop-blur-[30px] border border-white/10 rounded-[32px] shadow-2xl flex flex-col overflow-hidden z-50 animate-in slide-in-from-bottom-4">
-                      <div className="flex items-center justify-between p-4 border-b border-white/5">
-                        <span className="text-[10px] font-black uppercase text-neutral-500 tracking-widest">Emojis</span>
-                        <button onClick={() => setShowEmojiPicker(false)} className="text-neutral-500 hover:text-white"><X size={16} /></button>
+                    <div ref={emojiPickerRef} className="absolute bottom-full mb-4 right-0 w-80 h-96 bg-[#1a1a1a]/95 backdrop-blur-[30px] border border-white/10 rounded-[32px] shadow-2xl flex flex-col overflow-hidden z-50 animate-in slide-in-from-bottom-4">
+                      <div className="p-4 border-b border-white/5 bg-black/20 flex items-center gap-3">
+                        <Search size={16} className="text-neutral-500 shrink-0" />
+                        <input value={emojiSearch} onChange={e => setEmojiSearch(e.target.value)} placeholder="Search emojis..." className="flex-1 bg-transparent text-sm text-white focus:outline-none placeholder:text-neutral-700" />
+                        {emojiSearch && <button onClick={() => setEmojiSearch('')}><X size={14} className="text-neutral-500" /></button>}
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 custom-scrollbar grid grid-cols-6 gap-1">
-                        {COMMON_EMOJIS.map(e => <button key={e} onClick={() => addEmoji(e)} className="p-2 hover:bg-white/10 rounded-2xl text-xl transition-all active:scale-90">{e}</button>)}
+                        {filteredEmojis.map(e => <button key={e.char} onClick={() => addEmoji(e.char)} className="p-2 hover:bg-white/10 rounded-2xl text-xl transition-all active:scale-90">{e.char}</button>)}
+                        {filteredEmojis.length === 0 && <p className="col-span-6 text-center py-10 text-[10px] font-black uppercase text-neutral-700">No emojis found</p>}
                       </div>
                     </div>
                   )}
@@ -415,9 +523,17 @@ export const Inbox: React.FC = () => {
                   )}
                   <div className="flex gap-3 items-end">
                     <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end shadow-inner">
-                      <button onClick={() => {}} className="p-3 text-neutral-500 hover:text-indigo-400"><Paperclip size={20} /></button>
-                      <textarea ref={messageInputRef} rows={1} value={inputText} onChange={e => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Message..." className="flex-1 bg-transparent border-none text-white text-[15px] px-3 py-2.5 focus:outline-none resize-none max-h-40 overflow-y-auto custom-scrollbar" />
-                      <button ref={emojiButtonRef} onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`p-3 rounded-full transition-colors ${showEmojiPicker ? 'text-indigo-400 bg-white/10' : 'text-neutral-500 hover:text-indigo-400'}`}><Smile size={20} /></button>
+                      <button className="p-3 text-neutral-500 hover:text-indigo-400"><Paperclip size={20} /></button>
+                      <textarea 
+                        ref={messageInputRef} 
+                        rows={1} 
+                        value={inputText} 
+                        onChange={e => { handleInputChange(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} 
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} 
+                        placeholder="Message..." 
+                        className="flex-1 bg-transparent border-none text-white text-[15px] px-3 py-2.5 focus:outline-none resize-none max-h-40 overflow-y-auto custom-scrollbar" 
+                      />
+                      <button onClick={() => { setShowEmojiPicker(!showEmojiPicker); setEmojiSearch(''); }} className={`p-3 rounded-full transition-colors ${showEmojiPicker ? 'text-indigo-400 bg-white/10' : 'text-neutral-500 hover:text-indigo-400'}`}><Smile size={20} /></button>
                     </div>
                     <button onClick={() => sendMessage()} disabled={!inputText.trim()} className={`p-4 rounded-full transition-all shadow-lg active:scale-95 ${inputText.trim() ? 'bg-indigo-600 text-white shadow-indigo-900/40' : 'bg-neutral-800 text-neutral-600'}`}><Send size={20} /></button>
                   </div>
@@ -426,32 +542,20 @@ export const Inbox: React.FC = () => {
         </div>
       ) : ( <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-neutral-950 text-center px-12"><MessageCircle size={48} className="text-neutral-800 mb-4 opacity-50" /><h2 className="text-2xl font-black text-white mb-2">Select a conversation</h2><p className="text-neutral-600 text-sm">Choose a friend or group to start chatting.</p></div> )}
 
-      {/* Reaction Picker Portal */}
       {activeReactionPickerId && reactionPickerPos && createPortal(
           <div className="fixed inset-0 z-[1000]">
             <div className="absolute inset-0 bg-transparent" onClick={() => setActiveReactionPickerId(null)}></div>
-            <div 
-                style={{ position: 'fixed', top: `${reactionPickerPos.y - 60}px`, left: reactionPickerPos.isMe ? `${reactionPickerPos.x - 240}px` : `${reactionPickerPos.x}px` }} 
-                className="bg-neutral-900/90 backdrop-blur-xl border border-white/10 rounded-full p-1.5 shadow-2xl flex gap-1 animate-in zoom-in"
-            >
-                {REACTION_EMOJIS.map(e => (
-                    <button key={e} onClick={() => handleReaction(activeReactionPickerId, e)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full text-xl transition-transform hover:scale-125 active:scale-90">
-                        {e}
-                    </button>
-                ))}
-            </div>
+            <div style={{ position: 'fixed', top: `${reactionPickerPos.y - 60}px`, left: reactionPickerPos.isMe ? `${reactionPickerPos.x - 240}px` : `${reactionPickerPos.x}px` }} className="bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-full p-1.5 shadow-2xl flex gap-1 animate-in zoom-in">{REACTION_EMOJIS.map(e => <button key={e} onClick={() => handleReaction(activeReactionPickerId, e)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full text-xl transition-transform hover:scale-125 active:scale-90">{e}</button>)}</div>
           </div>, document.body
       )}
 
-      {/* Unsend Confirmation Portal */}
       {unsendConfirmId && createPortal(
           <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
               <div className="bg-neutral-900 border border-white/10 rounded-[32px] p-8 max-w-xs w-full text-center shadow-2xl animate-in zoom-in duration-200">
                   <div className="w-16 h-16 bg-red-500/10 rounded-[24px] flex items-center justify-center mx-auto mb-6"><AlertCircle size={32} className="text-red-500" /></div>
                   <h3 className="text-xl font-black text-white mb-2">Unsend message?</h3>
-                  <p className="text-neutral-400 text-sm mb-8">This will remove the message for everyone in this chat.</p>
-                  <div className="flex flex-col gap-2">
-                      <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all active:scale-95 shadow-lg shadow-red-900/20">Unsend</button>
+                  <div className="flex flex-col gap-2 mt-8">
+                      <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-95">Unsend</button>
                       <button onClick={() => setUnsendConfirmId(null)} className="w-full py-3.5 bg-neutral-800 text-neutral-400 hover:text-white rounded-2xl transition-all">Cancel</button>
                   </div>
               </div>
