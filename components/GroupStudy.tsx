@@ -10,7 +10,7 @@ export const GroupStudy: React.FC = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isGuest } = useAuth(); // Auth context
+  const { user } = useAuth();
 
   const myKey = location.state?.myKey;
   
@@ -65,7 +65,7 @@ export const GroupStudy: React.FC = () => {
       localStorage.setItem('focusflow_sessions', JSON.stringify([...existing, newSession]));
 
       // Social Auto-Post
-      if (duration >= 600 && user && !isGuest && roomId) {
+      if (duration >= 600 && user && roomId) {
           const mins = Math.floor(duration / 60);
           const hrs = Math.floor(mins / 60);
           const rMins = mins % 60;

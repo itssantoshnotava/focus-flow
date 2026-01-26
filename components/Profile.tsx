@@ -17,7 +17,7 @@ import {
 
 export const Profile: React.FC = () => {
   const { uid } = useParams();
-  const { user, isGuest } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -75,14 +75,9 @@ export const Profile: React.FC = () => {
     });
 
     if (user && !isMe) {
-        // Am I following them?
         onValue(ref(database, `following/${user.uid}/${uid}`), (snap) => setIsFollowing(snap.exists()));
-        // Do they follow me? (Am I in their following list? Or are they in my followers?)
-        // Path: followers/{myUid}/{uid} = true means uid follows me.
         onValue(ref(database, `followers/${user.uid}/${uid}`), (snap) => setIsFollowedBy(snap.exists()));
-        // Did I send a request?
         onValue(ref(database, `followRequests/${uid}/${user.uid}`), (snap) => setHasSentRequest(snap.exists()));
-
         onValue(ref(database, `blocks/${user.uid}/${uid}`), (snap) => setIsBlockingThem(snap.exists()));
         onValue(ref(database, `blocks/${uid}/${user.uid}`), (snap) => setIsBlockedByThem(snap.exists()));
     }
@@ -111,7 +106,7 @@ export const Profile: React.FC = () => {
     if (isFollowing) {
       await unfollowUser(user.uid, uid);
     } else if (hasSentRequest) {
-      // Logic for canceling request can go here if needed
+      // Requested state
     } else if (isFollowedBy) {
       await followBack(user.uid, uid);
     } else {
@@ -138,7 +133,6 @@ export const Profile: React.FC = () => {
         await remove(blockRef);
     } else {
         await set(blockRef, true);
-        // Wipe relationships
         const updates: any = {};
         updates[`following/${user.uid}/${uid}`] = null;
         updates[`followers/${uid}/${user.uid}`] = null;
@@ -163,7 +157,7 @@ export const Profile: React.FC = () => {
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0] && isMe && !isGuest) {
+    if (e.target.files && e.target.files[0] && isMe) {
       setIsUploading(true);
       try {
         const url = await uploadImageToCloudinary(e.target.files[0]);
@@ -298,7 +292,7 @@ export const Profile: React.FC = () => {
                     <p className="text-neutral-400 max-w-sm mx-auto whitespace-pre-wrap text-sm leading-relaxed font-medium mb-6">{displayProfile.bio}</p>
                   )}
 
-                  {!isMe && !isGuest && (
+                  {!isMe && (
                       <div className="flex items-center justify-center gap-3 mt-4">
                           {restrictedProfile ? (
                               <div className="text-xs font-bold text-neutral-600 uppercase tracking-widest py-2 bg-white/5 px-6 rounded-xl border border-white/5">This user is unavailable</div>

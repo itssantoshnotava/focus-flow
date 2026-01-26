@@ -10,7 +10,7 @@ import {
 export const Layout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isGuest } = useAuth();
+  const { user } = useAuth();
   
   const [inboxUnread, setInboxUnread] = useState(0);
   const [profileImage, setProfileImage] = useState(user?.photoURL);
@@ -29,7 +29,7 @@ export const Layout: React.FC = () => {
 
   // --- Global Presence System ---
   useEffect(() => {
-    if (user && !isGuest) {
+    if (user) {
         const connectedRef = ref(database, ".info/connected");
         const presenceRef = ref(database, `presence/${user.uid}`);
         
@@ -48,18 +48,17 @@ export const Layout: React.FC = () => {
 
         return () => unsub();
     }
-  }, [user, isGuest]);
+  }, [user]);
 
   // --- Global Counters Listeners ---
   useEffect(() => {
-      if (!user || isGuest) return;
+      if (!user) return;
 
       const inboxRef = ref(database, `userInboxes/${user.uid}`);
       const unsubInbox = onValue(inboxRef, (snapshot) => {
           let unreadChatsCount = 0;
           if (snapshot.exists()) {
               snapshot.forEach((child) => {
-                  // Count distinct chats that have at least one unread message
                   if ((child.val().unreadCount || 0) > 0) {
                       unreadChatsCount++;
                   }
@@ -71,7 +70,7 @@ export const Layout: React.FC = () => {
       return () => {
           unsubInbox();
       };
-  }, [user, isGuest]);
+  }, [user]);
 
   const NavItem = ({ icon: Icon, path, label, badge }: { icon: any, path: string, label: string, badge?: number }) => {
       const isActive = location.pathname === path;
@@ -82,7 +81,6 @@ export const Layout: React.FC = () => {
               ${isActive ? 'scale-105 translate-z-0' : 'hover:bg-white/5 active:scale-95'}`}
             title={label}
         >
-            {/* Active Glow Backdrop */}
             {isActive && (
               <div className="absolute inset-0 bg-indigo-500/10 blur-xl rounded-full animate-pulse pointer-events-none"></div>
             )}
@@ -119,32 +117,26 @@ export const Layout: React.FC = () => {
 
         <div className="flex flex-col gap-5 flex-1 w-full items-center">
            <NavItem icon={Home} path="/" label="Home" />
-           {!isGuest && (
-             <>
-               <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
-               <NavItem icon={Search} path="/search" label="Search" />
-               <NavItem icon={Bell} path="/notifications" label="Notifications" />
-             </>
-           )}
+           <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
+           <NavItem icon={Search} path="/search" label="Search" />
+           <NavItem icon={Bell} path="/notifications" label="Notifications" />
            <NavItem icon={Globe} path="/group" label="Group Study" />
         </div>
 
         <div className="mt-auto flex flex-col gap-4 items-center mb-2">
-            {!isGuest && (
-               <button 
-                  onClick={() => navigate(`/profile/${user?.uid}`)}
-                  className="w-11 h-11 rounded-full p-0.5 bg-gradient-to-tr from-white/10 to-transparent border border-white/10 hover:border-indigo-500/50 hover:shadow-[0_0_15px_rgba(99,102,241,0.3)] transition-all overflow-hidden group"
-                  title="Profile"
-               >
-                   <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 flex items-center justify-center">
-                       {profileImage ? (
-                         <img src={profileImage} alt="Profile" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
-                       ) : (
-                         <div className="text-xs font-bold text-neutral-400">{user?.displayName?.charAt(0) || <User size={16} />}</div>
-                       )}
-                   </div>
-               </button>
-            )}
+            <button 
+                onClick={() => navigate(`/profile/${user?.uid}`)}
+                className="w-11 h-11 rounded-full p-0.5 bg-gradient-to-tr from-white/10 to-transparent border border-white/10 hover:border-indigo-500/50 hover:shadow-[0_0_15px_rgba(99,102,241,0.3)] transition-all overflow-hidden group"
+                title="Profile"
+            >
+                <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 flex items-center justify-center">
+                    {profileImage ? (
+                      <img src={profileImage} alt="Profile" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+                    ) : (
+                      <div className="text-xs font-bold text-neutral-400">{user?.displayName?.charAt(0) || <User size={16} />}</div>
+                    )}
+                </div>
+            </button>
         </div>
       </aside>
 
@@ -156,30 +148,24 @@ export const Layout: React.FC = () => {
       {/* --- MOBILE NAV --- */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-22 bg-[#1414148c] backdrop-blur-[24px] backdrop-saturate-[160%] border-t border-white/10 flex items-center justify-around z-50 pb-6 px-4 rounded-t-[32px] shadow-[0_-8px_30px_rgba(0,0,0,0.25)]">
          <NavItem icon={Home} path="/" label="Home" />
-         {!isGuest && (
-           <>
-             <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
-             <NavItem icon={Search} path="/search" label="Search" />
-             <NavItem icon={Bell} path="/notifications" label="Notifications" />
-           </>
-         )}
+         <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
+         <NavItem icon={Search} path="/search" label="Search" />
+         <NavItem icon={Bell} path="/notifications" label="Notifications" />
          <NavItem icon={Globe} path="/group" label="Group" />
-         {!isGuest && (
-            <button 
-                onClick={() => navigate(`/profile/${user?.uid}`)}
-                className="w-10 h-10 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-white/10 to-transparent border border-white/10 active:scale-90 transition-transform"
-            >
-               <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 flex items-center justify-center">
-                   {profileImage ? (
-                     <img src={profileImage} alt="Me" className="w-full h-full object-cover" />
-                   ) : (
-                     <div className="w-full h-full bg-neutral-900 flex items-center justify-center text-xs text-neutral-400 font-bold">
-                        {user?.displayName?.charAt(0) || <User size={16} />}
-                     </div>
-                   )}
-               </div>
-            </button>
-         )}
+         <button 
+             onClick={() => navigate(`/profile/${user?.uid}`)}
+             className="w-10 h-10 rounded-full overflow-hidden p-0.5 bg-gradient-to-tr from-white/10 to-transparent border border-white/10 active:scale-90 transition-transform"
+         >
+            <div className="w-full h-full rounded-full overflow-hidden bg-neutral-900 flex items-center justify-center">
+                {profileImage ? (
+                  <img src={profileImage} alt="Me" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full bg-neutral-900 flex items-center justify-center text-xs text-neutral-400 font-bold">
+                     {user?.displayName?.charAt(0) || <User size={16} />}
+                  </div>
+                )}
+            </div>
+         </button>
       </nav>
 
     </div>

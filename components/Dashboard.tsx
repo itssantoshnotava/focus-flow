@@ -12,7 +12,7 @@ import { ref, get } from 'firebase/database';
 import { database } from '../firebase';
 
 export const Dashboard: React.FC = () => {
-  const { user, isGuest } = useAuth();
+  const { user } = useAuth();
   const { sessions } = useTimer();
   
   // --- State: Syllabus Progress ---
@@ -31,12 +31,12 @@ export const Dashboard: React.FC = () => {
 
   // --- Effect: Fetch Profile ---
   useEffect(() => {
-      if (user && !isGuest) {
+      if (user) {
           get(ref(database, `users/${user.uid}`)).then(snap => {
               if (snap.exists()) setUserProfile(snap.val());
           });
       }
-  }, [user, isGuest, sessions]); // Refresh when sessions sync
+  }, [user, sessions]);
 
   // --- Handlers ---
   const handleToggleProgress = useCallback((examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
@@ -138,7 +138,7 @@ export const Dashboard: React.FC = () => {
                   </div>
               </div>
 
-              {!isGuest && <FriendsLeaderboard />}
+              <FriendsLeaderboard />
             </div>
 
             {/* Right Column */}

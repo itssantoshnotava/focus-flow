@@ -36,7 +36,7 @@ export const useTimer = () => {
 };
 
 export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isGuest } = useAuth();
+  const { user } = useAuth();
 
   const [mode, setModeState] = useState<TimerMode>(() => {
     const saved = localStorage.getItem('focusflow_timer_mode');
@@ -146,7 +146,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [mode, phase, pomodoroCount, isActive, seconds, initialTime, dailyTotal, sessions]);
 
   useEffect(() => {
-      if (user && !isGuest) {
+      if (user) {
           const { current, longest } = calculateStreak(sessions);
           let totalSeconds = 0;
           sessions.forEach(s => totalSeconds += s.duration);
@@ -157,10 +157,10 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               streaks: { current, longest }
           }).catch(err => console.error("Failed to sync stats", err));
       }
-  }, [sessions, user, isGuest, calculateStreak]);
+  }, [sessions, user, calculateStreak]);
 
   const postStudyUpdate = useCallback(async (duration: number, timerMode: string) => {
-    if (!user || isGuest || duration < 600) return;
+    if (!user || duration < 600) return;
 
     const mins = Math.floor(duration / 60);
     const hrs = Math.floor(mins / 60);
@@ -188,7 +188,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
         }
     } catch (e) { console.error("Auto-post failed", e); }
-  }, [user, isGuest]);
+  }, [user]);
 
   const saveSession = useCallback((forceDuration?: number) => {
       let duration = forceDuration !== undefined ? forceDuration : 0;
@@ -203,7 +203,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
       }
 
-      // Only save if it was a focus phase or stopwatch
       if (duration > 10 && (mode !== TimerMode.POMODORO || phase === TimerPhase.FOCUS)) {
           const newSession: StudySession = {
               id: crypto.randomUUID(),
@@ -221,7 +220,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (mode !== TimerMode.POMODORO) return;
 
     if (phase === TimerPhase.FOCUS) {
-      saveSession(initialTime); // Save the full focus block
+      saveSession(initialTime);
       setPomodoroCount(c => c + 1);
       setPhase(TimerPhase.BREAK);
       setSeconds(5 * 60);
@@ -281,7 +280,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             return prev + 1;
           } else {
             if (prev <= 1) {
-              // Trigger transition on next tick
               setTimeout(handlePhaseTransition, 0);
               return 0;
             }

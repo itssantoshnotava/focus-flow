@@ -1,9 +1,9 @@
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, AlertCircle, User } from 'lucide-react';
+import { LayoutDashboard, AlertCircle } from 'lucide-react';
 
 export const Login: React.FC = () => {
-  const { signInWithGoogle, loginAsGuest, error } = useAuth();
+  const { signInWithGoogle, error } = useAuth();
 
   return (
     <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 font-sans text-neutral-200">
@@ -28,29 +28,15 @@ export const Login: React.FC = () => {
         <div className="w-full space-y-3">
             <button 
                 onClick={signInWithGoogle}
-                className="w-full bg-white text-black font-medium py-3.5 px-6 rounded-xl flex items-center justify-center gap-3 hover:bg-neutral-200 transition-all shadow-xl active:scale-95"
+                className="w-full bg-white text-black font-medium py-4 px-6 rounded-xl flex items-center justify-center gap-3 hover:bg-neutral-200 transition-all shadow-xl active:scale-95"
             >
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
                 <span>Sign in with Google</span>
             </button>
-
-            <div className="relative flex py-2 items-center">
-                <div className="flex-grow border-t border-neutral-800"></div>
-                <span className="flex-shrink-0 mx-4 text-neutral-600 text-xs uppercase font-medium">Testing Access</span>
-                <div className="flex-grow border-t border-neutral-800"></div>
-            </div>
-
-            <button 
-                onClick={loginAsGuest}
-                className="w-full bg-neutral-900 text-neutral-300 font-medium py-3.5 px-6 rounded-xl flex items-center justify-center gap-3 hover:bg-neutral-800 border border-neutral-800 hover:text-white transition-all active:scale-95"
-            >
-                <User size={18} />
-                <span>Continue as Guest</span>
-            </button>
         </div>
 
         <p className="text-xs text-neutral-600 max-w-xs text-center mt-2">
-            Guests can create rooms and track time, but data is not saved to the cloud leaderboard.
+            Authentication is required to save study progress and join the community rankings.
         </p>
       </div>
     </div>

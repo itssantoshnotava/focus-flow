@@ -7,9 +7,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   error: string | null;
-  isGuest: boolean;
   signInWithGoogle: () => Promise<void>;
-  loginAsGuest: () => void;
   logout: () => Promise<void>;
 }
 
@@ -25,47 +23,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      // Only update if we are not in guest mode
-      if (!isGuest) {
-        setUser(currentUser);
-        setLoading(false);
+      setUser(currentUser);
+      setLoading(false);
 
-        // Sync user to database if logged in and not anonymous
-        if (currentUser && !currentUser.isAnonymous) {
-            const userRef = ref(database, `users/${currentUser.uid}`);
-            try {
-                // Check if user exists first to ensure creation
-                const snapshot = await get(userRef);
-                if (!snapshot.exists()) {
-                    await set(userRef, {
-                        name: currentUser.displayName,
-                        photoURL: currentUser.photoURL
-                    });
-                } else {
-                    // Update profile if it exists to keep it fresh
-                    await update(userRef, {
-                        name: currentUser.displayName,
-                        photoURL: currentUser.photoURL
-                    });
-                }
-            } catch (e) {
-                console.error("Error syncing user profile", e);
-            }
-        }
+      // Sync user to database if logged in
+      if (currentUser) {
+          const userRef = ref(database, `users/${currentUser.uid}`);
+          try {
+              const snapshot = await get(userRef);
+              if (!snapshot.exists()) {
+                  await set(userRef, {
+                      name: currentUser.displayName,
+                      photoURL: currentUser.photoURL
+                  });
+              } else {
+                  await update(userRef, {
+                      name: currentUser.displayName,
+                      photoURL: currentUser.photoURL
+                  });
+              }
+          } catch (e) {
+              console.error("Error syncing user profile", e);
+          }
       }
     });
     return unsubscribe;
-  }, [isGuest]);
+  }, []);
 
   const signInWithGoogle = async () => {
     setError(null);
     try {
       await signInWithPopup(auth, googleProvider);
-      setIsGuest(false);
     } catch (err: any) {
       console.error("Error signing in", err);
       const authError = err as AuthError;
@@ -79,43 +70,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const loginAsGuest = () => {
-    setError(null);
-    // Create a mock user object that satisfies the User interface for our needs
-    const guestUser = {
-      uid: `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      displayName: 'Guest',
-      email: null,
-      photoURL: null,
-      emailVerified: false,
-      isAnonymous: true,
-      metadata: {},
-      providerData: [],
-      // Mock methods that might be called
-      getIdToken: async () => 'guest-token',
-      toJSON: () => ({})
-    } as unknown as User;
-
-    setUser(guestUser);
-    setIsGuest(true);
-    setLoading(false);
-  };
-
   const logout = async () => {
     try {
-        if (isGuest) {
-            setUser(null);
-            setIsGuest(false);
-        } else {
-            await signOut(auth);
-        }
+        await signOut(auth);
     } catch (e) {
         console.error(e);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, error, isGuest, signInWithGoogle, loginAsGuest, logout }}>
+    <AuthContext.Provider value={{ user, loading, error, signInWithGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   );

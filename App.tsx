@@ -20,7 +20,7 @@ import { ref, get, update } from 'firebase/database';
 import { database } from './firebase';
 
 const AppContent: React.FC = () => {
-  const { user, loading, isGuest } = useAuth();
+  const { user, loading } = useAuth();
   
   // --- Flow State ---
   const [splashSeen, setSplashSeen] = useState(() => localStorage.getItem('focusflow_splash_seen') === 'true');
@@ -37,7 +37,7 @@ const AppContent: React.FC = () => {
 
   useEffect(() => {
     const syncAndCheck = async () => {
-        if (!user || isGuest) {
+        if (!user) {
             setCheckingProfile(false);
             return;
         }
@@ -90,7 +90,7 @@ const AppContent: React.FC = () => {
     } else {
         setCheckingProfile(false);
     }
-  }, [user, isGuest]);
+  }, [user, accessVerified, onboardingComplete]);
 
   const handleSplashComplete = () => {
       localStorage.setItem('focusflow_splash_seen', 'true');
@@ -129,7 +129,7 @@ const AppContent: React.FC = () => {
     return <Login />;
   }
 
-  if (!isGuest && !onboardingComplete) {
+  if (!onboardingComplete) {
       if (checkingProfile) {
         return (
             <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-neutral-500 font-sans">
