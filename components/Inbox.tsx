@@ -37,6 +37,7 @@ export const Inbox: React.FC = () => {
   const [searchParams] = useSearchParams();
   
   const [viewMode, setViewMode] = useState<'list' | 'create_group'>('list');
+  const [showArchived, setShowArchived] = useState(false);
   const [chats, setChats] = useState<ChatItem[]>([]);
   const [selectedChat, setSelectedChat] = useState<ChatItem | null>(null);
   const [activeGroupData, setActiveGroupData] = useState<any>(null);
@@ -83,45 +84,21 @@ export const Inbox: React.FC = () => {
     return () => { update(pRef, { activeChatId: null }); };
   }, [user, currentChatId]);
 
-  // Global Listeners for Mutual Follows, Block/Mute/Archive
+  // Global Listeners
   useEffect(() => {
     if (!user) return;
-    
-    // Following
-    const followingRef = ref(database, `following/${user.uid}`);
-    const unsubFollowing = onValue(followingRef, (snap) => setFollowing(snap.val() || {}));
-
-    // Followers
-    const followersRef = ref(database, `followers/${user.uid}`);
-    const unsubFollowers = onValue(followersRef, (snap) => setFollowers(snap.val() || {}));
-
-    const blockRef = ref(database, `blocks/${user.uid}`);
-    const unsubBlocks = onValue(blockRef, (snap) => setBlocks(snap.val() || {}));
-
-    const mutedRef = ref(database, `mutedChats/${user.uid}`);
-    const unsubMuted = onValue(mutedRef, (snap) => setMutedChats(snap.val() || {}));
-
-    const archivedRef = ref(database, `archivedChats/${user.uid}`);
-    const unsubArchived = onValue(archivedRef, (snap) => setArchivedChats(snap.val() || {}));
-
-    const blockedByRef = ref(database, `blockedUsers/${user.uid}`);
-    const unsubBlockedBy = onValue(blockedByRef, (snap) => setBlockedBy(snap.val() || {}));
-
-    return () => { 
-      unsubFollowing();
-      unsubFollowers();
-      unsubBlocks(); 
-      unsubMuted(); 
-      unsubArchived(); 
-      unsubBlockedBy();
-    };
+    onValue(ref(database, `following/${user.uid}`), (snap) => setFollowing(snap.val() || {}));
+    onValue(ref(database, `followers/${user.uid}`), (snap) => setFollowers(snap.val() || {}));
+    onValue(ref(database, `blocks/${user.uid}`), (snap) => setBlocks(snap.val() || {}));
+    onValue(ref(database, `mutedChats/${user.uid}`), (snap) => setMutedChats(snap.val() || {}));
+    onValue(ref(database, `archivedChats/${user.uid}`), (snap) => setArchivedChats(snap.val() || {}));
+    onValue(ref(database, `blockedUsers/${user.uid}`), (snap) => setBlockedBy(snap.val() || {}));
   }, [user]);
 
   // Listen for inbox changes
   useEffect(() => {
     if (!user) return;
     const inboxRef = ref(database, `userInboxes/${user.uid}`);
-    
     const handleInboxUpdate = (snapshot: any) => {
         const val = snapshot.val();
         const key = snapshot.key;
@@ -139,15 +116,12 @@ export const Inbox: React.FC = () => {
         });
         setLoading(false);
     };
-
-    const unsubAdded = onChildAdded(inboxRef, handleInboxUpdate);
-    const unsubChanged = onChildChanged(inboxRef, handleInboxUpdate);
-    const unsubRemoved = onChildRemoved(inboxRef, (snapshot) => {
+    onChildAdded(inboxRef, handleInboxUpdate);
+    onChildChanged(inboxRef, handleInboxUpdate);
+    onChildRemoved(inboxRef, (snapshot) => {
         setChats(prev => prev.filter(c => c.id !== snapshot.key));
     });
-
     get(inboxRef).then(() => setLoading(false));
-    return () => { unsubAdded(); unsubChanged(); unsubRemoved(); };
   }, [user]);
 
   // Sync Profiles & Block Visibility
@@ -155,45 +129,32 @@ export const Inbox: React.FC = () => {
     if (!selectedChat) return;
     const profileListeners: (() => void)[] = [];
     const attachListener = (uid: string) => {
-      const userRef = ref(database, `users/${uid}`);
-      const unsub = onValue(userRef, (snap) => {
+      onValue(ref(database, `users/${uid}`), (snap) => {
         if (snap.exists()) {
           const data = snap.val();
           const isBlocked = blocks[uid] || blockedBy[uid];
           setUserProfiles(prev => ({
-            ...prev,
-            [uid]: { 
-              name: isBlocked ? 'Wishp User' : data.name, 
-              photoURL: isBlocked ? undefined : data.photoURL 
-            }
+            ...prev, [uid]: { name: isBlocked ? 'Wishp User' : data.name, photoURL: isBlocked ? undefined : data.photoURL }
           }));
         }
       });
-      profileListeners.push(unsub);
     };
-
-    if (selectedChat.type === 'dm') {
-      attachListener(selectedChat.id);
-    } else {
-      const membersRef = ref(database, `groupChats/${selectedChat.id}/members`);
-      get(membersRef).then(snap => {
-        if (snap.exists()) {
-          Object.keys(snap.val()).forEach(mid => attachListener(mid));
-        }
-      });
-    }
-    return () => profileListeners.forEach(unsub => unsub());
+    if (selectedChat.type === 'dm') attachListener(selectedChat.id);
+    else get(ref(database, `groupChats/${selectedChat.id}/members`)).then(snap => {
+        if (snap.exists()) Object.keys(snap.val()).forEach(mid => attachListener(mid));
+    });
   }, [selectedChat, blocks, blockedBy]);
 
-  // Filter chats: Only mutual DMs and Groups
+  // Filter chats: Main view vs Archived view
   const filteredChats = useMemo(() => {
     return chats.filter(c => {
-        if (archivedChats[c.id]) return false;
+        const isArchived = archivedChats[c.id];
+        if (showArchived) return isArchived;
+        if (isArchived) return false;
         if (c.type === 'group') return true;
-        // DM: Must be mutual follow
         return following[c.id] && followers[c.id];
     });
-  }, [chats, archivedChats, following, followers]);
+  }, [chats, archivedChats, following, followers, showArchived]);
 
   const isCurrentChatBlocked = useMemo(() => {
     if (!selectedChat || selectedChat.type !== 'dm') return false;
@@ -208,71 +169,27 @@ export const Inbox: React.FC = () => {
   // Messages logic
   useEffect(() => {
     if (!user || !selectedChat || !currentChatId) return;
-
     const messagesPath = selectedChat.type === 'dm' ? `messages/${currentChatId}` : `groupMessages/${selectedChat.id}`;
     const unsubMessages = onValue(ref(database, messagesPath), (snapshot) => {
       if (snapshot.exists()) {
         const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(list);
-
-        list.forEach(m => {
-           if (m.senderUid !== user.uid && !m.seen) {
-               update(ref(database, `${messagesPath}/${m.id}`), { seen: true });
-           }
-        });
-      } else {
-        setMessages([]);
-      }
+        list.forEach(m => { if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${messagesPath}/${m.id}`), { seen: true }); });
+      } else { setMessages([]); }
     });
-
-    const typingRef = ref(database, `typing/${currentChatId}`);
-    const unsubTyping = onValue(typingRef, (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        const typers = Object.entries(data)
-          .filter(([uid, val]: [string, any]) => uid !== user.uid && val.isTyping)
-          .map(([uid, val]: [string, any]) => val.name);
-        
-        if (typers.length === 0) setTypingText('');
-        else if (typers.length === 1) setTypingText(`${typers[0]} is typing...`);
-        else if (typers.length === 2) setTypingText(`${typers[0]} and ${typers[1]} are typing...`);
-        else setTypingText('Several people are typing...');
-      } else {
-        setTypingText('');
-      }
-    });
-
     update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
-
-    if (selectedChat.type === 'dm') {
-        onValue(ref(database, `presence/${selectedChat.id}`), (snap) => {
-            setFriendPresence(snap.val());
-        });
-    } else {
-        onValue(ref(database, `groupChats/${selectedChat.id}`), (snap) => {
-            if (snap.exists()) setActiveGroupData(snap.val());
-        });
-    }
-
-    return () => { unsubMessages(); unsubTyping(); };
+    if (selectedChat.type === 'dm') onValue(ref(database, `presence/${selectedChat.id}`), (snap) => setFriendPresence(snap.val()));
+    return () => unsubMessages();
   }, [selectedChat, currentChatId, user]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, typingText]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const handleBlock = async () => {
     if (!user || !selectedChat || selectedChat.type !== 'dm') return;
     const targetUid = selectedChat.id;
     const isCurrentlyBlocked = blocks[targetUid];
-    
-    if (isCurrentlyBlocked) {
-        await remove(ref(database, `blocks/${user.uid}/${targetUid}`));
-        await remove(ref(database, `blockedUsers/${targetUid}/${user.uid}`));
-    } else {
-        await set(ref(database, `blocks/${user.uid}/${targetUid}`), true);
-        await set(ref(database, `blockedUsers/${targetUid}/${user.uid}`), true);
-    }
+    if (isCurrentlyBlocked) await remove(ref(database, `blocks/${user.uid}/${targetUid}`));
+    else await set(ref(database, `blocks/${user.uid}/${targetUid}`), true);
     setIsHeaderMenuOpen(false);
   };
 
@@ -291,70 +208,25 @@ export const Inbox: React.FC = () => {
     setIsHeaderMenuOpen(false);
   };
 
-  const sendMessage = async (e?: React.FormEvent, attachment?: { url: string, type: 'image' | 'video' }) => {
+  const sendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() && !attachment && !user || !selectedChat || !currentChatId) return;
-
-    // BLOCK & MUTUAL CHECK
+    if (!inputText.trim() && !user || !selectedChat || !currentChatId) return;
     if (selectedChat.type === 'dm' && (isCurrentChatBlocked || !isCurrentChatMutual)) {
-        alert("Cannot send messages. Mutual follow required.");
+        alert("Mutual follow required to message.");
         return;
     }
-
     const msgText = inputText.trim();
     setInputText('');
-    setReplyingTo(null);
-    update(ref(database, `typing/${currentChatId}/${user.uid}`), { isTyping: false });
-
-    const isRecipientActive = selectedChat.type === 'dm' && friendPresence?.online && friendPresence?.activeChatId === currentChatId;
-
-    const msgData: any = {
-      text: msgText,
-      senderUid: user?.uid,
-      senderName: user?.displayName,
-      timestamp: Date.now(),
-      seen: isRecipientActive,
-      replyTo: replyingTo ? { id: replyingTo.id, text: replyingTo.text, senderName: replyingTo.senderName } : null
-    };
-
-    if (attachment) msgData.attachment = attachment;
-
+    const msgData: any = { text: msgText, senderUid: user?.uid, senderName: user?.displayName, timestamp: Date.now(), seen: false };
     const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
-    const newMsgRef = push(ref(database, `${basePath}/${currentChatId}`));
-    await set(newMsgRef, msgData);
-
+    await set(push(ref(database, `${basePath}/${currentChatId}`)), msgData);
     const updateInbox = (uid: string, chatName: string, chatPhoto?: string) => {
-      const targetChatIdForInbox = selectedChat.id === uid ? user?.uid : selectedChat.id;
-      const inboxPath = `userInboxes/${uid}/${targetChatIdForInbox}`;
-      const inboxRef = ref(database, inboxPath);
-      
-      remove(ref(database, `archivedChats/${uid}/${selectedChat.id}`));
-
-      update(inboxRef, {
-        lastMessage: { text: attachment ? (attachment.type === 'image' ? 'Sent an image' : 'Sent a video') : msgText, timestamp: Date.now(), senderUid: user?.uid },
-        lastMessageAt: Date.now(),
-        name: chatName,
-        photoURL: chatPhoto || null
-      });
-
-      if (uid !== user?.uid) {
-          get(ref(database, `mutedChats/${uid}/${selectedChat.id}`)).then(mSnap => {
-              if (!mSnap.exists()) {
-                  get(inboxRef).then(snap => {
-                      const currentUnread = snap.val()?.unreadCount || 0;
-                      update(inboxRef, { unreadCount: currentUnread + 1 });
-                  });
-              }
-          });
-      }
+      const inboxRef = ref(database, `userInboxes/${uid}/${selectedChat.id === uid ? user?.uid : selectedChat.id}`);
+      update(inboxRef, { lastMessage: { text: msgText, timestamp: Date.now(), senderUid: user?.uid }, lastMessageAt: Date.now(), name: chatName, photoURL: chatPhoto || null });
     };
-
     if (selectedChat.type === 'dm') {
       updateInbox(user!.uid, selectedChat.name, selectedChat.photoURL);
       updateInbox(selectedChat.id, user!.displayName || 'User', user!.photoURL || undefined);
-    } else if (activeGroupData) {
-        const members = Object.keys(activeGroupData.members);
-        members.forEach(mid => updateInbox(mid, activeGroupData.name, activeGroupData.photoURL));
     }
   };
 
@@ -371,8 +243,11 @@ export const Inbox: React.FC = () => {
       {/* SIDEBAR */}
       <div className={`${selectedChat ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-col border-r border-neutral-900 bg-neutral-950 shrink-0`}>
         <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/50 backdrop-blur-xl sticky top-0 z-20">
-          <h1 className="text-2xl font-black text-white tracking-tight">Messages</h1>
-          <button onClick={() => setViewMode(viewMode === 'list' ? 'create_group' : 'list')} className="p-2 bg-indigo-600/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-all active:scale-90">{viewMode === 'list' ? <Plus size={20} /> : <X size={20} />}</button>
+          <h1 className="text-2xl font-black text-white tracking-tight">{showArchived ? 'Archive' : 'Messages'}</h1>
+          <div className="flex gap-2">
+            <button onClick={() => setShowArchived(!showArchived)} className={`p-2 rounded-xl transition-all ${showArchived ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`} title="Archived Chats"><Archive size={20} /></button>
+            <button onClick={() => setViewMode(viewMode === 'list' ? 'create_group' : 'list')} className="p-2 bg-indigo-600/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-all active:scale-90">{viewMode === 'list' ? <Plus size={20} /> : <X size={20} />}</button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
           {viewMode === 'list' ? (
@@ -384,7 +259,6 @@ export const Inbox: React.FC = () => {
                     <div className="relative shrink-0">
                       {chat.photoURL ? <img src={chat.photoURL} className="w-14 h-14 rounded-full object-cover" /> : <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{chat.name.charAt(0)}</div>}
                       {chat.unreadCount ? chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-neutral-950">{chat.unreadCount}</div> : null}
-                      {mutedChats[chat.id] && <div className="absolute -bottom-1 -left-1 w-5 h-5 bg-neutral-900 rounded-full flex items-center justify-center border border-white/10"><VolumeX size={10} className="text-neutral-500" /></div>}
                     </div>
                     <div className="flex-1 text-left overflow-hidden">
                       <div className="flex justify-between items-baseline mb-0.5">
@@ -396,7 +270,15 @@ export const Inbox: React.FC = () => {
                   </button>
                 );
               })
-            ) : <div className="flex flex-col items-center justify-center py-20 text-center px-6"><div className="w-16 h-16 bg-neutral-900 rounded-[20px] flex items-center justify-center mb-4 text-neutral-700"><MessageCircle size={32} /></div><h3 className="text-white font-bold mb-1">No chats yet</h3><p className="text-neutral-500 text-sm">Mutual followers will appear here.</p></div>
+            ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+                    <div className="w-16 h-16 bg-neutral-900 rounded-[20px] flex items-center justify-center mb-4 text-neutral-700">
+                        {showArchived ? <Archive size={32} /> : <MessageCircle size={32} />}
+                    </div>
+                    <h3 className="text-white font-bold mb-1">{showArchived ? 'No archived chats' : 'No chats yet'}</h3>
+                    <p className="text-neutral-500 text-sm">{showArchived ? 'Conversations you archive will appear here.' : 'Mutual followers will appear here.'}</p>
+                </div>
+            )
           ) : (
             <div className="space-y-6 p-2">
                 <div className="space-y-2"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Group Name</label><input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="E.g. Study Squad" className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-5 py-3 text-white focus:outline-none focus:border-indigo-500 transition-all font-bold" /></div>
@@ -438,7 +320,6 @@ export const Inbox: React.FC = () => {
                 <button onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)} className={`p-3 rounded-2xl transition-all ${isHeaderMenuOpen ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}>
                     <MoreVertical size={20} />
                 </button>
-
                 {isHeaderMenuOpen && (
                     <div className="absolute top-full right-0 mt-2 w-48 bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-[24px] shadow-2xl p-1 z-[100] animate-in fade-in zoom-in-95 duration-200">
                         {selectedChat.type === 'dm' && (
@@ -458,20 +339,14 @@ export const Inbox: React.FC = () => {
                 )}
             </div>
           </div>
-
-          {/* Messages Area */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-20" ref={scrollContainerRef}>
             {messages.map((msg, index) => {
               const isMe = msg.senderUid === user?.uid;
-              const isFirstInStack = index === 0 || messages[index - 1]?.senderUid !== msg.senderUid || messages[index - 1]?.system;
-              const showAvatar = !isMe && isFirstInStack;
-              const isLastSentByMe = msg.id === lastSentMessageByMe?.id;
-
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-1`}>
                   <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : 'items-end'}`}>
                     <div className="flex flex-col min-w-0 relative">
-                        <div className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed transition-all break-words ${msg.deleted ? 'italic opacity-60 bg-neutral-900 border border-white/5 text-neutral-500 rounded-3xl' : isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}>
+                        <div className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed transition-all break-words ${isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}>
                           <p className="inline-block whitespace-pre-wrap">{msg.text}</p>
                         </div>
                     </div>
@@ -481,15 +356,11 @@ export const Inbox: React.FC = () => {
             })}
             <div ref={messagesEndRef} />
           </div>
-
-          {/* Input Area */}
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
             {isCurrentChatBlocked || !isCurrentChatMutual ? (
                 <div className="flex items-center justify-center py-4 bg-neutral-900/50 border border-white/5 rounded-3xl gap-3">
                     <Lock size={16} className="text-neutral-500" />
-                    <span className="text-neutral-500 text-sm font-bold uppercase tracking-widest">
-                        {isCurrentChatBlocked ? 'Blocked Relationship' : 'Mutual Follow Required to Message'}
-                    </span>
+                    <span className="text-neutral-500 text-sm font-bold uppercase tracking-widest">{isCurrentChatBlocked ? 'Blocked Relationship' : 'Mutual Follow Required'}</span>
                 </div>
             ) : (
                 <form onSubmit={sendMessage} className="flex gap-3 items-end max-w-5xl mx-auto">
@@ -505,7 +376,7 @@ export const Inbox: React.FC = () => {
         <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-neutral-950 text-center px-12">
            <div className="w-24 h-24 bg-neutral-900 border border-white/5 rounded-[32px] flex items-center justify-center mb-8"><MessageCircle size={40} className="text-indigo-500" /></div>
            <h2 className="text-3xl font-black text-white tracking-tight mb-3">Select a conversation</h2>
-           <p className="text-neutral-500 max-w-xs leading-relaxed">Choose a mutual follower to start chatting.</p>
+           <p className="text-neutral-500 max-w-xs leading-relaxed">Choose a chat to start studying together.</p>
         </div>
       )}
     </div>
