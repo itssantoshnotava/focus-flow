@@ -339,7 +339,7 @@ export const GroupSettings: React.FC = () => {
                                 {isAdmin && member.uid !== user?.uid && (
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === member.uid ? null : member.uid); }}
-                                        className={`p-2 rounded-xl transition-colors ${activeMenuId === member.uid ? 'bg-indigo-600 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/10'}`}
+                                        className={`p-2 rounded-xl transition-colors relative z-30 ${activeMenuId === member.uid ? 'bg-indigo-600 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/10'}`}
                                     >
                                         <MoreVertical size={20} />
                                     </button>
@@ -348,46 +348,53 @@ export const GroupSettings: React.FC = () => {
 
                             {/* Actions Menu */}
                             {activeMenuId === member.uid && (
-                                <div className="absolute right-0 top-full mt-2 w-56 bg-neutral-900/95 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl overflow-hidden z-20 animate-in fade-in zoom-in-95 duration-200">
-                                    <div className="p-2 space-y-1">
-                                        {!isMemberHost && (
-                                            <button 
-                                                onClick={() => toggleAdmin(member.uid)}
-                                                className="w-full flex items-center justify-between px-4 py-3 text-neutral-300 hover:bg-white/5 rounded-2xl text-sm font-bold transition-colors"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    {isMemberAdmin ? <Shield size={18} /> : <ShieldCheck size={18} />}
-                                                    {isMemberAdmin ? 'Remove Admin' : 'Make Admin'}
-                                                </div>
-                                                <ChevronRight size={14} className="opacity-50" />
-                                            </button>
-                                        )}
-                                        {isHost && !isMemberHost && (
-                                            <button 
-                                                onClick={() => transferHost(member.uid)}
-                                                className="w-full flex items-center justify-between px-4 py-3 text-amber-400 hover:bg-amber-400/5 rounded-2xl text-sm font-bold transition-colors"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <LogOut size={18} />
-                                                    Transfer Host
-                                                </div>
-                                                <ChevronRight size={14} className="opacity-50" />
-                                            </button>
-                                        )}
-                                        {!isMemberHost && (
-                                            <button 
-                                                onClick={() => removeMember(member.uid)}
-                                                className="w-full flex items-center justify-between px-4 py-3 text-red-400 hover:bg-red-400/5 rounded-2xl text-sm font-bold transition-colors"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <UserMinus size={18} />
-                                                    Remove from Group
-                                                </div>
-                                                <ChevronRight size={14} className="opacity-50" />
-                                            </button>
-                                        )}
+                                <>
+                                    {/* Backdrop to close on outside click */}
+                                    <div 
+                                        className="fixed inset-0 z-20 cursor-default" 
+                                        onClick={(e) => { e.stopPropagation(); setActiveMenuId(null); }}
+                                    />
+                                    <div className="absolute right-0 top-full mt-2 w-56 bg-neutral-900/95 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl overflow-hidden z-30 animate-in fade-in zoom-in-95 duration-200">
+                                        <div className="p-1.5 flex flex-col h-auto">
+                                            {!isMemberHost && (
+                                                <button 
+                                                    onClick={() => toggleAdmin(member.uid)}
+                                                    className="w-full flex items-center justify-between px-4 py-2.5 text-neutral-300 hover:bg-white/5 rounded-2xl text-sm font-bold transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        {isMemberAdmin ? <Shield size={18} /> : <ShieldCheck size={18} />}
+                                                        {isMemberAdmin ? 'Remove Admin' : 'Make Admin'}
+                                                    </div>
+                                                    <ChevronRight size={14} className="opacity-50" />
+                                                </button>
+                                            )}
+                                            {isHost && !isMemberHost && (
+                                                <button 
+                                                    onClick={() => transferHost(member.uid)}
+                                                    className="w-full flex items-center justify-between px-4 py-2.5 text-amber-400 hover:bg-amber-400/5 rounded-2xl text-sm font-bold transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <LogOut size={18} />
+                                                        Transfer Host
+                                                    </div>
+                                                    <ChevronRight size={14} className="opacity-50" />
+                                                </button>
+                                            )}
+                                            {!isMemberHost && (
+                                                <button 
+                                                    onClick={() => removeMember(member.uid)}
+                                                    className="w-full flex items-center justify-between px-4 py-2.5 text-red-400 hover:bg-red-400/5 rounded-2xl text-sm font-bold transition-colors"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <UserMinus size={18} />
+                                                        Remove Member
+                                                    </div>
+                                                    <ChevronRight size={14} className="opacity-50" />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
+                                </>
                             )}
                         </div>
                     );
