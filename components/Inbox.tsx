@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ref, onValue, push, update, get, set, remove, onDisconnect } from "firebase/database";
@@ -60,13 +59,12 @@ export const Inbox: React.FC = () => {
   const [activeChatId, setActiveChatId] = useState<string | null>(urlChatId);
 
   const [userProfiles, setUserProfiles] = useState<Record<string, { name: string, photoURL?: string }>>({});
+  const [groupMetadata, setGroupMetadata] = useState<Record<string, { name: string, photoURL?: string }>>({});
   const [listPresences, setListPresences] = useState<Record<string, { online: boolean, lastSeen: number }>>({});
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number, activeChatId?: string} | null>(null);
   
-  // Typing state
   const [typingUsers, setTypingUsers] = useState<any[]>([]);
-  // Fix: Using ReturnType<typeof setTimeout> instead of NodeJS.Timeout to avoid namespace error in browser environment
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [inputText, setInputText] = useState('');
@@ -103,11 +101,7 @@ export const Inbox: React.FC = () => {
   // --- TYPING SYNC ---
   useEffect(() => {
     if (!user || !activeChatId || !currentConvoId || !selectedChat) return;
-
-    const typingPath = selectedChat.type === 'dm' 
-        ? `userTyping/${currentConvoId}` 
-        : `groupTyping/${activeChatId}`;
-    
+    const typingPath = selectedChat.type === 'dm' ? `userTyping/${currentConvoId}` : `groupTyping/${activeChatId}`;
     const typingRef = ref(database, typingPath);
     const unsub = onValue(typingRef, (snapshot) => {
         if (snapshot.exists()) {
@@ -124,17 +118,12 @@ export const Inbox: React.FC = () => {
             setTypingUsers([]);
         }
     });
-
     return () => unsub();
   }, [user, activeChatId, currentConvoId, selectedChat, userProfiles]);
 
   const setTypingStatus = (isTyping: boolean) => {
     if (!user || !activeChatId || !currentConvoId || !selectedChat) return;
-
-    const typingPath = selectedChat.type === 'dm' 
-        ? `userTyping/${currentConvoId}/${user.uid}` 
-        : `groupTyping/${activeChatId}/${user.uid}`;
-    
+    const typingPath = selectedChat.type === 'dm' ? `userTyping/${currentConvoId}/${user.uid}` : `groupTyping/${activeChatId}/${user.uid}`;
     const myTypingRef = ref(database, typingPath);
     if (isTyping) {
         update(myTypingRef, { typing: true, timestamp: Date.now() });
@@ -146,38 +135,16 @@ export const Inbox: React.FC = () => {
 
   const handleInputChange = (val: string) => {
     setInputText(val);
-    
-    // Handle typing status
     if (val.trim().length > 0) {
         setTypingStatus(true);
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-        typingTimeoutRef.current = setTimeout(() => {
-            setTypingStatus(false);
-        }, 2500);
+        typingTimeoutRef.current = setTimeout(() => setTypingStatus(false), 2500);
     } else {
         setTypingStatus(false);
     }
   };
 
-  // --- EMOJI PICKER OUTSIDE CLICK ---
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
-        setShowEmojiPicker(false);
-      }
-    };
-    if (showEmojiPicker) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showEmojiPicker]);
-
-  // --- AUTO FOCUS ON REPLY ---
-  useEffect(() => {
-    if (replyingTo && messageInputRef.current) {
-        messageInputRef.current.focus();
-    }
-  }, [replyingTo]);
-
-  // --- SCROLL MANAGEMENT ---
+  // --- SCROLL MANAGEMENT (FIXED: Snap to Bottom) ---
   const isOpeningChat = useRef(false);
   useEffect(() => { if (activeChatId) isOpeningChat.current = true; }, [activeChatId]);
 
@@ -185,7 +152,11 @@ export const Inbox: React.FC = () => {
     if ((messages.length > 0 || typingUsers.length > 0) && messagesEndRef.current) {
       if (isOpeningChat.current) {
         messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
-        isOpeningChat.current = false;
+        // Small timeout to catch late renders/images
+        setTimeout(() => {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+            isOpeningChat.current = false;
+        }, 50);
       } else {
         messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
       }
@@ -201,12 +172,25 @@ export const Inbox: React.FC = () => {
             const list = Object.entries(data).map(([id, val]: [string, any]) => ({ id, ...val }));
             setChats(list.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0)));
             list.forEach(chat => {
-                onValue(ref(database, `users/${chat.id}`), (uSnap) => {
-                    if (uSnap.exists()) setUserProfiles(prev => ({ ...prev, [chat.id]: uSnap.val() }));
-                });
-                onValue(ref(database, `presence/${chat.id}`), (pSnap) => {
-                    if (pSnap.exists()) setListPresences(prev => ({ ...prev, [chat.id]: pSnap.val() }));
-                });
+                if (chat.type === 'dm') {
+                    onValue(ref(database, `users/${chat.id}`), (uSnap) => {
+                        if (uSnap.exists()) setUserProfiles(prev => ({ ...prev, [chat.id]: uSnap.val() }));
+                    });
+                    onValue(ref(database, `presence/${chat.id}`), (pSnap) => {
+                        if (pSnap.exists()) setListPresences(prev => ({ ...prev, [chat.id]: pSnap.val() }));
+                    });
+                } else {
+                    // Authoritative Group Metadata Sync for PFP
+                    onValue(ref(database, `groupChats/${chat.id}`), (gSnap) => {
+                        if (gSnap.exists()) {
+                            const gData = gSnap.val();
+                            setGroupMetadata(prev => ({ 
+                                ...prev, 
+                                [chat.id]: { name: gData.name, photoURL: gData.photoURL } 
+                            }));
+                        }
+                    });
+                }
             });
         } else { setChats([]); }
         setLoading(false);
@@ -240,7 +224,6 @@ export const Inbox: React.FC = () => {
     return () => unsub();
   }, [activeChatId, currentConvoId, user, selectedChat?.type]);
 
-  // --- DRAFT MANAGEMENT ---
   const handleSelectChat = (chatId: string) => {
     if (activeChatId) {
         setDrafts(prev => ({ ...prev, [activeChatId]: inputText }));
@@ -267,11 +250,9 @@ export const Inbox: React.FC = () => {
     if (!inputText.trim() || !user || !activeChatId || !selectedChat || !currentConvoId) return;
     const msgText = inputText.trim();
     const ts = Date.now();
-    
     setTypingStatus(false);
     setDrafts(prev => ({ ...prev, [activeChatId]: '' }));
     setInputText('');
-    
     const msgData = { 
         text: msgText, senderUid: user.uid, senderName: user.displayName, timestamp: ts, seen: false,
         replyTo: replyingTo ? { id: replyingTo.id, text: replyingTo.text, senderName: replyingTo.senderName } : null 
@@ -280,13 +261,11 @@ export const Inbox: React.FC = () => {
     await push(ref(database, `${basePath}/${currentConvoId}`), msgData);
     setReplyingTo(null);
     setShowEmojiPicker(false);
-    
     const updInbx = async (pId: string) => {
         const r = ref(database, `userInboxes/${pId}/${selectedChat.type === 'dm' ? user.uid : activeChatId}`);
         const s = await get(r);
         update(r, { lastMessage: { text: msgText, timestamp: ts, senderUid: user.uid }, lastMessageAt: ts, unreadCount: (s.val()?.unreadCount || 0) + 1 });
     };
-
     if (selectedChat.type === 'dm') {
         updInbx(activeChatId);
         update(ref(database, `userInboxes/${user.uid}/${activeChatId}`), { lastMessage: { text: msgText, timestamp: ts, senderUid: user.uid }, lastMessageAt: ts });
@@ -334,8 +313,6 @@ export const Inbox: React.FC = () => {
     return fromMe.length > 0 ? fromMe[fromMe.length - 1].id : null;
   }, [messages, user?.uid]);
 
-  if (loading && !chats.length) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
-
   const filteredChats = chats.filter(c => {
     const isArchived = archivedChats[c.id];
     if (showArchived) return isArchived;
@@ -343,6 +320,8 @@ export const Inbox: React.FC = () => {
     if (c.type === 'group') return true;
     return following[c.id] && followers[c.id];
   });
+
+  if (loading && !chats.length) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
   return (
     <div className="flex h-full bg-neutral-950 overflow-hidden font-sans">
@@ -359,16 +338,17 @@ export const Inbox: React.FC = () => {
           {filteredChats.map(chat => {
             const isSelected = activeChatId === chat.id;
             const profile = userProfiles[chat.id];
+            const gMeta = groupMetadata[chat.id];
             const presence = listPresences[chat.id];
             const hasDraft = (drafts[chat.id]?.trim().length > 0) || (chat.id === activeChatId && inputText.trim().length > 0);
-            const photo = chat.type === 'dm' ? profile?.photoURL : chat.photoURL;
-            const name = chat.type === 'dm' ? profile?.name || chat.name : chat.name;
+            const photo = chat.type === 'dm' ? profile?.photoURL : gMeta?.photoURL;
+            const name = chat.type === 'dm' ? profile?.name || chat.name : gMeta?.name || chat.name;
             return (
               <div key={chat.id} className="group/tile relative">
                   <button onClick={() => handleSelectChat(chat.id)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10 shadow-lg' : 'hover:bg-white/[0.04] border-transparent'}`}>
                     <div className="relative shrink-0">
                       {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name.charAt(0)}</div>}
-                      <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>
+                      {chat.type === 'dm' && <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
                       {chat.unreadCount ? <div className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full border-2 border-neutral-950 flex items-center justify-center text-[10px] font-black text-white">{chat.unreadCount}</div> : null}
                     </div>
                     <div className="flex-1 text-left min-w-0">
@@ -393,12 +373,12 @@ export const Inbox: React.FC = () => {
             <div className="flex items-center gap-4 min-w-0">
               <button onClick={() => setActiveChatId(null)} className="md:hidden p-2 text-neutral-500 hover:text-white"><ArrowLeft size={24} /></button>
               <div className="cursor-pointer relative" onClick={() => navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`)}>
-                  { (selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL) ? <img src={selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL} className="w-11 h-11 rounded-full object-cover border border-white/5 shadow-lg" /> : <div className="w-11 h-11 rounded-full bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.name : selectedChat.name)?.charAt(0)}</div> }
-                  {friendPresence?.online && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950 shadow-sm animate-pulse"></div>}
+                  { (selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : groupMetadata[activeChatId]?.photoURL) ? <img src={selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : groupMetadata[activeChatId]?.photoURL} className="w-11 h-11 rounded-full object-cover border border-white/5 shadow-lg" /> : <div className="w-11 h-11 rounded-full bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.name : groupMetadata[activeChatId]?.name || selectedChat.name)?.charAt(0)}</div> }
+                  {selectedChat.type === 'dm' && friendPresence?.online && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950 shadow-sm animate-pulse"></div>}
               </div>
               <div className="flex flex-col min-w-0">
-                  <span className="font-bold text-white truncate text-base md:text-lg">{selectedChat.type === 'dm' ? (userProfiles[activeChatId]?.name || selectedChat.name) : selectedChat.name}</span>
-                  <span className="text-[10px] uppercase font-black text-neutral-500 tracking-wider">{friendPresence?.online ? 'Online' : 'Offline'}</span>
+                  <span className="font-bold text-white truncate text-base md:text-lg">{selectedChat.type === 'dm' ? (userProfiles[activeChatId]?.name || selectedChat.name) : groupMetadata[activeChatId]?.name || selectedChat.name}</span>
+                  <span className="text-[10px] uppercase font-black text-neutral-500 tracking-wider">{selectedChat.type === 'dm' ? (friendPresence?.online ? 'Online' : 'Offline') : `${Object.keys(selectedChat.members || {}).length} members`}</span>
               </div>
             </div>
             <button className={`p-3 rounded-2xl transition-colors text-neutral-500 hover:text-white hover:bg-white/5`}><MoreVertical size={20} /></button>
@@ -446,47 +426,34 @@ export const Inbox: React.FC = () => {
               );
             })}
 
-            {/* TYPING INDICATOR AREA */}
+            {/* TYPING INDICATOR AREA (FIXED: Dynamic Bubbles & Text) */}
             {typingUsers.length > 0 && (
                 <div className="flex items-center gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    {selectedChat.type === 'group' ? (
-                        <>
-                            <div className="flex -space-x-2.5 mr-1">
-                                {typingUsers.slice(0, 5).map((u, i) => (
-                                    <div key={u.uid} className="relative transition-transform hover:translate-y-[-2px]" style={{ zIndex: 10 - i }}>
-                                        {u.photoURL ? (
-                                            <img src={u.photoURL} className="w-6 h-6 rounded-full border-2 border-neutral-950 object-cover shadow-sm" alt={u.name} />
-                                        ) : (
-                                            <div className="w-6 h-6 rounded-full border-2 border-neutral-950 bg-neutral-800 flex items-center justify-center text-[8px] font-black text-neutral-500 uppercase">{u.name.charAt(0)}</div>
-                                        )}
-                                    </div>
-                                ))}
+                    <div className="flex -space-x-3 mr-1">
+                        {typingUsers.slice(0, 5).map((u, i) => (
+                            <div key={u.uid} className="relative transition-transform hover:translate-y-[-2px] hover:scale-110" style={{ zIndex: 10 - i }}>
+                                {u.photoURL ? (
+                                    <img src={u.photoURL} className="w-7 h-7 rounded-full border-2 border-neutral-950 object-cover shadow-lg" alt={u.name} />
+                                ) : (
+                                    <div className="w-7 h-7 rounded-full border-2 border-neutral-950 bg-neutral-800 flex items-center justify-center text-[8px] font-black text-neutral-500 uppercase">{u.name.charAt(0)}</div>
+                                )}
                             </div>
-                            <div className="flex flex-col">
-                                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest leading-none mb-1">
-                                    {typingUsers.length > 5 
-                                        ? 'Several people are typing...' 
-                                        : `${typingUsers.map(u => u.name.split(' ')[0]).join(', ')} ${typingUsers.length === 1 ? 'is' : 'are'} typing...`}
-                                </span>
-                                <div className="flex gap-1 ml-0.5">
-                                    <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot"></div>
-                                    <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.2s]"></div>
-                                    <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.4s]"></div>
-                                </div>
-                            </div>
-                        </>
-                    ) : (
-                        <div className="flex flex-col ml-11">
-                            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest leading-none mb-1">
-                                {typingUsers[0].name} is typing...
-                            </span>
-                            <div className="flex gap-1 ml-0.5">
-                                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot"></div>
-                                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.2s]"></div>
-                                <div className="w-1 h-1 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.4s]"></div>
-                            </div>
+                        ))}
+                    </div>
+                    <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest leading-none mb-1 shadow-sm">
+                            {typingUsers.length === 1 
+                                ? `${typingUsers[0].name.split(' ')[0]} is typing...` 
+                                : typingUsers.length <= 5 
+                                    ? `${typingUsers.slice(0, -1).map(u => u.name.split(' ')[0]).join(', ')} and ${typingUsers[typingUsers.length-1].name.split(' ')[0]} are typing...`
+                                    : `${typingUsers.slice(0, 3).map(u => u.name.split(' ')[0]).join(', ')} and ${typingUsers.length - 3} others are typing...`}
+                        </span>
+                        <div className="flex gap-1 ml-0.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-typing-dot"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.2s]"></div>
+                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-typing-dot [animation-delay:0.4s]"></div>
                         </div>
-                    )}
+                    </div>
                 </div>
             )}
             <div ref={messagesEndRef} />
