@@ -48,6 +48,7 @@ export const Inbox: React.FC = () => {
   const [typingText, setTypingText] = useState('');
   const [inputText, setInputText] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
@@ -175,7 +176,6 @@ export const Inbox: React.FC = () => {
     });
   }, [selectedChat, iBlockedThem, theyBlockedMe]);
 
-  // Fix: Removed duplicate isCurrentChatBlocked declaration
   const isCurrentChatBlocked = useMemo(() => {
     if (!selectedChat || selectedChat.type !== 'dm') return false;
     return iBlockedThem[selectedChat.id] || theyBlockedMe[selectedChat.id];
@@ -258,6 +258,52 @@ export const Inbox: React.FC = () => {
             setIsUploadingMedia(false);
         }
     }
+  };
+
+  const handleCreateGroup = async () => {
+      if (!user || !newGroupName.trim() || creatingGroup) return;
+      setCreatingGroup(true);
+      try {
+          const groupRef = push(ref(database, 'groupChats'));
+          const groupId = groupRef.key;
+          if (!groupId) return;
+
+          const groupData = {
+              id: groupId,
+              name: newGroupName.trim(),
+              hostUid: user.uid,
+              members: { [user.uid]: true },
+              admins: { [user.uid]: true },
+              createdAt: Date.now(),
+              type: 'group'
+          };
+
+          const updates: any = {};
+          updates[`groupChats/${groupId}`] = groupData;
+          updates[`userInboxes/${user.uid}/${groupId}`] = {
+              type: 'group',
+              name: groupData.name,
+              lastMessageAt: Date.now(),
+              unreadCount: 0
+          };
+          updates[`users/${user.uid}/groupChats/${groupId}`] = true;
+
+          await update(ref(database), updates);
+          
+          setNewGroupName('');
+          setViewMode('list');
+          setSelectedChat({
+              id: groupId,
+              type: 'group',
+              name: groupData.name,
+              timestamp: Date.now()
+          });
+      } catch (err) {
+          console.error("Group creation failed", err);
+          alert("Failed to create group.");
+      } finally {
+          setCreatingGroup(false);
+      }
   };
 
   const sendMessage = async (e?: React.FormEvent, attachment?: { url: string, type: 'image' | 'video' }) => {
@@ -400,8 +446,30 @@ export const Inbox: React.FC = () => {
             )
           ) : (
             <div className="space-y-6 p-2">
-                <div className="space-y-2"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Group Name</label><input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="E.g. Study Squad" className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-5 py-3 text-white focus:outline-none focus:border-indigo-500 transition-all font-bold" /></div>
-                <button onClick={() => setViewMode('list')} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black transition-all">Back</button>
+                <div className="space-y-2">
+                    <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Group Name</label>
+                    <input 
+                        value={newGroupName} 
+                        onChange={e => setNewGroupName(e.target.value)} 
+                        placeholder="E.g. Study Squad" 
+                        className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-5 py-3 text-white focus:outline-none focus:border-indigo-500 transition-all font-bold" 
+                    />
+                </div>
+                <div className="space-y-2">
+                    <button 
+                        onClick={handleCreateGroup} 
+                        disabled={!newGroupName.trim() || creatingGroup}
+                        className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 hover:bg-indigo-500 disabled:opacity-50"
+                    >
+                        {creatingGroup ? <Loader2 className="animate-spin" size={20} /> : 'Create Group'}
+                    </button>
+                    <button 
+                        onClick={() => setViewMode('list')} 
+                        className="w-full bg-neutral-800 text-neutral-400 py-3 rounded-2xl font-black transition-all"
+                    >
+                        Cancel
+                    </button>
+                </div>
             </div>
           )}
         </div>
