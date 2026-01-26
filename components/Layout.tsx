@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ref, onValue, update, onDisconnect } from "firebase/database";
 import { database } from "../firebase";
@@ -12,7 +12,10 @@ export const Layout: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
   
-  const [inboxUnread, setInboxUnread] = useState(0);
+  const [inboxData, setInboxData] = useState<Record<string, any>>({});
+  const [following, setFollowing] = useState<Record<string, boolean>>({});
+  const [followers, setFollowers] = useState<Record<string, boolean>>({});
+  const [archivedChats, setArchivedChats] = useState<Record<string, boolean>>({});
   const [profileImage, setProfileImage] = useState(user?.photoURL);
 
   // Sync profile image
@@ -50,44 +53,58 @@ export const Layout: React.FC = () => {
     }
   }, [user]);
 
-  // --- Global Counters Listeners ---
+  // --- Global Counters & Visibility State Listeners ---
   useEffect(() => {
       if (!user) {
-          setInboxUnread(0);
+          setInboxData({});
+          setFollowing({});
+          setFollowers({});
+          setArchivedChats({});
           return;
       }
 
-      // Root reference for the user's inbox list
-      const inboxRef = ref(database, `userInboxes/${user.uid}`);
-      
-      // Real-time listener for the entire inbox collection
-      const unsubInbox = onValue(inboxRef, (snapshot) => {
-          let unreadCount = 0;
-          
-          if (snapshot.exists()) {
-              const inboxData = snapshot.val();
-              
-              // Iterate through each conversation entry in the inbox
-              // Each key is a chatId (UID for DMs or GroupID for groups)
-              Object.values(inboxData).forEach((chat: any) => {
-                  // A conversation is unread only if it has an explicit unreadCount > 0
-                  if (chat && typeof chat.unreadCount === 'number' && chat.unreadCount > 0) {
-                      unreadCount++;
-                  }
-              });
-          }
-          
-          // Update the global state with the count of distinct unread conversations
-          setInboxUnread(unreadCount);
-      }, (error) => {
-          console.error("Inbox counter error:", error);
-          setInboxUnread(0);
+      const unsubInbox = onValue(ref(database, `userInboxes/${user.uid}`), (snap) => {
+          setInboxData(snap.val() || {});
+      });
+
+      const unsubFollowing = onValue(ref(database, `following/${user.uid}`), (snap) => {
+          setFollowing(snap.val() || {});
+      });
+
+      const unsubFollowers = onValue(ref(database, `followers/${user.uid}`), (snap) => {
+          setFollowers(snap.val() || {});
+      });
+
+      const unsubArchived = onValue(ref(database, `archivedChats/${user.uid}`), (snap) => {
+          setArchivedChats(snap.val() || {});
       });
 
       return () => {
           unsubInbox();
+          unsubFollowing();
+          unsubFollowers();
+          unsubArchived();
       };
   }, [user]);
+
+  // Calculate distinct unread conversations based on visibility filters
+  const inboxUnread = useMemo(() => {
+      let count = 0;
+      Object.entries(inboxData).forEach(([chatId, chat]: [string, any]) => {
+          const isGroup = chat.type === 'group';
+          const isMutual = following[chatId] && followers[chatId];
+          const isArchived = archivedChats[chatId];
+
+          // Visibility filter: Must be a group OR a DM between mutual followers
+          // Also check if it's not archived (standard badge behavior)
+          const isVisible = isGroup || (isMutual && !isArchived);
+
+          if (isVisible && chat.unreadCount && typeof chat.unreadCount === 'number' && chat.unreadCount > 0) {
+              count++;
+          }
+      });
+      return count;
+  }, [inboxData, following, followers, archivedChats]);
 
   const NavItem = ({ icon: Icon, path, label, badge }: { icon: any, path: string, label: string, badge?: number }) => {
       const isActive = location.pathname === path;
