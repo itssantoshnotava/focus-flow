@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ref, onValue, get, remove, update, query, orderByChild, equalTo } from "firebase/database";
-import { deleteUser } from "firebase/auth";
-import { database, auth } from "../firebase";
+import { deleteUser, reauthenticateWithPopup } from "firebase/auth";
+import { database, auth, googleProvider } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
   ArrowLeft, LogOut, ChevronRight, User, Bell, 
@@ -48,10 +48,10 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleDeleteAccount = async () => {
-      if (!user) return;
+      if (!user || !auth.currentUser) return;
       
       const confirmText = "DELETE";
-      const userInput = window.prompt("Type 'DELETE' to permanently remove your account and all associated data. This cannot be undone.");
+      const userInput = window.prompt("This action is permanent and cannot be undone. All study progress, streaks, and messages will be wiped.\n\nType 'DELETE' to confirm.");
       
       if (userInput !== confirmText) return;
 
@@ -59,84 +59,90 @@ export const SettingsPage: React.FC = () => {
       const uid = user.uid;
 
       try {
-          // 1. Reset Access Code
+          // STEP 0: Re-authentication (MANDATORY for deleteUser)
+          try {
+              await reauthenticateWithPopup(auth.currentUser, googleProvider);
+          } catch (reauthErr: any) {
+              console.error("Re-auth failed", reauthErr);
+              alert("Authentication failed. You must re-authenticate with Google to delete your account.");
+              setIsDeletingAccount(false);
+              return;
+          }
+
+          // STEP 1: Database cleanup
+          const updates: any = {};
+
+          // 1.1 Reset Access Code
           const codesRef = ref(database, 'accessCodes');
           const codeQuery = query(codesRef, orderByChild('usedBy'), equalTo(uid));
           const codeSnap = await get(codeQuery);
           if (codeSnap.exists()) {
-              const codeUpdates: any = {};
               Object.keys(codeSnap.val()).forEach(codeKey => {
-                  codeUpdates[`accessCodes/${codeKey}/used`] = false;
-                  codeUpdates[`accessCodes/${codeKey}/usedBy`] = null;
-                  codeUpdates[`accessCodes/${codeKey}/usedAt`] = null;
+                  updates[`accessCodes/${codeKey}/used`] = false;
+                  updates[`accessCodes/${codeKey}/usedBy`] = null;
+                  updates[`accessCodes/${codeKey}/usedAt`] = null;
               });
-              await update(ref(database), codeUpdates);
           }
 
-          // 2. Cleanup Social Relationships
-          // Remove my following entries and their corresponding followers entries
-          const myFollowingSnap = await get(ref(database, `following/${uid}`));
-          if (myFollowingSnap.exists()) {
-              const followingList = Object.keys(myFollowingSnap.val());
-              const followUpdates: any = {};
-              followingList.forEach(targetId => {
-                  followUpdates[`followers/${targetId}/${uid}`] = null;
-              });
-              await update(ref(database), followUpdates);
-          }
-
-          // Remove entries from people following me
+          // 1.2 Remove from followers' following lists and their inboxes
           const myFollowersSnap = await get(ref(database, `followers/${uid}`));
           if (myFollowersSnap.exists()) {
               const followersList = Object.keys(myFollowersSnap.val());
-              const reverseFollowUpdates: any = {};
               followersList.forEach(followerId => {
-                  reverseFollowUpdates[`following/${followerId}/${uid}`] = null;
-                  // Also remove from their inbox if it's a DM
-                  reverseFollowUpdates[`userInboxes/${followerId}/${uid}`] = null;
+                  updates[`following/${followerId}/${uid}`] = null;
+                  updates[`userInboxes/${followerId}/${uid}`] = null; // Remove the DM entry from their inbox
               });
-              await update(ref(database), reverseFollowUpdates);
           }
 
-          // 3. Cleanup Group Chats
+          // 1.3 Remove from following's followers lists
+          const myFollowingSnap = await get(ref(database, `following/${uid}`));
+          if (myFollowingSnap.exists()) {
+              const followingList = Object.keys(myFollowingSnap.val());
+              followingList.forEach(targetId => {
+                  updates[`followers/${targetId}/${uid}`] = null;
+              });
+          }
+
+          // 1.4 Remove from group chats
           const userGroupsRef = ref(database, `users/${uid}/groupChats`);
           const groupsSnap = await get(userGroupsRef);
           if (groupsSnap.exists()) {
               const groupIds = Object.keys(groupsSnap.val());
-              const groupUpdates: any = {};
               groupIds.forEach(gid => {
-                  groupUpdates[`groupChats/${gid}/members/${uid}`] = null;
-                  groupUpdates[`groupChats/${gid}/admins/${uid}`] = null;
+                  updates[`groupChats/${gid}/members/${uid}`] = null;
+                  updates[`groupChats/${gid}/admins/${uid}`] = null;
               });
-              await update(ref(database), groupUpdates);
           }
 
-          // 4. Cleanup Core Nodes
-          await remove(ref(database, `users/${uid}`));
-          await remove(ref(database, `following/${uid}`));
-          await remove(ref(database, `followers/${uid}`));
-          await remove(ref(database, `userInboxes/${uid}`));
-          await remove(ref(database, `presence/${uid}`));
-          await remove(ref(database, `blocks/${uid}`));
-          await remove(ref(database, `mutedChats/${uid}`));
-          await remove(ref(database, `archivedChats/${uid}`));
+          // 1.5 Global removal from all user inboxes (Fallback check)
+          // Note: In a large app, this would be a Cloud Function. 
+          // For this scale, we rely on the social tie logic above (1.2).
 
-          // 5. Delete Firebase Auth User
-          if (auth.currentUser) {
-              await deleteUser(auth.currentUser);
-          }
+          // 1.6 Final node removals
+          updates[`users/${uid}`] = null;
+          updates[`following/${uid}`] = null;
+          updates[`followers/${uid}`] = null;
+          updates[`userInboxes/${uid}`] = null;
+          updates[`presence/${uid}`] = null;
+          updates[`blocks/${uid}`] = null;
+          updates[`mutedChats/${uid}`] = null;
+          updates[`archivedChats/${uid}`] = null;
+          updates[`friendRequests/${uid}`] = null;
 
+          // Apply all DB updates
+          await update(ref(database), updates);
+
+          // STEP 2: Auth Deletion
+          await deleteUser(auth.currentUser);
+
+          // STEP 3: Frontend cleanup
           localStorage.clear();
-          window.location.hash = '/login';
+          // Force a hard reload to the root to reset all states
+          window.location.href = window.location.origin;
 
       } catch (err: any) {
-          console.error("Account deletion failed", err);
-          if (err.code === 'auth/requires-recent-login') {
-              alert("Please log out and log back in to perform this sensitive operation.");
-          } else {
-              alert("Failed to delete account. Please try again later.");
-          }
-      } finally {
+          console.error("Account deletion failed at final steps", err);
+          alert(`Failed to complete account deletion: ${err.message}`);
           setIsDeletingAccount(false);
       }
   };
@@ -160,8 +166,8 @@ export const SettingsPage: React.FC = () => {
       return (
           <div className="flex flex-col h-full items-center justify-center bg-neutral-950 p-6 text-center">
               <Loader2 className="animate-spin text-red-500 mb-4" size={40} />
-              <h2 className="text-xl font-black text-white mb-2">Deleting Account...</h2>
-              <p className="text-neutral-500 text-sm">Please wait while we securely remove your data.</p>
+              <h2 className="text-xl font-black text-white mb-2">Permanently Deleting Data...</h2>
+              <p className="text-neutral-500 text-sm max-w-xs mx-auto">Please do not close the app. We are securely wiping your account and releasing your access code.</p>
           </div>
       );
   }
@@ -227,12 +233,15 @@ export const SettingsPage: React.FC = () => {
                           <p className="text-neutral-400 text-sm leading-relaxed font-medium">
                               Deleting your account is permanent. All your progress, streaks, messages, and followers will be removed forever. Your access code will be released for others to use.
                           </p>
-                          <button 
-                            onClick={handleDeleteAccount}
-                            className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-[0.98] flex items-center justify-center gap-2"
-                          >
-                            <Trash2 size={18} /> Delete My Account
-                          </button>
+                          <div className="pt-2">
+                            <button 
+                                onClick={handleDeleteAccount}
+                                className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-[0.98] flex items-center justify-center gap-2"
+                            >
+                                <Trash2 size={18} /> Delete My Account
+                            </button>
+                            <p className="text-[10px] text-neutral-600 text-center mt-3 uppercase tracking-widest font-black">Requires Re-authentication</p>
+                          </div>
                       </div>
                   </div>
                </div>
@@ -281,7 +290,7 @@ export const SettingsPage: React.FC = () => {
                 </button>
             </div>
         </div>
-        <div className="mt-16 text-center"><p className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.3em]">FocusFlow v1.0.5</p></div>
+        <div className="mt-16 text-center"><p className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.3em]">FocusFlow v1.0.6</p></div>
       </div>
     </div>
   );
