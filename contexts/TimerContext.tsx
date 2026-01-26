@@ -4,9 +4,15 @@ import { useAuth } from './AuthContext';
 import { ref, update, get, push, set } from "firebase/database";
 import { database } from "../firebase";
 
+export enum TimerPhase {
+  FOCUS = 'FOCUS',
+  BREAK = 'BREAK',
+}
+
 interface TimerContextType {
   mode: TimerMode;
   setMode: (mode: TimerMode) => void;
+  phase: TimerPhase;
   isActive: boolean;
   toggleTimer: () => void;
   resetTimer: () => void;
@@ -14,6 +20,7 @@ interface TimerContextType {
   initialTime: number;
   dailyTotal: number;
   sessions: StudySession[];
+  pomodoroCount: number;
   customMinutes: number;
   setCustomMinutes: (m: number) => void;
   setSeconds: (s: number) => void;
@@ -31,10 +38,18 @@ export const useTimer = () => {
 export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isGuest } = useAuth();
 
-  // --- State Initialization (Load from LocalStorage) ---
   const [mode, setModeState] = useState<TimerMode>(() => {
     const saved = localStorage.getItem('focusflow_timer_mode');
     return (saved as TimerMode) || TimerMode.STOPWATCH;
+  });
+
+  const [phase, setPhase] = useState<TimerPhase>(() => {
+    const saved = localStorage.getItem('focusflow_timer_phase');
+    return (saved as TimerPhase) || TimerPhase.FOCUS;
+  });
+
+  const [pomodoroCount, setPomodoroCount] = useState(() => {
+    return parseInt(localStorage.getItem('focusflow_pomo_count') || '0');
   });
 
   const [isActive, setIsActive] = useState(() => {
@@ -69,10 +84,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const intervalRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(Date.now());
 
-  // --- Streak Logic ---
   const calculateStreak = useCallback((sessionList: StudySession[]) => {
-    const STREAK_THRESHOLD = 30 * 60; // 30 minutes in seconds
-    
+    const STREAK_THRESHOLD = 30 * 60; 
     const dayTotals: Record<string, number> = {};
     sessionList.forEach(s => {
       const date = s.date.split('T')[0];
@@ -99,11 +112,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const prev = new Date(sortedAsc[i - 1]);
         const curr = new Date(sortedAsc[i]);
         const diff = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
-        if (Math.round(diff) === 1) {
-          currentCount++;
-        } else {
-          currentCount = 1;
-        }
+        if (Math.round(diff) === 1) currentCount++;
+        else currentCount = 1;
         longest = Math.max(longest, currentCount);
       }
     }
@@ -115,20 +125,17 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const curr = new Date(activeDays[i - 1]);
         const prev = new Date(activeDays[i]);
         const diff = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
-        if (Math.round(diff) === 1) {
-          currentStreak++;
-        } else {
-          break;
-        }
+        if (Math.round(diff) === 1) currentStreak++;
+        else break;
       }
     }
-
     return { current: currentStreak, longest };
   }, []);
 
-  // --- Persistence Wrappers ---
   useEffect(() => {
     localStorage.setItem('focusflow_timer_mode', mode);
+    localStorage.setItem('focusflow_timer_phase', phase);
+    localStorage.setItem('focusflow_pomo_count', String(pomodoroCount));
     localStorage.setItem('focusflow_timer_active', String(isActive));
     localStorage.setItem('focusflow_timer_seconds', String(seconds));
     localStorage.setItem('focusflow_timer_initial', String(initialTime));
@@ -136,9 +143,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const today = new Date().toISOString().split('T')[0];
     localStorage.setItem('focusflow_study_data', JSON.stringify({ date: today, seconds: dailyTotal }));
     localStorage.setItem('focusflow_sessions', JSON.stringify(sessions));
-  }, [mode, isActive, seconds, initialTime, dailyTotal, sessions]);
+  }, [mode, phase, pomodoroCount, isActive, seconds, initialTime, dailyTotal, sessions]);
 
-  // --- Sync Stats & Streaks to Firebase ---
   useEffect(() => {
       if (user && !isGuest) {
           const { current, longest } = calculateStreak(sessions);
@@ -153,21 +159,19 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [sessions, user, isGuest, calculateStreak]);
 
-  // --- Social Auto-Post Logic ---
   const postStudyUpdate = useCallback(async (duration: number, timerMode: string) => {
-    if (!user || isGuest || duration < 600) return; // Minimum 10 minutes
+    if (!user || isGuest || duration < 600) return;
 
     const mins = Math.floor(duration / 60);
     const hrs = Math.floor(mins / 60);
     const rMins = mins % 60;
     const durStr = hrs > 0 ? `${hrs}h ${rMins}m` : `${mins} min`;
-    const isPomo = timerMode.toLowerCase().includes('pomodoro') || timerMode.includes('25/') || timerMode.includes('50/');
+    const isPomo = timerMode === TimerMode.POMODORO;
     const emoji = isPomo ? '💪🔥' : '📚⏱️';
     const text = isPomo 
         ? `${user.displayName} completed a ${durStr} Pomodoro ${emoji}`
         : `${user.displayName} studied for ${durStr} ${emoji}`;
 
-    // Find first available group to post to (Priority: Default/Most Recent Group)
     try {
         const inboxRef = ref(database, `userInboxes/${user.uid}`);
         const snap = await get(inboxRef);
@@ -178,36 +182,29 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             
             if (groups.length > 0) {
                 const targetGroupId = groups[0][0];
-                const msgData = {
-                    type: 'system',
-                    text,
-                    senderUid: user.uid,
-                    timestamp: Date.now(),
-                    system: true
-                };
-                
+                const msgData = { type: 'system', text, senderUid: user.uid, timestamp: Date.now(), system: true };
                 await set(push(ref(database, `groupMessages/${targetGroupId}`)), msgData);
                 await update(ref(database, `groupChats/${targetGroupId}`), { lastMessage: msgData });
             }
         }
-    } catch (e) {
-        console.error("Auto-post failed", e);
-    }
+    } catch (e) { console.error("Auto-post failed", e); }
   }, [user, isGuest]);
 
-  // --- Session Management ---
-  const saveSession = useCallback(() => {
-      let duration = 0;
+  const saveSession = useCallback((forceDuration?: number) => {
+      let duration = forceDuration !== undefined ? forceDuration : 0;
       let completed = false;
 
-      if (mode === TimerMode.STOPWATCH) {
-          duration = seconds;
-      } else {
-          duration = initialTime - seconds;
-          completed = seconds <= 0;
+      if (forceDuration === undefined) {
+          if (mode === TimerMode.STOPWATCH) {
+              duration = seconds;
+          } else {
+              duration = initialTime - seconds;
+              completed = seconds <= 0;
+          }
       }
 
-      if (duration > 10) {
+      // Only save if it was a focus phase or stopwatch
+      if (duration > 10 && (mode !== TimerMode.POMODORO || phase === TimerPhase.FOCUS)) {
           const newSession: StudySession = {
               id: crypto.randomUUID(),
               date: new Date().toISOString(),
@@ -218,13 +215,29 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setSessions(prev => [...prev, newSession]);
           postStudyUpdate(duration, mode);
       }
-  }, [mode, seconds, initialTime, postStudyUpdate]);
+  }, [mode, phase, seconds, initialTime, postStudyUpdate]);
 
-  // --- Actions ---
+  const handlePhaseTransition = useCallback(() => {
+    if (mode !== TimerMode.POMODORO) return;
+
+    if (phase === TimerPhase.FOCUS) {
+      saveSession(initialTime); // Save the full focus block
+      setPomodoroCount(c => c + 1);
+      setPhase(TimerPhase.BREAK);
+      setSeconds(5 * 60);
+      setInitialTime(5 * 60);
+    } else {
+      setPhase(TimerPhase.FOCUS);
+      setSeconds(25 * 60);
+      setInitialTime(25 * 60);
+    }
+  }, [mode, phase, initialTime, saveSession]);
+
   const setMode = (newMode: TimerMode) => {
       if (mode === newMode) return;
       setIsActive(false);
       setModeState(newMode);
+      setPhase(TimerPhase.FOCUS);
       if (newMode === TimerMode.STOPWATCH) {
           setSeconds(0);
           setInitialTime(0);
@@ -243,10 +256,11 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const resetTimer = () => {
-      if (isActive || (mode !== TimerMode.STOPWATCH && seconds !== initialTime) || (mode === TimerMode.STOPWATCH && seconds > 0)) {
+      if (isActive || (mode === TimerMode.STOPWATCH && seconds > 0) || (mode !== TimerMode.STOPWATCH && seconds !== initialTime)) {
           saveSession();
       }
       setIsActive(false);
+      setPhase(TimerPhase.FOCUS);
       if (mode === TimerMode.STOPWATCH) {
           setSeconds(0);
       } else if (mode === TimerMode.POMODORO) {
@@ -258,64 +272,38 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   };
 
-  // --- Tick Logic ---
-  useEffect(() => {
-      const lastSavedTime = parseInt(localStorage.getItem('focusflow_last_tick') || '0');
-      const wasActive = localStorage.getItem('focusflow_timer_active') === 'true';
-      if (wasActive && lastSavedTime > 0) {
-          const now = Date.now();
-          const diff = Math.floor((now - lastSavedTime) / 1000);
-          if (diff > 0) {
-              if (mode === TimerMode.STOPWATCH) {
-                  setSeconds(s => s + diff);
-                  setDailyTotal(d => d + diff);
-              } else {
-                  setSeconds(s => {
-                      const next = s - diff;
-                      if (next <= 0) {
-                          setIsActive(false);
-                          saveSession(); 
-                          return 0;
-                      }
-                      return next;
-                  });
-                  setDailyTotal(d => d + diff); 
-              }
-          }
-      }
-  }, []);
-
   useEffect(() => {
     if (isActive) {
       intervalRef.current = window.setInterval(() => {
-        const now = Date.now();
-        localStorage.setItem('focusflow_last_tick', String(now));
         setSeconds(prev => {
           if (mode === TimerMode.STOPWATCH) {
             setDailyTotal(d => d + 1);
             return prev + 1;
           } else {
-            if (prev <= 0) {
-              setIsActive(false);
-              saveSession();
+            if (prev <= 1) {
+              // Trigger transition on next tick
+              setTimeout(handlePhaseTransition, 0);
               return 0;
             }
-            setDailyTotal(d => d + 1);
+            if (mode === TimerMode.POMODORO && phase === TimerPhase.FOCUS) {
+              setDailyTotal(d => d + 1);
+            } else if (mode === TimerMode.COUNTDOWN) {
+              setDailyTotal(d => d + 1);
+            }
             return prev - 1;
           }
         });
       }, 1000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
-      localStorage.setItem('focusflow_last_tick', '0');
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [isActive, mode, saveSession]);
+  }, [isActive, mode, phase, handlePhaseTransition]);
 
   return (
     <TimerContext.Provider value={{
-      mode, setMode, isActive, toggleTimer, resetTimer,
-      seconds, initialTime, dailyTotal, sessions,
+      mode, setMode, phase, isActive, toggleTimer, resetTimer,
+      seconds, initialTime, dailyTotal, sessions, pomodoroCount,
       customMinutes, setCustomMinutes, setSeconds, setInitialTime
     }}>
       {children}
