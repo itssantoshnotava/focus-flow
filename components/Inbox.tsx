@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ref, onValue, push, update, get, set, remove, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database";
@@ -53,6 +52,7 @@ export const Inbox: React.FC = () => {
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
+  const [reactionPickerPos, setReactionPickerPos] = useState<{ x: number, y: number, isMe: boolean } | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [loading, setLoading] = useState(true);
   const [chatLoading, setChatLoading] = useState(false);
@@ -215,6 +215,7 @@ export const Inbox: React.FC = () => {
         list.forEach(m => { if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${messagesPath}/${m.id}`), { seen: true }); });
       } else { setMessages([]); }
     });
+    // Reset unread count when chat is selected
     update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
     if (selectedChat.type === 'dm') onValue(ref(database, `presence/${selectedChat.id}`), (snap) => setFriendPresence(snap.val()));
     return () => unsubMessages();
@@ -319,7 +320,7 @@ export const Inbox: React.FC = () => {
                   type: 'group',
                   name: groupData.name,
                   lastMessageAt: Date.now(),
-                  unreadCount: 0
+                  unreadCount: 1 // Start with 1 because there is technically a "group created" notification or just to show activity
               };
               updates[`users/${mid}/groupChats/${groupId}`] = true;
           });
@@ -369,20 +370,44 @@ export const Inbox: React.FC = () => {
     const newMsgRef = push(ref(database, `${basePath}/${currentChatId}`));
     await set(newMsgRef, msgData);
 
-    const updateInbox = (uid: string, chatName: string, chatPhoto?: string) => {
-      const targetIdForInbox = selectedChat.id === uid ? user?.uid : selectedChat.id;
-      const inboxRef = ref(database, `userInboxes/${uid}/${targetIdForInbox}`);
-      update(inboxRef, { 
+    const updateInbox = async (uid: string, chatName: string, chatPhoto?: string, incrementUnread = false) => {
+      const targetChatId = selectedChat.id;
+      const inboxRef = ref(database, `userInboxes/${uid}/${targetChatId}`);
+      const inboxSnap = await get(inboxRef);
+      const currentUnread = (inboxSnap.exists() && incrementUnread) ? (inboxSnap.val().unreadCount || 0) : 0;
+      
+      const inboxData: any = { 
           lastMessage: { text: attachment ? (attachment.type === 'image' ? 'Image' : 'Video') : msgText, timestamp: Date.now(), senderUid: user?.uid }, 
           lastMessageAt: Date.now(), 
           name: chatName, 
-          photoURL: chatPhoto || null 
-      });
+          photoURL: chatPhoto || null,
+          type: selectedChat.type
+      };
+
+      if (incrementUnread) {
+          inboxData.unreadCount = currentUnread + 1;
+      } else {
+          inboxData.unreadCount = 0;
+      }
+
+      update(inboxRef, inboxData);
     };
 
     if (selectedChat.type === 'dm') {
-      updateInbox(user!.uid, selectedChat.name, selectedChat.photoURL);
-      updateInbox(selectedChat.id, user!.displayName || 'User', user!.photoURL || undefined);
+      // Update Sender (No unread increment)
+      updateInbox(user!.uid, selectedChat.name, selectedChat.photoURL, false);
+      // Update Receiver (Increment unread)
+      updateInbox(selectedChat.id, user!.displayName || 'User', user!.photoURL || undefined, true);
+    } else {
+      // Group Chat Inbox Updates
+      const membersSnap = await get(ref(database, `groupChats/${selectedChat.id}/members`));
+      if (membersSnap.exists()) {
+          const members = Object.keys(membersSnap.val());
+          members.forEach(memberId => {
+              const isMe = memberId === user!.uid;
+              updateInbox(memberId, selectedChat.name, selectedChat.photoURL, !isMe);
+          });
+      }
     }
   };
 
@@ -404,6 +429,13 @@ export const Inbox: React.FC = () => {
         await set(reactionRef, emoji);
     }
     setActiveReactionPickerId(null);
+    setReactionPickerPos(null);
+  };
+
+  const openReactionPicker = (e: React.MouseEvent, msgId: string, isMe: boolean) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setReactionPickerPos({ x: rect.left, y: rect.top, isMe });
+    setActiveReactionPickerId(msgId);
   };
 
   const lastSentMessageByMe = useMemo(() => {
@@ -675,7 +707,7 @@ export const Inbox: React.FC = () => {
                                 
                                 {/* REACTION CHIPS (ATTACHED STYLE) */}
                                 {reactions.length > 0 && (
-                                    <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex gap-1 bg-neutral-900 border border-white/10 rounded-full px-1.5 py-0.5 shadow-xl z-10 hover:bg-neutral-800 cursor-pointer`} onClick={() => setActiveReactionPickerId(msg.id)}>
+                                    <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex gap-1 bg-neutral-900 border border-white/10 rounded-full px-1.5 py-0.5 shadow-xl z-10 hover:bg-neutral-800 cursor-pointer`} onClick={(e) => openReactionPicker(e, msg.id, isMe)}>
                                         {reactions.map(([uid, emoji]) => <span key={uid} className="text-[10px] animate-reaction-bounce">{emoji as string}</span>)}
                                     </div>
                                 )}
@@ -683,7 +715,7 @@ export const Inbox: React.FC = () => {
                                 {/* ACTION TOOLBAR (VISIBLE ON HOVER) */}
                                 <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20 ${isMe ? 'right-full mr-2' : 'left-full ml-2'}`}>
                                     <button onClick={() => setReplyingTo(msg)} className="p-2 text-neutral-500 hover:text-white hover:bg-white/5 rounded-full transition-all" title="Reply"><Reply size={16} /></button>
-                                    <button onClick={() => setActiveReactionPickerId(msg.id)} className="p-2 text-neutral-500 hover:text-white hover:bg-white/5 rounded-full transition-all" title="React"><SmilePlus size={16} /></button>
+                                    <button onClick={(e) => openReactionPicker(e, msg.id, isMe)} className="p-2 text-neutral-500 hover:text-white hover:bg-white/5 rounded-full transition-all" title="React"><SmilePlus size={16} /></button>
                                     {isMe && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-400/10 rounded-full transition-all" title="Delete"><Trash size={16} /></button>}
                                 </div>
                             </div>
@@ -695,15 +727,6 @@ export const Inbox: React.FC = () => {
                           <div className="flex items-center gap-1 mt-1 mr-1 text-[10px] font-bold text-neutral-500 uppercase tracking-widest animate-in fade-in duration-500">
                             {msg.seen ? <><CheckCheck size={12} className="text-indigo-500" /> Seen</> : <><Check size={12} /> Sent</>}
                           </div>
-                      )}
-
-                      {/* REACTION PICKER POPOVER */}
-                      {activeReactionPickerId === msg.id && (
-                        <div className={`absolute z-[100] ${isMe ? 'right-0' : 'left-0'} bottom-full mb-2 bg-neutral-900 border border-white/10 rounded-full p-1 shadow-2xl flex gap-1 animate-in zoom-in-95 fade-in duration-200`}>
-                            {REACTION_EMOJIS.map(emoji => (
-                                <button key={emoji} onClick={() => handleReaction(msg.id, emoji)} className="w-9 h-9 flex items-center justify-center hover:bg-white/5 rounded-full text-lg transition-transform hover:scale-125">{emoji}</button>
-                            ))}
-                        </div>
                       )}
                     </div>
                   );
@@ -783,6 +806,27 @@ export const Inbox: React.FC = () => {
            <h2 className="text-3xl font-black text-white tracking-tight mb-3">Select a conversation</h2>
            <p className="text-neutral-500 max-w-xs leading-relaxed">Choose a mutual follower to start chatting.</p>
         </div>
+      )}
+
+      {/* PORTAL REACTION PICKER */}
+      {activeReactionPickerId && reactionPickerPos && createPortal(
+          <div className="fixed inset-0 z-[1000]">
+              <div className="absolute inset-0 bg-transparent" onClick={() => { setActiveReactionPickerId(null); setReactionPickerPos(null); }}></div>
+              <div 
+                  style={{ 
+                      position: 'fixed', 
+                      top: `${reactionPickerPos.y - 50}px`, 
+                      left: reactionPickerPos.isMe ? `${reactionPickerPos.x - 200}px` : `${reactionPickerPos.x}px`,
+                      zIndex: 1001 
+                  }}
+                  className="bg-neutral-900 border border-white/10 rounded-full p-1.5 shadow-2xl flex gap-1 animate-in zoom-in-95 fade-in duration-200"
+              >
+                  {REACTION_EMOJIS.map(emoji => (
+                      <button key={emoji} onClick={() => handleReaction(activeReactionPickerId, emoji)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full text-xl transition-transform hover:scale-125">{emoji}</button>
+                  ))}
+              </div>
+          </div>,
+          document.body
       )}
 
       {/* PORTAL MENU FOR LIST REMOVAL */}
