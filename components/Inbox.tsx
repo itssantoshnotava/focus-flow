@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { ref, onValue, push, update, get, set, remove, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database";
 import { database } from "../firebase";
@@ -83,6 +83,32 @@ export const Inbox: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- SCROLL MANAGEMENT FIX ---
+  const isInitialLoadRef = useRef(true);
+  const prevActiveChatIdRef = useRef<string | null>(null);
+
+  // Reset scroll state when chat changes
+  useEffect(() => {
+    if (activeChatId !== prevActiveChatIdRef.current) {
+      isInitialLoadRef.current = true;
+      prevActiveChatIdRef.current = activeChatId;
+    }
+  }, [activeChatId]);
+
+  // Handle scrolling logic
+  useLayoutEffect(() => {
+    if (messages.length > 0 && messagesEndRef.current) {
+      if (isInitialLoadRef.current) {
+        // Instant scroll for the first time messages are loaded for this chat
+        messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+        isInitialLoadRef.current = false;
+      } else {
+        // Smooth scroll only when new messages arrive after initial load
+        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }
+  }, [messages]);
 
   const currentChatId = useMemo(() => {
     if (!user || !activeChatId || !selectedChat) return null;
@@ -258,8 +284,6 @@ export const Inbox: React.FC = () => {
     if (selectedChat?.type === 'dm') onValue(ref(database, `presence/${activeChatId}`), (snap) => setFriendPresence(snap.val()));
     return () => unsubMessages();
   }, [activeChatId, currentChatId, user, selectedChat?.type]);
-
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const handleSelectChat = (chat: ChatItem) => {
       setActiveChatId(chat.id);
