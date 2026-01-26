@@ -52,21 +52,36 @@ export const Layout: React.FC = () => {
 
   // --- Global Counters Listeners ---
   useEffect(() => {
-      if (!user) return;
+      if (!user) {
+          setInboxUnread(0);
+          return;
+      }
 
+      // Root reference for the user's inbox list
       const inboxRef = ref(database, `userInboxes/${user.uid}`);
+      
+      // Real-time listener for the entire inbox collection
       const unsubInbox = onValue(inboxRef, (snapshot) => {
-          let unreadConversations = 0;
+          let unreadCount = 0;
+          
           if (snapshot.exists()) {
-              snapshot.forEach((child) => {
-                  const data = child.val();
-                  // Count the number of DISTINCT conversations that have at least one unread message
-                  if (data && typeof data.unreadCount === 'number' && data.unreadCount > 0) {
-                      unreadConversations++;
+              const inboxData = snapshot.val();
+              
+              // Iterate through each conversation entry in the inbox
+              // Each key is a chatId (UID for DMs or GroupID for groups)
+              Object.values(inboxData).forEach((chat: any) => {
+                  // A conversation is unread only if it has an explicit unreadCount > 0
+                  if (chat && typeof chat.unreadCount === 'number' && chat.unreadCount > 0) {
+                      unreadCount++;
                   }
               });
           }
-          setInboxUnread(unreadConversations);
+          
+          // Update the global state with the count of distinct unread conversations
+          setInboxUnread(unreadCount);
+      }, (error) => {
+          console.error("Inbox counter error:", error);
+          setInboxUnread(0);
       });
 
       return () => {
