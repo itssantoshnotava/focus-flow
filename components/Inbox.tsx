@@ -65,7 +65,6 @@ export const Inbox: React.FC = () => {
     return selectedChat.type === 'dm' ? [user.uid, selectedChat.id].sort().join('_') : selectedChat.id;
   }, [user, selectedChat]);
 
-  // Presence & Active Chat tracking for Seen logic
   useEffect(() => {
     if (!user || !currentChatId) return;
     const pRef = ref(database, `presence/${user.uid}`);
@@ -73,7 +72,6 @@ export const Inbox: React.FC = () => {
     return () => { update(pRef, { activeChatId: null }); };
   }, [user, currentChatId]);
 
-  // Listen for inbox changes
   useEffect(() => {
     if (!user) return;
     const inboxRef = ref(database, `userInboxes/${user.uid}`);
@@ -106,7 +104,6 @@ export const Inbox: React.FC = () => {
     return () => { unsubAdded(); unsubChanged(); unsubRemoved(); };
   }, [user]);
 
-  // Handle chatId param from search/profile
   useEffect(() => {
     if (chats.length > 0) {
         const targetChatId = searchParams.get('chatId');
@@ -117,7 +114,6 @@ export const Inbox: React.FC = () => {
     }
   }, [chats, searchParams]);
 
-  // REAL-TIME PROFILE PICTURE SYNCING
   useEffect(() => {
     if (!selectedChat) return;
 
@@ -140,7 +136,6 @@ export const Inbox: React.FC = () => {
     if (selectedChat.type === 'dm') {
       attachListener(selectedChat.id);
     } else {
-      // For groups, we listen to members as we find them in messages or from group data
       const membersRef = ref(database, `groupChats/${selectedChat.id}/members`);
       get(membersRef).then(snap => {
         if (snap.exists()) {
@@ -152,7 +147,6 @@ export const Inbox: React.FC = () => {
     return () => profileListeners.forEach(unsub => unsub());
   }, [selectedChat]);
 
-  // Messages and Presence logic
   useEffect(() => {
     if (!user || !selectedChat || !currentChatId) return;
 
@@ -162,7 +156,6 @@ export const Inbox: React.FC = () => {
         const list = Object.entries(snapshot.val()).map(([key, val]: [string, any]) => ({ id: key, ...val })).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(list);
 
-        // Mark incoming messages as seen if I'm active in chat
         list.forEach(m => {
            if (m.senderUid !== user.uid && !m.seen) {
                update(ref(database, `${messagesPath}/${m.id}`), { seen: true });
@@ -394,7 +387,7 @@ export const Inbox: React.FC = () => {
             <div className="flex items-center gap-4 min-w-0">
               <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 text-neutral-500 hover:text-white transition-colors"><ArrowLeft size={24} /></button>
               <div className="relative cursor-pointer" onClick={() => navigate(selectedChat.type === 'dm' ? `/profile/${selectedChat.id}` : `/group/${selectedChat.id}/settings`)}>
-                {/* 1-1 Chat Header Profile Display - Use fresh userProfiles data */}
+                {/* 1-1 Chat Header Profile Display */}
                 {(selectedChat.type === 'dm' ? userProfiles[selectedChat.id]?.photoURL : selectedChat.photoURL) ? (
                   <img 
                     src={selectedChat.type === 'dm' ? userProfiles[selectedChat.id]?.photoURL : selectedChat.photoURL} 
@@ -423,18 +416,15 @@ export const Inbox: React.FC = () => {
           </div>
 
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 pb-20" ref={scrollContainerRef}>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-20" ref={scrollContainerRef}>
             {messages.map((msg, index) => {
               if (msg.system) return <div key={msg.id} className="w-full flex justify-center py-2 animate-in fade-in slide-in-from-top-2 duration-300"><div className="bg-white/5 border border-white/5 rounded-full px-4 py-1 text-[10px] text-neutral-500 font-bold uppercase tracking-widest">{msg.text}</div></div>;
               const isMe = msg.senderUid === user?.uid;
-              const nextMsg = messages[index + 1];
               const isFirstInStack = index === 0 || messages[index - 1]?.senderUid !== msg.senderUid || messages[index - 1]?.system;
-              const isLastInStack = !nextMsg || nextMsg.senderUid !== msg.senderUid || nextMsg.system;
-              const showAvatar = !isMe && selectedChat.type === 'group' && isFirstInStack;
+              const showAvatar = !isMe && isFirstInStack;
               
               const isLastSentByMe = msg.id === lastSentMessageByMe?.id;
 
-              // Aggregate reactions
               const aggregatedReactions = (() => {
                   if (!msg.reactions) return {};
                   const counts: Record<string, { count: number, me: boolean }> = {};
@@ -447,10 +437,12 @@ export const Inbox: React.FC = () => {
                   return counts;
               })();
 
+              const hasReactions = Object.keys(aggregatedReactions).length > 0;
+
               return (
-                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative`}>
+                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-1`}>
                   
-                  {/* Reply Preview */}
+                  {/* Reply Preview above bubble */}
                   {!msg.deleted && msg.replyTo && (
                     <div className={`mb-1 px-3 py-1 bg-white/[0.04] border border-white/5 rounded-2xl text-[10px] flex flex-col gap-0.5 max-w-[60%] animate-in slide-in-from-bottom-1 duration-200 ${isMe ? 'items-end' : 'items-start'}`}>
                       <span className="font-black opacity-60 uppercase tracking-widest text-[8px]">{msg.replyTo.senderName}</span>
@@ -459,31 +451,31 @@ export const Inbox: React.FC = () => {
                   )}
 
                   <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : 'items-end'}`}>
-                    {/* Message Avatar for Groups */}
-                    {selectedChat.type === 'group' && !isMe && (
-                      <div className="w-8 h-8 shrink-0 flex items-center justify-center mb-0.5">
+                    {/* Message Avatar (DMs and Groups) */}
+                    {!isMe && (
+                      <div className="w-8 h-8 shrink-0 flex items-center justify-center">
                         {showAvatar ? (
                           userProfiles[msg.senderUid]?.photoURL ? (
                             <img 
                               src={userProfiles[msg.senderUid]?.photoURL} 
-                              className="w-8 h-8 rounded-full object-cover animate-in fade-in zoom-in-75 duration-300" 
+                              className="w-7 h-7 rounded-full object-cover animate-in fade-in zoom-in-75 duration-300" 
                               alt={msg.senderName} 
                             />
                           ) : (
-                            <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] font-bold text-neutral-500 animate-in fade-in zoom-in-75 duration-300">
+                            <div className="w-7 h-7 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] font-bold text-neutral-500 animate-in fade-in zoom-in-75 duration-300">
                               {msg.senderName?.charAt(0) || '?'}
                             </div>
                           )
-                        ) : null}
+                        ) : <div className="w-7 h-7" />}
                       </div>
                     )}
 
                     <div className="flex flex-col min-w-0 relative">
-                      {showAvatar && (
+                      {showAvatar && selectedChat.type === 'group' && (
                         <span className="text-[10px] font-black text-indigo-400 mb-0.5 ml-3 uppercase tracking-wider">{msg.senderName}</span>
                       )}
                       
-                      <div className="relative group/bubble">
+                      <div className="relative group/bubble flex flex-col">
                         <div className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed transition-all break-words relative z-10 ${msg.deleted ? 'italic opacity-60 bg-neutral-900 border border-white/5 text-neutral-500 rounded-3xl' : isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}>
                           
                           {/* Media */}
@@ -507,14 +499,14 @@ export const Inbox: React.FC = () => {
                           </span>
                         </div>
 
-                        {/* Reactions BELOW Bubble */}
-                        {Object.keys(aggregatedReactions).length > 0 && !msg.deleted && (
-                          <div className={`absolute -bottom-3 flex gap-0.5 z-20 scale-90 ${isMe ? 'right-2' : 'left-2'}`}>
+                        {/* Reactions Stacking BELOW Bubble (Natural height) */}
+                        {hasReactions && !msg.deleted && (
+                          <div className={`flex gap-1 mt-1 z-20 ${isMe ? 'justify-end pr-2' : 'justify-start pl-2'}`}>
                             {Object.entries(aggregatedReactions).map(([emoji, data]) => (
                               <button 
                                 key={emoji} 
                                 onClick={() => addReaction(msg.id, emoji)} 
-                                className={`flex items-center gap-1 px-1.5 py-1 rounded-full backdrop-blur-md border shadow-xl transition-all animate-in zoom-in-75 duration-220 ${data.me ? 'bg-indigo-600/90 border-indigo-400 text-white' : 'bg-neutral-800/90 border-white/10 text-neutral-300'}`}
+                                className={`flex items-center gap-1 px-2 py-1 rounded-full backdrop-blur-md border shadow-sm transition-all animate-in zoom-in-75 duration-220 scale-90 ${data.me ? 'bg-indigo-600/90 border-indigo-400 text-white' : 'bg-neutral-800/90 border-white/10 text-neutral-300'}`}
                               >
                                 <span className="text-xs leading-none">{emoji}</span>
                                 {data.count > 1 && <span className="text-[9px] font-black">{data.count}</span>}
@@ -548,7 +540,7 @@ export const Inbox: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Seen Status */}
+                      {/* Seen Status - BELOW everything */}
                       {isLastSentByMe && msg.seen && (
                         <div className="mt-1 flex justify-end animate-in fade-in slide-in-from-top-1 duration-500">
                           <span className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.2em] mr-2">Seen</span>
@@ -573,7 +565,7 @@ export const Inbox: React.FC = () => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Unsend Confirmation Overlay */}
+          {/* Unsend Confirmation */}
           {unsendConfirmId && (
             <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200 px-6">
                 <div className="bg-neutral-900 border border-white/10 p-6 rounded-[32px] shadow-2xl w-full max-w-[280px] text-center animate-in zoom-in-95 duration-200">
@@ -590,7 +582,7 @@ export const Inbox: React.FC = () => {
             </div>
           )}
 
-          {/* Chat Input Area */}
+          {/* Input Area */}
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
             {replyingTo && (
               <div className="mb-4 p-4 bg-indigo-500/10 border-l-4 border-indigo-500 rounded-r-2xl flex items-center justify-between animate-in slide-in-from-bottom-2 duration-200 max-w-5xl mx-auto">
