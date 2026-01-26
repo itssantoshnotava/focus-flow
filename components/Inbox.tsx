@@ -92,6 +92,28 @@ export const Inbox: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const emojiButtonRef = useRef<HTMLButtonElement>(null);
+
+  // --- Outside click to close emoji picker ---
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        emojiPickerRef.current && 
+        !emojiPickerRef.current.contains(event.target as Node) &&
+        emojiButtonRef.current &&
+        !emojiButtonRef.current.contains(event.target as Node)
+      ) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    if (showEmojiPicker) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showEmojiPicker]);
 
   // --- DRAFT MANAGEMENT ---
   const isInternalLoading = useRef(false);
@@ -195,7 +217,10 @@ export const Inbox: React.FC = () => {
     onValue(friendsRef, async (snapshot) => {
         if (snapshot.exists()) {
             const friendIds = Object.keys(snapshot.val());
-            const promises = friendIds.map(uid => get(ref(database, `users/${uid}`)).then(s => ({ uid, ...s.val() })));
+            const promises = friendIds.map(uid => get(ref(database, `users/${uid}`)).then(s => {
+              const u = s.val();
+              return { uid, name: u?.name, photoURL: u?.photoURL };
+            }));
             const details = await Promise.all(promises);
             setMyFriends(details.filter(d => d.name));
         } else {
@@ -625,17 +650,20 @@ export const Inbox: React.FC = () => {
               <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
                 <div className="max-w-5xl mx-auto flex flex-col gap-2 relative">
                   {showEmojiPicker && (
-                    <div ref={emojiPickerRef} className="absolute bottom-full mb-4 left-0 w-72 h-64 bg-neutral-900 border border-white/10 rounded-3xl shadow-2xl flex flex-col overflow-hidden z-[100] animate-in slide-in-from-bottom-4">
-                      <div className="p-3 border-b border-white/5 flex justify-between items-center bg-neutral-900/50">
-                        <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">Select Emoji</span>
-                        <button onClick={() => setShowEmojiPicker(false)} className="text-neutral-500 hover:text-white"><X size={14} /></button>
+                    <div 
+                      ref={emojiPickerRef} 
+                      className="absolute bottom-full mb-4 right-0 w-80 h-96 bg-[#1a1a1a]/60 backdrop-blur-[40px] border border-white/10 rounded-[32px] shadow-[0_8px_48px_rgba(0,0,0,0.8)] flex flex-col overflow-hidden z-[100] animate-in slide-in-from-bottom-4 zoom-in-95 duration-300"
+                    >
+                      <div className="p-4 border-b border-white/5 flex justify-between items-center bg-white/5">
+                        <span className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.2em] ml-2">Express Yourself</span>
+                        <button onClick={() => setShowEmojiPicker(false)} className="p-1.5 text-neutral-500 hover:text-white hover:bg-white/10 rounded-full transition-colors"><X size={14} /></button>
                       </div>
-                      <div className="flex-1 overflow-y-auto p-2 custom-scrollbar grid grid-cols-6 gap-1">
+                      <div className="flex-1 overflow-y-auto p-3 custom-scrollbar grid grid-cols-6 gap-1">
                         {COMMON_EMOJIS.map(emoji => (
                           <button 
                             key={emoji} 
                             onClick={() => addEmoji(emoji)}
-                            className="p-2 hover:bg-white/5 rounded-lg text-lg transition-transform active:scale-90"
+                            className="p-2.5 hover:bg-white/10 rounded-2xl text-xl transition-all active:scale-90 hover:scale-110"
                           >
                             {emoji}
                           </button>
@@ -645,7 +673,21 @@ export const Inbox: React.FC = () => {
                   )}
 
                   {replyingTo && <div className="flex items-center justify-between bg-white/5 px-4 py-2 rounded-2xl border border-white/5 mb-2"><div className="flex items-center gap-3 overflow-hidden"><Reply size={14} className="text-indigo-400" /><div className="flex flex-col min-w-0"><span className="text-[10px] font-black uppercase text-indigo-400">{replyingTo.senderName}</span><span className="text-xs text-neutral-400 truncate">{replyingTo.text}</span></div></div><button onClick={() => setReplyingTo(null)} className="p-1 text-neutral-500 hover:text-white"><X size={16} /></button></div>}
-                  <div className="flex gap-3 items-end"><div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end relative"><button onClick={() => fileInputRef.current?.click()} disabled={isUploadingMedia} className="p-3 text-neutral-500 hover:text-indigo-400 transition-all">{isUploadingMedia ? <Loader2 className="animate-spin" size={20} /> : <Paperclip size={20} />}</button><input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} accept="image/*,video/*" /><textarea rows={1} value={inputText} onChange={(e) => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} onPaste={handlePaste} placeholder="Message…" className="flex-1 bg-transparent border-none text-white text-[15px] px-3 py-2.5 focus:outline-none resize-none max-h-40 overflow-y-auto custom-scrollbar" /><button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`p-3 transition-all ${showEmojiPicker ? 'text-indigo-400' : 'text-neutral-500 hover:text-indigo-400'}`}><Smile size={20} /></button></div><button onClick={() => sendMessage()} disabled={!inputText.trim() && !isUploadingMedia} className={`p-4 rounded-full transition-all shadow-lg active:scale-95 flex items-center justify-center shrink-0 ${inputText.trim() ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'bg-neutral-800 text-neutral-600'}`}><Send size={20} /></button></div>
+                  <div className="flex gap-3 items-end">
+                    <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end relative">
+                      <button onClick={() => fileInputRef.current?.click()} disabled={isUploadingMedia} className="p-3 text-neutral-500 hover:text-indigo-400 transition-all">{isUploadingMedia ? <Loader2 className="animate-spin" size={20} /> : <Paperclip size={20} />}</button>
+                      <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} accept="image/*,video/*" />
+                      <textarea rows={1} value={inputText} onChange={(e) => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} onPaste={handlePaste} placeholder="Message…" className="flex-1 bg-transparent border-none text-white text-[15px] px-3 py-2.5 focus:outline-none resize-none max-h-40 overflow-y-auto custom-scrollbar" />
+                      <button 
+                        ref={emojiButtonRef}
+                        onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
+                        className={`p-3 transition-all rounded-full ${showEmojiPicker ? 'text-indigo-400 bg-white/10' : 'text-neutral-500 hover:text-indigo-400 hover:bg-white/5'}`}
+                      >
+                        <Smile size={20} />
+                      </button>
+                    </div>
+                    <button onClick={() => sendMessage()} disabled={!inputText.trim() && !isUploadingMedia} className={`p-4 rounded-full transition-all shadow-lg active:scale-95 flex items-center justify-center shrink-0 ${inputText.trim() ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'bg-neutral-800 text-neutral-600'}`}><Send size={20} /></button>
+                  </div>
                 </div>
               </div>
             </>
