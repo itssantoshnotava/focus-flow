@@ -52,6 +52,7 @@ export const Inbox: React.FC = () => {
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [loading, setLoading] = useState(true);
   const [unsendConfirmId, setUnsendConfirmId] = useState<string | null>(null);
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -361,13 +362,13 @@ export const Inbox: React.FC = () => {
             <div className="flex items-center gap-2">{selectedChat.type === 'group' && <button onClick={() => navigate(`/group/${selectedChat.id}/settings`)} className="p-3 text-neutral-500 hover:text-white hover:bg-white/5 rounded-2xl transition-all"><Settings size={20} /></button>}<button className="p-3 text-neutral-500 hover:text-white hover:bg-white/5 rounded-2xl transition-all"><MoreVertical size={20} /></button></div>
           </div>
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-16" ref={scrollContainerRef}>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6 pb-20" ref={scrollContainerRef}>
             {messages.map((msg, index) => {
               if (msg.system) return <div key={msg.id} className="w-full flex justify-center py-2 animate-in fade-in slide-in-from-top-2 duration-300"><div className="bg-white/5 border border-white/5 rounded-full px-4 py-1 text-[10px] text-neutral-500 font-bold uppercase tracking-widest">{msg.text}</div></div>;
               const isMe = msg.senderUid === user?.uid;
               const showAvatar = !isMe && selectedChat.type === 'group';
               const showSenderName = !isMe && selectedChat.type === 'group' && (index === 0 || messages[index-1].senderUid !== msg.senderUid);
-              const isLastSentByMe = msg.id === lastSentMessageByMe?.id && msg.seen;
+              const isLastSentByMe = msg.id === lastSentMessageByMe?.id;
 
               // Aggregate reactions for simplified rendering
               const aggregatedReactions = (() => {
@@ -384,6 +385,15 @@ export const Inbox: React.FC = () => {
 
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative`}>
+                  
+                  {/* Reply Preview above bubble */}
+                  {!msg.deleted && msg.replyTo && (
+                    <div className={`mb-1 px-3 py-1 bg-white/[0.04] border border-white/5 rounded-2xl text-[10px] flex flex-col gap-0.5 max-w-[60%] animate-in slide-in-from-bottom-1 duration-200 ${isMe ? 'items-end' : 'items-start'}`}>
+                      <span className="font-black opacity-60 uppercase tracking-widest text-[8px]">{msg.replyTo.senderName}</span>
+                      <span className="truncate italic text-neutral-500">{msg.replyTo.text}</span>
+                    </div>
+                  )}
+
                   <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
                     {showAvatar && (
                         <div className="w-7 h-7 rounded-lg bg-neutral-800 shrink-0 self-end mb-1 overflow-hidden">
@@ -394,16 +404,8 @@ export const Inbox: React.FC = () => {
                       {showSenderName && <span className="text-[10px] font-black text-indigo-400 mb-0.5 ml-3 uppercase tracking-wider">{msg.senderName}</span>}
                       
                       <div className="relative group/bubble">
-                        <div className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed shadow-sm transition-all break-words relative z-0 ${msg.deleted ? 'italic opacity-60 bg-neutral-900 border border-white/5 text-neutral-500 rounded-3xl' : isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}>
+                        <div className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed transition-all break-words relative z-10 ${msg.deleted ? 'italic opacity-60 bg-neutral-900 border border-white/5 text-neutral-500 rounded-3xl' : isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}>
                           
-                          {/* Lightweight Reply Preview */}
-                          {!msg.deleted && msg.replyTo && (
-                            <div className={`mb-1.5 pl-2 border-l-2 border-white/20 flex flex-col gap-0.5 text-[11px] py-1 bg-black/10 rounded-r-lg ${isMe ? 'text-indigo-100' : 'text-neutral-400'}`}>
-                              <span className="font-black opacity-90 uppercase text-[9px] tracking-wider">{msg.replyTo.senderName}</span>
-                              <span className="truncate italic opacity-80">{msg.replyTo.text}</span>
-                            </div>
-                          )}
-
                           {/* Media Rendering */}
                           {!msg.deleted && msg.attachment && (
                             <div className="mb-2 rounded-2xl overflow-hidden bg-black/20">
@@ -416,20 +418,25 @@ export const Inbox: React.FC = () => {
                           )}
 
                           <p className="inline-block whitespace-pre-wrap">{msg.text}</p>
-                          
-                          {/* Integrated Timestamp + Seen */}
-                          <div className={`flex items-center justify-end gap-1.5 mt-0.5 -mr-1 opacity-60 text-[9px] font-bold uppercase tracking-tighter ${isMe ? 'text-indigo-200' : 'text-neutral-500'}`}>
-                            <span>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                            {isLastSentByMe && <span>· Seen</span>}
-                          </div>
                         </div>
 
-                        {/* Reaction Display - iMessage Floating Style */}
+                        {/* Floating Timestamp - Absolute outside bubble, hover visible */}
+                        <div className={`absolute top-1/2 -translate-y-1/2 opacity-0 group-hover/msg:opacity-100 transition-all duration-200 px-3 z-0 pointer-events-none whitespace-nowrap ${isMe ? 'right-full translate-x-1' : 'left-full -translate-x-1'}`}>
+                          <span className="text-[9px] font-black text-neutral-600 uppercase tracking-widest">
+                            {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+
+                        {/* Reaction Display - iMessage Floating Style BELOW Bubble */}
                         {Object.keys(aggregatedReactions).length > 0 && !msg.deleted && (
-                          <div className={`absolute -bottom-2 flex gap-0.5 z-10 scale-90 ${isMe ? 'right-2' : 'left-2'}`}>
+                          <div className={`absolute -bottom-3 flex gap-0.5 z-20 scale-90 ${isMe ? 'right-2' : 'left-2'}`}>
                             {Object.entries(aggregatedReactions).map(([emoji, data]) => (
-                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className={`flex items-center gap-1 px-1.5 py-1 rounded-full backdrop-blur-md border shadow-xl transition-all animate-in zoom-in-75 duration-200 ${data.me ? 'bg-indigo-600/80 border-indigo-400 text-white' : 'bg-neutral-800/80 border-white/10 text-neutral-300'}`}>
-                                <span className="text-xs">{emoji}</span>
+                              <button 
+                                key={emoji} 
+                                onClick={() => addReaction(msg.id, emoji)} 
+                                className={`flex items-center gap-1 px-1.5 py-1 rounded-full backdrop-blur-md border shadow-xl transition-all animate-in zoom-in-75 duration-220 ${data.me ? 'bg-indigo-600/90 border-indigo-400 text-white' : 'bg-neutral-800/90 border-white/10 text-neutral-300'}`}
+                              >
+                                <span className="text-xs leading-none">{emoji}</span>
                                 {data.count > 1 && <span className="text-[9px] font-black">{data.count}</span>}
                               </button>
                             ))}
@@ -438,7 +445,7 @@ export const Inbox: React.FC = () => {
 
                         {/* Action Buttons - Hidden until hover */}
                         {!msg.deleted && (
-                          <div className={`absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity px-2 z-20 ${isMe ? 'right-full' : 'left-full'}`}>
+                          <div className={`absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity px-2 z-20 ${isMe ? 'right-full mr-12' : 'left-full ml-12'}`}>
                              <button onClick={() => setReplyingTo(msg)} className="p-1.5 bg-neutral-900/80 backdrop-blur-md border border-white/10 rounded-full text-neutral-500 hover:text-white transition-all hover:scale-110"><Reply size={13} /></button>
                              <button onClick={() => setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id)} className={`p-1.5 bg-neutral-900/80 backdrop-blur-md border border-white/10 rounded-full transition-all hover:scale-110 ${activeReactionPickerId === msg.id ? 'text-indigo-400 scale-110' : 'text-neutral-500 hover:text-white'}`}><Smile size={13} /></button>
                              {isMe && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-1.5 bg-neutral-900/80 backdrop-blur-md border border-white/10 rounded-full text-neutral-500 hover:text-red-400 transition-all hover:scale-110"><Trash2 size={13} /></button>}
@@ -447,13 +454,26 @@ export const Inbox: React.FC = () => {
 
                         {/* Reaction Picker Overlay */}
                         {activeReactionPickerId === msg.id && (
-                          <div className={`absolute bottom-full mb-3 bg-neutral-900/95 backdrop-blur-xl border border-white/10 p-1 rounded-[24px] shadow-2xl flex gap-1 z-[60] animate-in fade-in zoom-in-95 duration-200 ${isMe ? 'right-0' : 'left-0'}`}>
+                          <div className={`absolute bottom-full mb-3 bg-neutral-900/95 backdrop-blur-xl border border-white/10 p-1.5 rounded-[24px] shadow-2xl flex gap-1 z-[60] animate-in fade-in zoom-in-95 duration-200 ${isMe ? 'right-0' : 'left-0'}`}>
                             {REACTION_EMOJIS.map(emoji => (
-                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className="p-2.5 hover:bg-white/5 rounded-full transition-all hover:scale-125 text-xl leading-none">{emoji}</button>
+                              <button 
+                                key={emoji} 
+                                onClick={() => addReaction(msg.id, emoji)} 
+                                className="p-2 hover:bg-white/5 rounded-full transition-all hover:scale-125 text-xl leading-none"
+                              >
+                                {emoji}
+                              </button>
                             ))}
                           </div>
                         )}
                       </div>
+
+                      {/* Seen Status - BELOW Bubble */}
+                      {isLastSentByMe && msg.seen && (
+                        <div className="mt-1 flex justify-end animate-in fade-in slide-in-from-top-1 duration-500">
+                          <span className="text-[8px] font-black text-neutral-600 uppercase tracking-[0.2em] mr-2">Seen</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -517,7 +537,7 @@ export const Inbox: React.FC = () => {
                   rows={1}
                   value={inputText}
                   onChange={handleInputChange}
-                  placeholder="iMessage"
+                  placeholder="Message…"
                   className="flex-1 bg-transparent border-none text-white text-[15px] px-2 py-2.5 focus:outline-none resize-none custom-scrollbar placeholder:text-neutral-600 font-medium"
                   onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                 />
