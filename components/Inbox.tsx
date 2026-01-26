@@ -8,7 +8,7 @@ import {
     Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
     Circle, Settings, Camera, Trash2, UserPlus, 
     Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
-    SmilePlus, Paperclip, Play, Image as ImageIcon, Film, MoreVertical, Smile
+    SmilePlus, Paperclip, Play, Image as ImageIcon, Film, MoreVertical, Smile, AlertCircle
 } from 'lucide-react';
 
 interface ChatItem {
@@ -51,6 +51,7 @@ export const Inbox: React.FC = () => {
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [unsendConfirmId, setUnsendConfirmId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -261,11 +262,14 @@ export const Inbox: React.FC = () => {
   const addReaction = async (msgId: string, emoji: string) => {
     if (!user || !currentChatId || !selectedChat) return;
     const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
-    const reactionRef = ref(database, `${basePath}/${currentChatId}/${msgId}/reactions/${emoji}/${user.uid}`);
+    const userReactionRef = ref(database, `${basePath}/${currentChatId}/${msgId}/reactions/${user.uid}`);
     
-    const snap = await get(reactionRef);
-    if (snap.exists()) await remove(reactionRef);
-    else await set(reactionRef, true);
+    const snap = await get(userReactionRef);
+    if (snap.exists() && snap.val() === emoji) {
+        await remove(userReactionRef);
+    } else {
+        await set(userReactionRef, emoji);
+    }
     setActiveReactionPickerId(null);
   };
 
@@ -274,11 +278,11 @@ export const Inbox: React.FC = () => {
     const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
     await update(ref(database, `${basePath}/${currentChatId}/${msgId}`), { 
       deleted: true, 
-      text: "Message unsend",
+      text: "Message unsent",
       attachment: null,
       replyTo: null
     });
-    setActiveReactionPickerId(null);
+    setUnsendConfirmId(null);
   };
 
   const lastSentMessageByMe = useMemo(() => {
@@ -314,21 +318,24 @@ export const Inbox: React.FC = () => {
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
           {viewMode === 'list' ? (
             chats.length > 0 ? (
-              chats.map(chat => (
-                <button key={chat.id} onClick={() => setSelectedChat(chat)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all group ${selectedChat?.id === chat.id ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl' : 'hover:bg-white/[0.04]'}`}>
-                  <div className="relative shrink-0">
-                    {chat.photoURL ? <img src={chat.photoURL} className="w-14 h-14 rounded-[18px] object-cover" /> : <div className={`w-14 h-14 rounded-[18px] flex items-center justify-center text-xl font-bold ${selectedChat?.id === chat.id ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{chat.name.charAt(0)}</div>}
-                    {chat.unreadCount ? chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-neutral-950">{chat.unreadCount}</div> : null}
-                  </div>
-                  <div className="flex-1 text-left overflow-hidden">
-                    <div className="flex justify-between items-baseline mb-0.5">
-                      <span className={`font-bold truncate text-base ${selectedChat?.id === chat.id ? 'text-white' : 'text-neutral-200'}`}>{chat.name}</span>
-                      <span className={`text-[10px] uppercase font-black shrink-0 ml-2 ${selectedChat?.id === chat.id ? 'text-white/60' : 'text-neutral-500'}`}>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              chats.map(chat => {
+                const isSelected = selectedChat?.id === chat.id;
+                return (
+                  <button key={chat.id} onClick={() => setSelectedChat(chat)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] group transition-opacity ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl opacity-100' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}>
+                    <div className="relative shrink-0">
+                      {chat.photoURL ? <img src={chat.photoURL} className="w-14 h-14 rounded-[18px] object-cover" /> : <div className={`w-14 h-14 rounded-[18px] flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{chat.name.charAt(0)}</div>}
+                      {chat.unreadCount ? chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-neutral-950">{chat.unreadCount}</div> : null}
                     </div>
-                    <p className={`text-sm truncate font-medium ${selectedChat?.id === chat.id ? 'text-white/80' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages yet'}</p>
-                  </div>
-                </button>
-              ))
+                    <div className="flex-1 text-left overflow-hidden">
+                      <div className="flex justify-between items-baseline mb-0.5">
+                        <span className={`font-bold truncate text-base ${isSelected ? 'text-white' : 'text-neutral-200'}`}>{chat.name}</span>
+                        <span className={`text-[10px] uppercase font-black shrink-0 ml-2 ${isSelected ? 'text-white/60' : 'text-neutral-500'}`}>{new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <p className={`text-sm truncate font-medium ${isSelected ? 'text-white/80' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages yet'}</p>
+                    </div>
+                  </button>
+                );
+              })
             ) : <div className="flex flex-col items-center justify-center py-20 text-center px-6"><div className="w-16 h-16 bg-neutral-900 rounded-[20px] flex items-center justify-center mb-4 text-neutral-700"><MessageCircle size={32} /></div><h3 className="text-white font-bold mb-1">No chats yet</h3><p className="text-neutral-500 text-sm">Add friends from search to start a conversation.</p></div>
           ) : (
             <div className="space-y-6 p-2">
@@ -362,6 +369,19 @@ export const Inbox: React.FC = () => {
               const showSenderName = !isMe && selectedChat.type === 'group' && (index === 0 || messages[index-1].senderUid !== msg.senderUid);
               const isLastSentByMe = msg.id === lastSentMessageByMe?.id && msg.seen;
 
+              // Aggregate reactions for simplified rendering
+              const aggregatedReactions = (() => {
+                  if (!msg.reactions) return {};
+                  const counts: Record<string, { count: number, me: boolean }> = {};
+                  Object.entries(msg.reactions).forEach(([uid, emoji]) => {
+                      const e = emoji as string;
+                      if (!counts[e]) counts[e] = { count: 0, me: false };
+                      counts[e].count++;
+                      if (uid === user?.uid) counts[e].me = true;
+                  });
+                  return counts;
+              })();
+
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg animate-in ${isMe ? 'fade-in slide-in-from-right-4' : 'fade-in slide-in-from-left-4'} duration-200`}>
                   <div className={`flex gap-3 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : ''}`}>
@@ -374,8 +394,13 @@ export const Inbox: React.FC = () => {
                       {showSenderName && <span className="text-[10px] font-black text-indigo-400 mb-1 ml-3 uppercase tracking-wider">{msg.senderName}</span>}
                       
                       <div className="relative group/bubble">
-                        <div className={`px-4 pt-3 pb-2 rounded-[24px] text-sm leading-relaxed shadow-sm transition-all break-words ${msg.deleted ? 'italic opacity-60 bg-white/5 border border-white/5 text-neutral-500' : isMe ? 'bg-indigo-600 text-white rounded-tr-[4px]' : 'bg-white/[0.04] text-neutral-200 rounded-tl-[4px] border border-white/5'}`}>
-                          {!msg.deleted && msg.replyTo && <div className={`mb-2 p-2 rounded-xl text-xs border-l-4 bg-black/20 ${isMe ? 'border-white/40 text-white/60' : 'border-indigo-500/50 text-neutral-500'}`}><p className="font-black truncate mb-0.5">{msg.replyTo.senderName}</p><p className="truncate italic">{msg.replyTo.text}</p></div>}
+                        <div className={`px-4 pt-3 pb-2 rounded-2xl text-sm leading-relaxed shadow-sm transition-all break-words ${msg.deleted ? 'italic opacity-60 bg-white/5 border border-white/5 text-neutral-500' : isMe ? 'bg-indigo-600 text-white rounded-br-md' : 'bg-white/[0.04] text-neutral-200 rounded-bl-md border border-white/5'}`}>
+                          {!msg.deleted && msg.replyTo && (
+                            <div className={`mb-1 pl-2 border-l-2 border-indigo-500/50 flex flex-col gap-0.5 text-[11px] ${isMe ? 'text-white/60' : 'text-neutral-500'}`}>
+                              <span className="font-bold opacity-90">{msg.replyTo.senderName}</span>
+                              <span className="truncate italic opacity-80">{msg.replyTo.text}</span>
+                            </div>
+                          )}
                           {!msg.deleted && msg.attachment && <div className="mb-2 rounded-xl overflow-hidden bg-black/20 border border-white/5">{msg.attachment.type === 'image' ? <img src={msg.attachment.url} className="max-w-full h-auto object-cover max-h-80" /> : <video src={msg.attachment.url} controls className="max-w-full h-auto max-h-80" />}</div>}
                           <p>{msg.text}</p>
                           <div className="flex items-center justify-end gap-2 mt-1 -mr-1">
@@ -385,12 +410,12 @@ export const Inbox: React.FC = () => {
                         </div>
 
                         {/* Reaction Display */}
-                        {msg.reactions && !msg.deleted && (
+                        {Object.keys(aggregatedReactions).length > 0 && !msg.deleted && (
                           <div className={`flex flex-wrap gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                            {Object.entries(msg.reactions).map(([emoji, uids]: [string, any]) => (
-                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold animate-reaction-bounce ${uids[user?.uid || ''] ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-400' : 'bg-white/5 border-white/10 text-neutral-400'}`}>
+                            {Object.entries(aggregatedReactions).map(([emoji, data]) => (
+                              <button key={emoji} onClick={() => addReaction(msg.id, emoji)} className={`flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-bold animate-reaction-bounce transition-all ${data.me ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-400' : 'bg-white/5 border-white/10 text-neutral-400'}`}>
                                 <span>{emoji}</span>
-                                <span>{Object.keys(uids).length}</span>
+                                {data.count > 1 && <span>{data.count}</span>}
                               </button>
                             ))}
                           </div>
@@ -400,7 +425,7 @@ export const Inbox: React.FC = () => {
                           <div className={`absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity px-2 z-10 ${isMe ? 'right-full' : 'left-full'}`}>
                              <button onClick={() => setReplyingTo(msg)} className="p-1.5 bg-neutral-900 border border-white/10 rounded-lg text-neutral-500 hover:text-white transition-all"><Reply size={14} /></button>
                              <button onClick={() => setActiveReactionPickerId(activeReactionPickerId === msg.id ? null : msg.id)} className={`p-1.5 bg-neutral-900 border border-white/10 rounded-lg transition-all ${activeReactionPickerId === msg.id ? 'text-indigo-400 scale-110' : 'text-neutral-500 hover:text-white'}`}><Smile size={14} /></button>
-                             {isMe && <button onClick={() => unsendMessage(msg.id)} className="p-1.5 bg-neutral-900 border border-white/10 rounded-lg text-neutral-500 hover:text-red-400 transition-all"><Trash2 size={14} /></button>}
+                             {isMe && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-1.5 bg-neutral-900 border border-white/10 rounded-lg text-neutral-500 hover:text-red-400 transition-all"><Trash2 size={14} /></button>}
                           </div>
                         )}
 
@@ -420,6 +445,23 @@ export const Inbox: React.FC = () => {
             {typingText && <div className="flex items-center gap-3 animate-in fade-in duration-300"><div className="px-5 py-3 bg-white/[0.03] border border-white/5 rounded-full rounded-tl-sm flex items-center gap-2"><div className="flex gap-1"><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot"></div><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot [animation-delay:0.2s]"></div><div className="w-1.5 h-1.5 bg-indigo-500 rounded-full animate-typing-dot [animation-delay:0.4s]"></div></div><span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{typingText}</span></div></div>}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Unsend Confirmation Overlay */}
+          {unsendConfirmId && (
+            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+                <div className="bg-neutral-900 border border-white/10 p-6 rounded-[32px] shadow-2xl w-full max-w-[280px] text-center animate-in zoom-in-95 duration-200">
+                    <div className="w-12 h-12 bg-red-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                        <Trash2 className="text-red-500" size={24} />
+                    </div>
+                    <h3 className="text-white font-bold text-lg mb-1">Unsend this message?</h3>
+                    <p className="text-neutral-500 text-sm mb-6">This will remove it for everyone.</p>
+                    <div className="flex flex-col gap-2">
+                        <button onClick={() => unsendMessage(unsendConfirmId)} className="w-full py-3 bg-red-600 hover:bg-red-500 text-white rounded-2xl font-bold transition-all active:scale-95">Unsend</button>
+                        <button onClick={() => setUnsendConfirmId(null)} className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 rounded-2xl font-bold transition-all">Cancel</button>
+                    </div>
+                </div>
+            </div>
+          )}
 
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-20">
             {replyingTo && <div className="mb-4 p-4 bg-indigo-500/10 border-l-4 border-indigo-500 rounded-r-2xl flex items-center justify-between animate-in slide-in-from-bottom-2 duration-200"><div className="min-w-0"><p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-0.5">Replying to {replyingTo.senderName}</p><p className="text-sm text-neutral-400 truncate">{replyingTo.text}</p></div><button onClick={() => setReplyingTo(null)} className="p-2 text-neutral-500 hover:text-white transition-colors"><X size={18} /></button></div>}
