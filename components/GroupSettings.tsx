@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -7,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { 
   Camera, X, ArrowLeft, Users, UserMinus, Shield, ShieldCheck, 
-  Trash2, Save, MoreVertical, LogOut, ChevronRight, Check, Plus
+  Trash2, Save, MoreVertical, LogOut, ChevronRight, Check, Plus, Loader2
 } from 'lucide-react';
 
 export const GroupSettings: React.FC = () => {
@@ -48,9 +49,10 @@ export const GroupSettings: React.FC = () => {
 
         if (data.members) {
           const mIds = Object.keys(data.members);
-          const mPromises = mIds.map(mid => get(ref(database, `users/${mid}`)).then(s => ({ uid: mid, ...s.val() })));
-          const details = await Promise.all(mPromises);
-          setMembersDetails(details);
+          const details = await Promise.all(
+            mIds.map(mid => get(ref(database, `users/${mid}`)).then(s => ({ uid: mid, ...s.val() })))
+          );
+          setMembersDetails(details.filter(d => d.name));
           
           mIds.forEach(mid => {
               if (mid !== user?.uid) {
@@ -61,6 +63,7 @@ export const GroupSettings: React.FC = () => {
           });
         }
       } else {
+        console.warn("Group does not exist or was deleted.");
         navigate('/inbox');
       }
       setLoading(false);
@@ -70,9 +73,10 @@ export const GroupSettings: React.FC = () => {
     get(friendsRef).then(async (snap) => {
       if (snap.exists()) {
           const ids = Object.keys(snap.val());
-          const promises = ids.map(id => get(ref(database, `users/${id}`)).then(s => ({ uid: id, ...s.val() })));
-          const res = await Promise.all(promises);
-          setMyFriends(res);
+          const res = await Promise.all(
+            ids.map(id => get(ref(database, `users/${id}`)).then(s => ({ uid: id, ...s.val() })))
+          );
+          setMyFriends(res.filter(r => r.name));
       }
     });
 
@@ -81,8 +85,20 @@ export const GroupSettings: React.FC = () => {
 
   const handleSave = async () => {
     if (!groupId || !isAdmin) return;
-    await update(ref(database, `groupChats/${groupId}`), { name: editName, description: editDesc });
-    alert("Group updated successfully!");
+    try {
+        await update(ref(database, `groupChats/${groupId}`), { name: editName, description: editDesc });
+        // Sync inbox names for all members if name changed
+        if (editName !== groupData.name) {
+            const updates: any = {};
+            Object.keys(groupData.members).forEach(mid => {
+                updates[`userInboxes/${mid}/${groupId}/name`] = editName;
+            });
+            await update(ref(database), updates);
+        }
+        alert("Group updated successfully!");
+    } catch (err) {
+        console.error("Save failed", err);
+    }
   };
 
   const handleAvatarClick = () => {
@@ -94,7 +110,15 @@ export const GroupSettings: React.FC = () => {
       setIsUploading(true);
       try {
         const url = await uploadImageToCloudinary(e.target.files[0]);
-        await update(ref(database, `groupChats/${groupId}`), { photoURL: url });
+        const updates: any = { photoURL: url };
+        await update(ref(database, `groupChats/${groupId}`), updates);
+        
+        // Sync inbox photos
+        const inboxUpdates: any = {};
+        Object.keys(groupData.members).forEach(mid => {
+            inboxUpdates[`userInboxes/${mid}/${groupId}/photoURL`] = url;
+        });
+        await update(ref(database), inboxUpdates);
       } catch (err) {
         console.error(err);
       }
@@ -118,27 +142,35 @@ export const GroupSettings: React.FC = () => {
     if (!groupId || !isAdmin) return;
     if (targetUid === groupData.hostUid) return;
     
-    const updates: any = {};
-    updates[`groupChats/${groupId}/members/${targetUid}`] = null;
-    updates[`groupChats/${groupId}/admins/${targetUid}`] = null;
-    updates[`userInboxes/${targetUid}/${groupId}`] = null;
-    await update(ref(database), updates);
-    closeMenu();
+    if (window.confirm("Remove this member from the group?")) {
+        const updates: any = {};
+        updates[`groupChats/${groupId}/members/${targetUid}`] = null;
+        updates[`groupChats/${groupId}/admins/${targetUid}`] = null;
+        updates[`userInboxes/${targetUid}/${groupId}`] = null;
+        updates[`users/${targetUid}/groupChats/${groupId}`] = null;
+        await update(ref(database), updates);
+        closeMenu();
+    }
   };
 
   const transferHost = async (targetUid: string) => {
     if (!groupId || !isHost) return;
-    await update(ref(database, `groupChats/${groupId}`), { hostUid: targetUid });
-    await update(ref(database, `groupChats/${groupId}/admins`), { [targetUid]: true });
-    closeMenu();
+    if (window.confirm("Transfer group ownership to this member?")) {
+        await update(ref(database, `groupChats/${groupId}`), { hostUid: targetUid });
+        await update(ref(database, `groupChats/${groupId}/admins`), { [targetUid]: true });
+        closeMenu();
+    }
   };
 
   const deleteGroup = async () => {
     if (!groupId || !isHost) return;
-    if (window.confirm("Are you absolutely sure you want to delete this group? All history will be lost.")) {
+    if (window.confirm("Are you absolutely sure you want to delete this group? All history will be lost for everyone.")) {
       const mIds = Object.keys(groupData.members);
       const updates: any = {};
-      mIds.forEach(mid => { updates[`userInboxes/${mid}/${groupId}`] = null; });
+      mIds.forEach(mid => { 
+        updates[`userInboxes/${mid}/${groupId}`] = null; 
+        updates[`users/${mid}/groupChats/${groupId}`] = null;
+      });
       updates[`groupChats/${groupId}`] = null;
       updates[`groupMessages/${groupId}`] = null;
       await update(ref(database), updates);
@@ -157,6 +189,8 @@ export const GroupSettings: React.FC = () => {
           updates[`groupChats/${groupId}/members/${user.uid}`] = null;
           updates[`groupChats/${groupId}/admins/${user.uid}`] = null;
           updates[`userInboxes/${user.uid}/${groupId}`] = null;
+          updates[`users/${user.uid}/groupChats/${groupId}`] = null;
+          
           if (Object.keys(groupData.members).length === 1) {
               updates[`groupChats/${groupId}`] = null;
               updates[`groupMessages/${groupId}`] = null;
@@ -167,7 +201,7 @@ export const GroupSettings: React.FC = () => {
   };
 
   const addMember = async (targetUid: string, name: string, photoURL: string) => {
-    if (!groupId) return;
+    if (!groupId || !groupData) return;
     const updates: any = {};
     updates[`groupChats/${groupId}/members/${targetUid}`] = true;
     updates[`userInboxes/${targetUid}/${groupId}`] = { 
@@ -178,10 +212,12 @@ export const GroupSettings: React.FC = () => {
         unreadCount: 0, 
         photoURL: groupData.photoURL || null 
     };
+    updates[`users/${targetUid}/groupChats/${groupId}`] = true;
     await update(ref(database), updates);
+    setShowAddMember(false);
   };
 
-  if (loading) return <div className="flex h-full items-center justify-center bg-neutral-950"><div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>;
+  if (loading) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
   return (
     <div className="flex-1 h-full bg-neutral-950 overflow-y-auto custom-scrollbar relative">
@@ -236,7 +272,7 @@ export const GroupSettings: React.FC = () => {
                     <h1 className="text-3xl font-black text-white">{groupData.name}</h1>
                 )}
                 <p className="text-neutral-500 text-sm font-medium">
-                    {Object.keys(groupData.members).length} members · Created by <span className="text-indigo-400">{membersDetails.find(m => m.uid === groupData.hostUid)?.name || 'Unknown'}</span>
+                    {Object.keys(groupData.members || {}).length} members · Created by <span className="text-indigo-400">{membersDetails.find(m => m.uid === groupData.hostUid)?.name || 'Unknown'}</span>
                 </p>
             </div>
 
@@ -389,30 +425,16 @@ export const GroupSettings: React.FC = () => {
         {/* Member Action Menu Portal */}
         {activeMenuId && menuPos && createPortal(
             <div className="fixed inset-0 z-[9999] pointer-events-none">
-                {/* Full-screen Backdrop */}
+                <div className="fixed inset-0 bg-transparent pointer-events-auto cursor-default" onClick={closeMenu} />
                 <div 
-                    className="fixed inset-0 bg-transparent pointer-events-auto cursor-default" 
-                    onClick={closeMenu}
-                />
-                
-                {/* Floating Menu */}
-                <div 
-                    style={{ 
-                        position: 'fixed', 
-                        top: `${menuPos.y + 8}px`, 
-                        left: `${menuPos.x - 224}px`, // Align w-56 right edge to button right edge
-                        zIndex: 10000 
-                    }}
+                    style={{ position: 'fixed', top: `${menuPos.y + 8}px`, left: `${menuPos.x - 224}px`, zIndex: 10000 }}
                     className="w-56 bg-neutral-900/95 backdrop-blur-2xl border border-white/10 rounded-[24px] shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200 pointer-events-auto"
                 >
                     <div className="p-1 flex flex-col h-auto">
                         {activeMember && (
                             <>
                                 {!(activeMember.uid === groupData.hostUid) && (
-                                    <button 
-                                        onClick={() => toggleAdmin(activeMember.uid)}
-                                        className="w-full flex items-center justify-between px-4 py-3 text-neutral-300 hover:bg-white/5 rounded-2xl text-sm font-bold transition-colors"
-                                    >
+                                    <button onClick={() => toggleAdmin(activeMember.uid)} className="w-full flex items-center justify-between px-4 py-3 text-neutral-300 hover:bg-white/5 rounded-2xl text-sm font-bold transition-colors">
                                         <div className="flex items-center gap-3">
                                             {groupData.admins?.[activeMember.uid] ? <Shield size={18} /> : <ShieldCheck size={18} />}
                                             {groupData.admins?.[activeMember.uid] ? 'Remove Admin' : 'Make Admin'}
@@ -421,26 +443,14 @@ export const GroupSettings: React.FC = () => {
                                     </button>
                                 )}
                                 {isHost && !(activeMember.uid === groupData.hostUid) && (
-                                    <button 
-                                        onClick={() => transferHost(activeMember.uid)}
-                                        className="w-full flex items-center justify-between px-4 py-3 text-amber-400 hover:bg-amber-400/5 rounded-2xl text-sm font-bold transition-colors"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <LogOut size={18} />
-                                            Transfer Host
-                                        </div>
+                                    <button onClick={() => transferHost(activeMember.uid)} className="w-full flex items-center justify-between px-4 py-3 text-amber-400 hover:bg-amber-400/5 rounded-2xl text-sm font-bold transition-colors">
+                                        <div className="flex items-center gap-3"><LogOut size={18} />Transfer Host</div>
                                         <ChevronRight size={14} className="opacity-50" />
                                     </button>
                                 )}
                                 {!(activeMember.uid === groupData.hostUid) && (
-                                    <button 
-                                        onClick={() => removeMember(activeMember.uid)}
-                                        className="w-full flex items-center justify-between px-4 py-3 text-red-400 hover:bg-red-400/5 rounded-2xl text-sm font-bold transition-colors"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <UserMinus size={18} />
-                                            Remove Member
-                                        </div>
+                                    <button onClick={() => removeMember(activeMember.uid)} className="w-full flex items-center justify-between px-4 py-3 text-red-400 hover:bg-red-400/5 rounded-2xl text-sm font-bold transition-colors">
+                                        <div className="flex items-center gap-3"><UserMinus size={18} />Remove Member</div>
                                         <ChevronRight size={14} className="opacity-50" />
                                     </button>
                                 )}

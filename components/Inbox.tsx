@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ref, onValue, push, update, get, set, remove, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database";
@@ -10,7 +11,7 @@ import {
     Circle, Settings, Camera, Trash2, UserPlus, 
     Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
     SmilePlus, Paperclip, Play, Image as ImageIcon, Film, MoreVertical, Smile, AlertCircle,
-    VolumeX, Archive, Ban, Lock, Trash
+    VolumeX, Archive, Ban, Lock, Trash, UserCircle2
 } from 'lucide-react';
 
 interface ChatItem {
@@ -45,9 +46,10 @@ export const Inbox: React.FC = () => {
   const [userProfiles, setUserProfiles] = useState<Record<string, { name: string, photoURL?: string }>>({});
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number, activeChatId?: string} | null>(null);
-  const [typingText, setTypingText] = useState('');
   const [inputText, setInputText] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
+  const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
+  const [myFriends, setMyFriends] = useState<any[]>([]);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
@@ -69,8 +71,6 @@ export const Inbox: React.FC = () => {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastTypingWriteRef = useRef<number>(0);
-  const stopTypingTimeoutRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentChatId = useMemo(() => {
@@ -92,6 +92,19 @@ export const Inbox: React.FC = () => {
     onValue(ref(database, `blocks/${user.uid}`), (snap) => setIBlockedThem(snap.val() || {}));
     onValue(ref(database, `mutedChats/${user.uid}`), (snap) => setMutedChats(snap.val() || {}));
     onValue(ref(database, `archivedChats/${user.uid}`), (snap) => setArchivedChats(snap.val() || {}));
+
+    // Fetch mutual friends for group creation
+    const friendsRef = ref(database, `friends/${user.uid}`);
+    onValue(friendsRef, async (snapshot) => {
+        if (snapshot.exists()) {
+            const friendIds = Object.keys(snapshot.val());
+            const promises = friendIds.map(uid => get(ref(database, `users/${uid}`)).then(s => ({ uid, ...s.val() })));
+            const details = await Promise.all(promises);
+            setMyFriends(details.filter(d => d.name));
+        } else {
+            setMyFriends([]);
+        }
+    });
   }, [user]);
 
   useEffect(() => {
@@ -207,7 +220,7 @@ export const Inbox: React.FC = () => {
     return () => unsubMessages();
   }, [selectedChat, currentChatId, user]);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, typingText]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const handleRemoveChat = async (chatId: string) => {
       if (!user) return;
@@ -260,19 +273,29 @@ export const Inbox: React.FC = () => {
     }
   };
 
+  const toggleMemberSelection = (uid: string) => {
+    const next = new Set(selectedMembers);
+    if (next.has(uid)) next.delete(uid);
+    else next.add(uid);
+    setSelectedMembers(next);
+  };
+
   const handleCreateGroup = async () => {
-      if (!user || !newGroupName.trim() || creatingGroup) return;
+      if (!user || !newGroupName.trim() || selectedMembers.size === 0 || creatingGroup) return;
       setCreatingGroup(true);
       try {
           const groupRef = push(ref(database, 'groupChats'));
           const groupId = groupRef.key;
           if (!groupId) return;
 
+          const membersObj: any = { [user.uid]: true };
+          selectedMembers.forEach(mid => membersObj[mid] = true);
+
           const groupData = {
               id: groupId,
               name: newGroupName.trim(),
               hostUid: user.uid,
-              members: { [user.uid]: true },
+              members: membersObj,
               admins: { [user.uid]: true },
               createdAt: Date.now(),
               type: 'group'
@@ -280,6 +303,8 @@ export const Inbox: React.FC = () => {
 
           const updates: any = {};
           updates[`groupChats/${groupId}`] = groupData;
+          
+          // Update host inbox
           updates[`userInboxes/${user.uid}/${groupId}`] = {
               type: 'group',
               name: groupData.name,
@@ -288,9 +313,21 @@ export const Inbox: React.FC = () => {
           };
           updates[`users/${user.uid}/groupChats/${groupId}`] = true;
 
+          // Update other members inboxes
+          selectedMembers.forEach(mid => {
+              updates[`userInboxes/${mid}/${groupId}`] = {
+                  type: 'group',
+                  name: groupData.name,
+                  lastMessageAt: Date.now(),
+                  unreadCount: 0
+              };
+              updates[`users/${mid}/groupChats/${groupId}`] = true;
+          });
+
           await update(ref(database), updates);
           
           setNewGroupName('');
+          setSelectedMembers(new Set());
           setViewMode('list');
           setSelectedChat({
               id: groupId,
@@ -445,7 +482,7 @@ export const Inbox: React.FC = () => {
                 </div>
             )
           ) : (
-            <div className="space-y-6 p-2">
+            <div className="space-y-6 p-2 flex flex-col h-full">
                 <div className="space-y-2">
                     <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Group Name</label>
                     <input 
@@ -455,10 +492,47 @@ export const Inbox: React.FC = () => {
                         className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-5 py-3 text-white focus:outline-none focus:border-indigo-500 transition-all font-bold" 
                     />
                 </div>
-                <div className="space-y-2">
+                
+                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                    <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Select Members ({selectedMembers.size})</label>
+                    {myFriends.length > 0 ? (
+                        myFriends.map(friend => {
+                            const isSelected = selectedMembers.has(friend.uid);
+                            return (
+                                <button 
+                                    key={friend.uid}
+                                    onClick={() => toggleMemberSelection(friend.uid)}
+                                    className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all border ${isSelected ? 'bg-indigo-600/10 border-indigo-500/50' : 'bg-white/[0.02] border-transparent hover:bg-white/[0.05]'}`}
+                                >
+                                    <div className="relative">
+                                        {friend.photoURL ? (
+                                            <img src={friend.photoURL} className="w-10 h-10 rounded-full" />
+                                        ) : (
+                                            <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-bold text-neutral-400">
+                                                {friend.name.charAt(0)}
+                                            </div>
+                                        )}
+                                        {isSelected && (
+                                            <div className="absolute -top-1 -right-1 bg-indigo-500 text-white rounded-full p-0.5 border-2 border-neutral-950">
+                                                <Check size={10} strokeWidth={4} />
+                                            </div>
+                                        )}
+                                    </div>
+                                    <span className={`text-sm font-bold truncate ${isSelected ? 'text-white' : 'text-neutral-400'}`}>{friend.name}</span>
+                                </button>
+                            );
+                        })
+                    ) : (
+                        <div className="p-4 text-center text-neutral-600 text-xs italic">
+                            You need friends to create a group.
+                        </div>
+                    )}
+                </div>
+
+                <div className="space-y-2 pt-4">
                     <button 
                         onClick={handleCreateGroup} 
-                        disabled={!newGroupName.trim() || creatingGroup}
+                        disabled={!newGroupName.trim() || selectedMembers.size === 0 || creatingGroup}
                         className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 hover:bg-indigo-500 disabled:opacity-50"
                     >
                         {creatingGroup ? <Loader2 className="animate-spin" size={20} /> : 'Create Group'}
@@ -508,9 +582,29 @@ export const Inbox: React.FC = () => {
                     </span>
                   </div>
                 </div>
-                <button onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)} className={`p-3 rounded-2xl transition-all ${isHeaderMenuOpen ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}>
-                    <MoreVertical size={20} />
-                </button>
+                <div className="relative">
+                  <button onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)} className={`p-3 rounded-2xl transition-all ${isHeaderMenuOpen ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}>
+                      <MoreVertical size={20} />
+                  </button>
+                  {isHeaderMenuOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 z-[100] animate-in fade-in zoom-in-95">
+                        {selectedChat.type === 'group' && (
+                            <button 
+                                onClick={() => { setIsHeaderMenuOpen(false); navigate(`/group/${selectedChat.id}/settings`); }}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl transition-all"
+                            >
+                                <Settings size={18} /> Group Settings
+                            </button>
+                        )}
+                        <button 
+                            onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${selectedChat.id}` : `/group/${selectedChat.id}/settings`); }}
+                            className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl transition-all"
+                        >
+                            <UserCircle2 size={18} /> View {selectedChat.type === 'dm' ? 'Profile' : 'Members'}
+                        </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-20" ref={scrollContainerRef}>
