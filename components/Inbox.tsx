@@ -10,7 +10,7 @@ import {
     Circle, Settings, Camera, Trash2, UserPlus, 
     Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
     SmilePlus, Paperclip, Play, Image as ImageIcon, Film, MoreVertical, Smile, AlertCircle,
-    VolumeX, Archive, Ban, Lock, Trash, UserCircle2
+    VolumeX, Archive, Ban, Lock, Trash, UserCircle2, ShieldCheck, Crown
 } from 'lucide-react';
 
 interface ChatItem {
@@ -79,6 +79,11 @@ export const Inbox: React.FC = () => {
   const [listMenuId, setListMenuId] = useState<string | null>(null);
   const [listMenuPos, setListMenuPos] = useState<{ x: number, y: number } | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Group Admin States
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isHost, setIsHost] = useState(false);
+  const [groupAdmins, setGroupAdmins] = useState<Record<string, boolean>>({});
 
   // Block & Social States
   const [following, setFollowing] = useState<Record<string, boolean>>({});
@@ -163,6 +168,29 @@ export const Inbox: React.FC = () => {
     if (!user || !activeChatId || !selectedChat) return null;
     return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
   }, [user, activeChatId, selectedChat]);
+
+  // Group Info Real-time Listener
+  useEffect(() => {
+      if (!activeChatId || !selectedChat || selectedChat.type !== 'group' || !user) {
+          setIsAdmin(false);
+          setIsHost(false);
+          setGroupAdmins({});
+          return;
+      }
+
+      const gRef = ref(database, `groupChats/${activeChatId}`);
+      const unsub = onValue(gRef, (snap) => {
+          if (snap.exists()) {
+              const data = snap.val();
+              const hosts = data.hostUid === user.uid;
+              const admins = data.admins?.[user.uid] || hosts;
+              setIsHost(hosts);
+              setIsAdmin(admins);
+              setGroupAdmins(data.admins || {});
+          }
+      });
+      return () => unsub();
+  }, [activeChatId, selectedChat, user]);
 
   // Real-time Presence Listeners for the sidebar list
   useEffect(() => {
@@ -497,8 +525,22 @@ export const Inbox: React.FC = () => {
     if (!currentChatId || !activeChatId || !selectedChat || !user) return;
     const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
     
+    // Check permissions
+    const msgRef = ref(database, `${basePath}/${currentChatId}/${msgId}`);
+    const msgSnap = await get(msgRef);
+    if (!msgSnap.exists()) return;
+    
+    const msgData = msgSnap.val();
+    const isOwner = msgData.senderUid === user.uid;
+    const canUnsend = isOwner || isAdmin || isHost;
+    
+    if (!canUnsend) {
+        alert("Only admins can delete other members' messages.");
+        return;
+    }
+
     // 1. Delete the message
-    await remove(ref(database, `${basePath}/${currentChatId}/${msgId}`));
+    await remove(msgRef);
     setUnsendConfirmId(null);
 
     // 2. Query remaining messages to find the new latest one
@@ -615,7 +657,10 @@ export const Inbox: React.FC = () => {
                         </div>
                         <div className="flex-1 flex flex-col text-left min-w-0 overflow-hidden">
                           <div className="flex justify-between items-center gap-2 mb-0.5 w-full">
-                            <span className={`font-bold truncate text-base flex-1 ${isSelected ? 'text-white' : 'text-neutral-200'} ${unreadCount > 0 ? 'text-white font-black' : ''}`}>{displayName}</span>
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                <span className={`font-bold truncate text-base ${isSelected ? 'text-white' : 'text-neutral-200'} ${unreadCount > 0 ? 'text-white font-black' : ''}`}>{displayName}</span>
+                                {chat.type === 'group' && <Users size={12} className="text-neutral-600 shrink-0" />}
+                            </div>
                             <div className="flex items-center gap-2 shrink-0">
                                 <span className={`text-[10px] uppercase font-black ${isSelected ? 'text-white/60' : 'text-neutral-500'} whitespace-nowrap`}>{chat.timestamp ? new Date(chat.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
                                 <div className="opacity-0 group-hover/item:opacity-100 transition-opacity z-10">
@@ -657,11 +702,47 @@ export const Inbox: React.FC = () => {
                 <div className="flex items-center gap-4 min-w-0">
                   <button onClick={() => { setActiveChatId(null); navigate('/inbox', { replace: true }); }} className="md:hidden p-2 text-neutral-500 hover:text-white transition-colors"><ArrowLeft size={24} /></button>
                   <div className="relative cursor-pointer" onClick={() => navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`)}>{(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL) ? <img src={selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : selectedChat.photoURL} className="w-10 h-10 md:w-11 md:h-11 rounded-full object-cover" /> : <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-neutral-800 flex items-center justify-center text-lg font-bold text-neutral-500">{(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.name : selectedChat.name)?.charAt(0) || '?'}</div>}{selectedChat.type === 'dm' && friendPresence?.online && !isCurrentChatBlocked && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950"></div>}</div>
-                  <div className="flex flex-col min-w-0"><span className="font-bold text-white truncate leading-tight text-base md:text-lg">{selectedChat.type === 'dm' ? (userProfiles[activeChatId]?.name || selectedChat.name) : selectedChat.name}</span><span className="text-[9px] md:text-[10px] uppercase font-black text-neutral-500 tracking-wider">{selectedChat.type === 'dm' ? (isCurrentChatBlocked ? 'Blocked' : friendPresence?.online ? 'Online' : 'Offline') : 'Group Chat'}</span></div>
+                  <div className="flex flex-col min-w-0">
+                      <span className="font-bold text-white truncate leading-tight text-base md:text-lg">{selectedChat.type === 'dm' ? (userProfiles[activeChatId]?.name || selectedChat.name) : selectedChat.name}</span>
+                      <div className="flex items-center gap-1.5">
+                        {selectedChat.type === 'group' && <Users size={10} className="text-neutral-500" />}
+                        <span className="text-[9px] md:text-[10px] uppercase font-black text-neutral-500 tracking-wider">
+                            {selectedChat.type === 'dm' ? (isCurrentChatBlocked ? 'Blocked' : friendPresence?.online ? 'Online' : 'Offline') : `${Object.keys(selectedChat?.members || {}).length} Members${isAdmin ? ' • Admin' : ''}`}
+                        </span>
+                      </div>
+                  </div>
                 </div>
-                <div className="relative"><button onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)} className={`p-3 rounded-2xl transition-all ${isHeaderMenuOpen ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}><MoreVertical size={20} /></button>{isHeaderMenuOpen && <div className="absolute right-0 top-full mt-2 w-48 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 z-[100]">{selectedChat.type === 'group' && <button onClick={() => { setIsHeaderMenuOpen(false); navigate(`/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Settings size={18} /> Group Settings</button>}<button onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><UserCircle2 size={18} /> View {selectedChat.type === 'dm' ? 'Profile' : 'Members'}</button></div>}</div>
+                <div className="flex items-center gap-2">
+                    {selectedChat.type === 'group' && isAdmin && (
+                        <button onClick={() => navigate(`/group/${activeChatId}/settings`)} className="hidden md:flex items-center gap-2 px-4 py-2 bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-xl text-xs font-black uppercase tracking-widest transition-all">
+                           <UserPlus size={14} /> Add People
+                        </button>
+                    )}
+                    <div className="relative">
+                        <button onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)} className={`p-3 rounded-2xl transition-all ${isHeaderMenuOpen ? 'bg-white/10 text-white' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`}><MoreVertical size={20} /></button>
+                        {isHeaderMenuOpen && (
+                        <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1a1a]/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-1 z-[100] animate-in zoom-in-95">
+                            {selectedChat.type === 'group' && <button onClick={() => { setIsHeaderMenuOpen(false); navigate(`/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl transition-colors"><Settings size={18} /> Group Details</button>}
+                            <button onClick={() => { setIsHeaderMenuOpen(false); navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl transition-colors"><UserCircle2 size={18} /> View {selectedChat.type === 'dm' ? 'Profile' : 'Members'}</button>
+                        </div>
+                        )}
+                    </div>
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-20" ref={scrollContainerRef}>{messages.map((msg, index) => { const isMe = msg.senderUid === user?.uid; const reactions = msg.reactions ? Object.entries(msg.reactions) : []; const isLastSentByMe = msg.id === lastSentMessageByMe?.id; const senderProfile = userProfiles[msg.senderUid]; return ( <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-2`}><div className={`flex gap-3 max-w-[90%] md:max-w-[75%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>{(selectedChat.type === 'group' || (!isMe && selectedChat.type === 'dm')) && <div className="shrink-0 self-end mb-1">{senderProfile?.photoURL ? <img src={senderProfile.photoURL} className="w-8 h-8 rounded-full border border-white/5 object-cover" /> : <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] font-bold text-neutral-500">{senderProfile?.name?.charAt(0) || msg.senderName?.charAt(0) || '?'}</div>}</div>}<div className="flex flex-col min-w-0 relative">{selectedChat.type === 'group' && !isMe && <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3 mb-1">{senderProfile?.name || msg.senderName}</span>}<div onDoubleClick={() => handleReaction(msg.id, '❤️')} className={`flex flex-col rounded-[22px] relative shadow-lg cursor-pointer ${isMe ? 'bg-indigo-600 text-white rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-bl-lg border border-white/5'}`}>{msg.replyTo && <div className="mx-1 mt-1 px-3 py-2 rounded-[18px] bg-black/20 border-l-4 border-indigo-400 mb-1"><p className="text-[10px] font-black uppercase text-indigo-400">{msg.replyTo.senderName}</p><p className="text-xs truncate opacity-70">{msg.replyTo.text}</p></div>}{msg.attachment && <div className="p-1">{msg.attachment.type === 'image' ? <img src={msg.attachment.url} className="max-w-full rounded-[18px] max-h-[300px] object-cover" /> : <div className="relative group/vid"><video src={msg.attachment.url} className="max-w-full rounded-[18px] max-h-[300px] object-cover" /><div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/vid:opacity-100 bg-black/20"><button onClick={(e) => { e.stopPropagation(); const vid = e.currentTarget.parentElement?.previousElementSibling as HTMLVideoElement; if (vid.paused) vid.play(); else vid.pause(); }} className="p-4 bg-black/40 text-white rounded-full"><Play fill="currentColor" size={24} /></button></div></div>}</div>}<div className="px-4 py-2.5"><p className="inline-block whitespace-pre-wrap text-sm select-none">{msg.text}</p></div>{reactions.length > 0 && <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex gap-1 bg-neutral-900 border border-white/10 rounded-full px-1.5 py-0.5 shadow-xl z-10 hover:bg-neutral-800 cursor-pointer`} onClick={(e) => openReactionPicker(e, msg.id, isMe)}>{reactions.map(([uid, emoji]) => <span key={uid} className="text-[10px] animate-reaction-bounce">{emoji as string}</span>)}</div>}<div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20 ${isMe ? 'right-full mr-2' : 'left-full ml-2'}`}><button onClick={() => handleReplyClick(msg)} className="p-2 text-neutral-500 hover:text-white rounded-full transition-all"><Reply size={16} /></button><button onClick={(e) => openReactionPicker(e, msg.id, isMe)} className="p-2 text-neutral-500 hover:text-white rounded-full transition-all"><SmilePlus size={16} /></button>{isMe && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-2 text-neutral-500 hover:text-red-400 rounded-full transition-all"><Trash size={16} /></button>}</div></div></div></div>{isLastSentByMe && <div className="flex items-center gap-1 mt-1 mr-1 text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{msg.seen ? <><CheckCheck size={12} className="text-indigo-500" /> Seen</> : <><Check size={12} /> Sent</>}</div>}</div> ); })}<div ref={messagesEndRef} /></div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-20" ref={scrollContainerRef}>{messages.map((msg, index) => { 
+                  const isMe = msg.senderUid === user?.uid; 
+                  const reactions = msg.reactions ? Object.entries(msg.reactions) : []; 
+                  const isLastSentByMe = msg.id === lastSentMessageByMe?.id; 
+                  const senderProfile = userProfiles[msg.senderUid]; 
+                  const senderIsHost = groupAdmins.hostUid === msg.senderUid;
+                  const senderIsAdmin = groupAdmins[msg.senderUid] || senderIsHost;
+
+                  return ( <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-2`}><div className={`flex gap-3 max-w-[90%] md:max-w-[75%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>{(selectedChat.type === 'group' || (!isMe && selectedChat.type === 'dm')) && <div className="shrink-0 self-end mb-1 cursor-pointer" onClick={() => navigate(`/profile/${msg.senderUid}`)}>{senderProfile?.photoURL ? <img src={senderProfile.photoURL} className="w-8 h-8 rounded-full border border-white/5 object-cover" /> : <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] font-bold text-neutral-500">{senderProfile?.name?.charAt(0) || msg.senderName?.charAt(0) || '?'}</div>}</div>}<div className="flex flex-col min-w-0 relative">{selectedChat.type === 'group' && !isMe && (
+                      <div className="flex items-center gap-2 ml-3 mb-1">
+                        <span className="text-[10px] font-black text-neutral-500 uppercase tracking-widest">{senderProfile?.name || msg.senderName}</span>
+                        {senderIsHost ? <Crown size={10} className="text-amber-500" /> : senderIsAdmin ? <ShieldCheck size={10} className="text-indigo-400" /> : null}
+                      </div>
+                  )}<div onDoubleClick={() => handleReaction(msg.id, '❤️')} className={`flex flex-col rounded-[22px] relative shadow-lg cursor-pointer ${isMe ? 'bg-indigo-600 text-white rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-bl-lg border border-white/5'}`}>{msg.replyTo && <div className="mx-1 mt-1 px-3 py-2 rounded-[18px] bg-black/20 border-l-4 border-indigo-400 mb-1"><p className="text-[10px] font-black uppercase text-indigo-400">{msg.replyTo.senderName}</p><p className="text-xs truncate opacity-70">{msg.replyTo.text}</p></div>}{msg.attachment && <div className="p-1">{msg.attachment.type === 'image' ? <img src={msg.attachment.url} className="max-w-full rounded-[18px] max-h-[300px] object-cover" /> : <div className="relative group/vid"><video src={msg.attachment.url} className="max-w-full rounded-[18px] max-h-[300px] object-cover" /><div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/vid:opacity-100 bg-black/20"><button onClick={(e) => { e.stopPropagation(); const vid = e.currentTarget.parentElement?.previousElementSibling as HTMLVideoElement; if (vid.paused) vid.play(); else vid.pause(); }} className="p-4 bg-black/40 text-white rounded-full"><Play fill="currentColor" size={24} /></button></div></div>}</div>}<div className="px-4 py-2.5"><p className="inline-block whitespace-pre-wrap text-sm select-none">{msg.text}</p></div>{reactions.length > 0 && <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex gap-1 bg-neutral-900 border border-white/10 rounded-full px-1.5 py-0.5 shadow-xl z-10 hover:bg-neutral-800 cursor-pointer`} onClick={(e) => openReactionPicker(e, msg.id, isMe)}>{reactions.map(([uid, emoji]) => <span key={uid} className="text-[10px] animate-reaction-bounce">{emoji as string}</span>)}</div>}<div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-opacity z-20 ${isMe ? 'right-full mr-2' : 'left-full ml-2'}`}><button onClick={() => handleReplyClick(msg)} className="p-2 text-neutral-500 hover:text-white rounded-full transition-all"><Reply size={16} /></button><button onClick={(e) => openReactionPicker(e, msg.id, isMe)} className="p-2 text-neutral-500 hover:text-white rounded-full transition-all"><SmilePlus size={16} /></button>{(isMe || isAdmin || isHost) && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-2 text-neutral-500 hover:text-red-400 rounded-full transition-all"><Trash size={16} /></button>}</div></div></div></div>{isLastSentByMe && <div className="flex items-center gap-1 mt-1 mr-1 text-[10px] font-bold text-neutral-500 uppercase tracking-widest">{msg.seen ? <><CheckCheck size={12} className="text-indigo-500" /> Seen</> : <><Check size={12} /> Sent</>}</div>}</div> ); })}<div ref={messagesEndRef} /></div>
               <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
                 <div className="max-w-5xl mx-auto flex flex-col gap-2 relative">
                   {showEmojiPicker && (
