@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ref, onValue, update, onDisconnect } from "firebase/database";
 import { database } from "../firebase";
@@ -18,6 +18,12 @@ export const Layout: React.FC = () => {
   const [archivedChats, setArchivedChats] = useState<Record<string, boolean>>({});
   const [profileImage, setProfileImage] = useState(user?.photoURL);
 
+  const prevUnreadCount = useRef(0);
+
+  // Get current active chat from URL if in /inbox
+  const queryParams = new URLSearchParams(location.search);
+  const activeChatId = queryParams.get('chatId');
+
   // Sync profile image
   useEffect(() => {
     if (user) {
@@ -29,6 +35,13 @@ export const Layout: React.FC = () => {
         return () => unsub();
     }
   }, [user]);
+
+  // --- Notification Permissions ---
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+    }
+  }, []);
 
   // --- Global Presence System ---
   useEffect(() => {
@@ -63,7 +76,6 @@ export const Layout: React.FC = () => {
           return;
       }
 
-      // Live listeners for inbox and social constraints
       const unsubInbox = onValue(ref(database, `userInboxes/${user.uid}`), (snap) => {
           setInboxData(snap.val() || {});
       });
@@ -89,7 +101,6 @@ export const Layout: React.FC = () => {
   }, [user]);
 
   // Calculate distinct unread conversations based on visibility filters
-  // Resetting count when the relevant conversation is opened is handled by update(..., {unreadCount: 0}) in Inbox.tsx
   const inboxUnread = useMemo(() => {
       let count = 0;
       Object.entries(inboxData).forEach(([chatId, chat]: [string, any]) => {
@@ -99,15 +110,45 @@ export const Layout: React.FC = () => {
           const isMutual = following[chatId] && followers[chatId];
           const isArchived = archivedChats[chatId];
 
-          // Badge visibility rules: only show for items currently visible in the main inbox view
-          const isVisibleInMain = isGroup || (isMutual && !isArchived);
+          // Visibility rules: only count if it shows in main list
+          const isVisible = isGroup || (isMutual && !isArchived);
 
-          if (isVisibleInMain && typeof chat.unreadCount === 'number' && chat.unreadCount > 0) {
+          // We count the CONVERSATION as 1 if it has ANY unread messages
+          if (isVisible && typeof chat.unreadCount === 'number' && chat.unreadCount > 0) {
               count++;
           }
       });
       return count;
   }, [inboxData, following, followers, archivedChats]);
+
+  // Handle Notifications and Title updates
+  useEffect(() => {
+    // Update Document Title
+    if (inboxUnread > 0) {
+        document.title = `(${inboxUnread}) FocusFlow`;
+    } else {
+        document.title = `FocusFlow`;
+    }
+
+    // Trigger System Notification if count increased
+    if (inboxUnread > prevUnreadCount.current) {
+        // Find which chat just updated
+        Object.entries(inboxData).forEach(([chatId, chat]: [string, any]) => {
+            const isVisible = chat.type === 'group' || (following[chatId] && followers[chatId] && !archivedChats[chatId]);
+            
+            // If this chat is the one with new messages and it's NOT the one we are currently looking at
+            if (isVisible && chat.unreadCount > 0 && chatId !== activeChatId) {
+                if (Notification.permission === "granted" && document.hidden) {
+                    new Notification("New Message", {
+                        body: `${chat.name}: ${chat.lastMessage?.text || 'Sent an attachment'}`,
+                        icon: chat.photoURL || '/favicon.ico'
+                    });
+                }
+            }
+        });
+    }
+    prevUnreadCount.current = inboxUnread;
+  }, [inboxUnread, inboxData, activeChatId, following, followers, archivedChats]);
 
   const NavItem = ({ icon: Icon, path, label, badge }: { icon: any, path: string, label: string, badge?: number }) => {
       const isActive = location.pathname === path;
