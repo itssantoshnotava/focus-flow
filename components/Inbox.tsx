@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ref, onValue, push, update, get, set, remove, query, limitToLast, onChildAdded, onChildChanged, onChildRemoved } from "firebase/database";
+import { ref, onValue, push, update, get, set, remove } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
-    Send, MessageCircle, ArrowLeft, Users, Plus, CheckCircle2, 
-    Circle, Settings, Camera, Trash2, UserPlus, 
-    Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
-    SmilePlus, Paperclip, Play, Image as ImageIcon, Film, MoreVertical, Smile, AlertCircle,
-    VolumeX, Archive, Ban, Lock, Trash, UserCircle2, ShieldCheck, Crown, ArchiveRestore
+    Send, MessageCircle, ArrowLeft, Users, Plus, X, Check, CheckCheck, Reply,
+    SmilePlus, Paperclip, MoreVertical, Smile, AlertCircle, Archive, Trash, 
+    UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings
 } from 'lucide-react';
 
 interface ChatItem {
@@ -35,6 +33,9 @@ const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉
 const COMMON_EMOJIS = [
   '😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', '🤭', '🤫', '🤥', '😶', '😐', '😑', '😬', '🙄', '😯', '😦', '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴', '🤢', '🤮', '🤧', '🥵', '🥶', '😷', '🤒', '🤕', '🤑', '🤠', '😈', '👿', '👹', '👺', '🤡', '💩', '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹', '😻', '😼', '😽', '🙀', '😿', '😾', '👋', '🤚', '🖐', '✋', '🖖', '👌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🦵', '🦿', '🦶', '👂', '🦻', '👃', '🧠', '🦷', '🦴', '👀', '👁', '👅', '👄', '💋', '🩸', '💖', '💗', '💓', '💞', '💕', '💟', '❣️', '💔', '❤️', '🧡', '💛', '💚', '💙', '💜', '🤎', '🖤', '🤍', '💯', '💢', '💥', '💫', '💦', '💨', '🕳', '💣', '💬', '👁️‍🗨️', '🗨', '🗯', '💭', '💤'
 ];
+
+// Persistent drafts between chat switches
+const draftsStore: Record<string, string> = {};
 
 export const Inbox: React.FC = () => {
   const { user } = useAuth();
@@ -84,6 +85,13 @@ export const Inbox: React.FC = () => {
     return chats.find(c => c.id === activeChatId) || null;
   }, [chats, activeChatId]);
 
+  // --- AUTO FOCUS ON REPLY ---
+  useEffect(() => {
+    if (replyingTo && messageInputRef.current) {
+        messageInputRef.current.focus();
+    }
+  }, [replyingTo]);
+
   // --- SCROLL MANAGEMENT ---
   const isOpeningChat = useRef(false);
 
@@ -115,7 +123,6 @@ export const Inbox: React.FC = () => {
             setChats(list.sort((a, b) => (b.lastMessageAt || 0) - (a.lastMessageAt || 0)));
             
             list.forEach(chat => {
-                // Profile & Presence Sync
                 onValue(ref(database, `users/${chat.id}`), (uSnap) => {
                     if (uSnap.exists()) setUserProfiles(prev => ({ ...prev, [chat.id]: uSnap.val() }));
                 });
@@ -164,6 +171,16 @@ export const Inbox: React.FC = () => {
     return () => unsub();
   }, [activeChatId, currentConvoId, user, selectedChat?.type]);
 
+  // --- DRAFT MANAGEMENT ---
+  const handleSelectChat = (chatId: string) => {
+    if (activeChatId) {
+        draftsStore[activeChatId] = inputText;
+    }
+    setInputText(draftsStore[chatId] || '');
+    setActiveChatId(chatId);
+    navigate(`/inbox?chatId=${chatId}`, { replace: true });
+  };
+
   const addEmoji = (emoji: string) => {
     setInputText(prev => prev + emoji);
     setTimeout(() => {
@@ -180,7 +197,11 @@ export const Inbox: React.FC = () => {
     if (!inputText.trim() || !user || !activeChatId || !selectedChat || !currentConvoId) return;
     const msgText = inputText.trim();
     const ts = Date.now();
+    
+    // Clear draft for this chat
+    delete draftsStore[activeChatId];
     setInputText('');
+    
     const msgData = { 
         text: msgText, senderUid: user.uid, senderName: user.displayName, timestamp: ts, seen: false,
         replyTo: replyingTo ? { id: replyingTo.id, text: replyingTo.text, senderName: replyingTo.senderName } : null 
@@ -209,7 +230,8 @@ export const Inbox: React.FC = () => {
   };
 
   const handleUnsend = async (msgId: string) => {
-    const path = selectedChat?.type === 'dm' ? `messages/${currentConvoId}/${msgId}` : `groupMessages/${activeChatId}/${msgId}`;
+    if (!currentConvoId || !selectedChat) return;
+    const path = selectedChat.type === 'dm' ? `messages/${currentConvoId}/${msgId}` : `groupMessages/${activeChatId}/${msgId}`;
     await remove(ref(database, path));
     setUnsendConfirmId(null);
   };
@@ -229,7 +251,8 @@ export const Inbox: React.FC = () => {
   };
 
   const handleReaction = async (msgId: string, emoji: string) => {
-    const path = selectedChat?.type === 'dm' ? `messages/${currentConvoId}/${msgId}/reactions/${user!.uid}` : `groupMessages/${activeChatId}/${msgId}/reactions/${user!.uid}`;
+    if (!currentConvoId || !user) return;
+    const path = selectedChat?.type === 'dm' ? `messages/${currentConvoId}/${msgId}/reactions/${user.uid}` : `groupMessages/${activeChatId}/${msgId}/reactions/${user.uid}`;
     const snap = await get(ref(database, path));
     if (snap.exists() && snap.val() === emoji) await remove(ref(database, path));
     else await set(ref(database, path), emoji);
@@ -272,8 +295,8 @@ export const Inbox: React.FC = () => {
             return (
               <div key={chat.id} className="group/tile relative">
                   <button 
-                    onClick={() => { setActiveChatId(chat.id); navigate(`/inbox?chatId=${chat.id}`, { replace: true }); }} 
-                    className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10' : 'hover:bg-white/[0.04] border-transparent'}`}
+                    onClick={() => handleSelectChat(chat.id)} 
+                    className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10 shadow-lg' : 'hover:bg-white/[0.04] border-transparent'}`}
                   >
                     <div className="relative shrink-0">
                       {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name.charAt(0)}</div>}
@@ -330,11 +353,11 @@ export const Inbox: React.FC = () => {
                    <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                       {!isMe && (
                         <div className="shrink-0 self-end mb-1">
-                          {senderPfp ? <img src={senderPfp} className="w-8 h-8 rounded-full object-cover border border-white/5" /> : <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] font-bold text-neutral-500">?</div>}
+                          {senderPfp ? <img src={senderPfp} className="w-8 h-8 rounded-full object-cover border border-white/5 shadow-md" /> : <div className="w-8 h-8 rounded-full bg-neutral-800 flex items-center justify-center text-[10px] font-bold text-neutral-500">?</div>}
                         </div>
                       )}
                       <div className="flex flex-col min-w-0 relative">
-                        <div onDoubleClick={() => handleReaction(msg.id, '❤️')} className={`rounded-[22px] px-4 py-2.5 shadow-lg cursor-pointer relative ${isMe ? 'bg-indigo-600 text-white rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-bl-lg border border-white/5'}`}>
+                        <div onDoubleClick={() => handleReaction(msg.id, '❤️')} className={`rounded-[22px] px-4 py-2.5 shadow-lg cursor-pointer relative transition-all active:scale-[0.99] ${isMe ? 'bg-indigo-600 text-white rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-bl-lg border border-white/5'}`}>
                             {msg.replyTo && (
                                 <div className="bg-white/5 rounded-lg py-1 px-2.5 mb-2 border-l-2 border-indigo-500/50 text-[11px] italic opacity-80 inline-block max-w-full truncate">
                                     <span className="block font-black uppercase text-[7px] not-italic text-indigo-400 mb-0.5">{msg.replyTo.senderName}</span>
@@ -363,8 +386,21 @@ export const Inbox: React.FC = () => {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Footer Input */}
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
               <div className="max-w-5xl mx-auto flex flex-col gap-2 relative">
+                  {showEmojiPicker && (
+                    <div ref={emojiPickerRef} className="absolute bottom-full mb-4 right-0 w-80 h-96 bg-[#1a1a1a]/80 backdrop-blur-[30px] border border-white/10 rounded-[32px] shadow-2xl flex flex-col overflow-hidden z-50 animate-in slide-in-from-bottom-4">
+                      <div className="flex items-center justify-between p-4 border-b border-white/5">
+                        <span className="text-[10px] font-black uppercase text-neutral-500 tracking-widest">Emojis</span>
+                        <button onClick={() => setShowEmojiPicker(false)} className="text-neutral-500 hover:text-white"><X size={16} /></button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-3 custom-scrollbar grid grid-cols-6 gap-1">
+                        {COMMON_EMOJIS.map(e => <button key={e} onClick={() => addEmoji(e)} className="p-2 hover:bg-white/10 rounded-2xl text-xl transition-all active:scale-90">{e}</button>)}
+                      </div>
+                    </div>
+                  )}
+
                   {replyingTo && (
                     <div className="flex items-center justify-between bg-white/[0.04] backdrop-blur-3xl px-4 py-2 rounded-[18px] border border-white/5 mb-2 animate-in slide-in-from-bottom-2">
                         <div className="flex items-center gap-3 overflow-hidden">
@@ -378,20 +414,52 @@ export const Inbox: React.FC = () => {
                     </div>
                   )}
                   <div className="flex gap-3 items-end">
-                    <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end">
+                    <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end shadow-inner">
                       <button onClick={() => {}} className="p-3 text-neutral-500 hover:text-indigo-400"><Paperclip size={20} /></button>
                       <textarea ref={messageInputRef} rows={1} value={inputText} onChange={e => { setInputText(e.target.value); e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }} placeholder="Message..." className="flex-1 bg-transparent border-none text-white text-[15px] px-3 py-2.5 focus:outline-none resize-none max-h-40 overflow-y-auto custom-scrollbar" />
                       <button ref={emojiButtonRef} onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`p-3 rounded-full transition-colors ${showEmojiPicker ? 'text-indigo-400 bg-white/10' : 'text-neutral-500 hover:text-indigo-400'}`}><Smile size={20} /></button>
                     </div>
-                    <button onClick={() => sendMessage()} disabled={!inputText.trim()} className={`p-4 rounded-full transition-all shadow-lg active:scale-95 ${inputText.trim() ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-600'}`}><Send size={20} /></button>
+                    <button onClick={() => sendMessage()} disabled={!inputText.trim()} className={`p-4 rounded-full transition-all shadow-lg active:scale-95 ${inputText.trim() ? 'bg-indigo-600 text-white shadow-indigo-900/40' : 'bg-neutral-800 text-neutral-600'}`}><Send size={20} /></button>
                   </div>
               </div>
           </div>
         </div>
       ) : ( <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-neutral-950 text-center px-12"><MessageCircle size={48} className="text-neutral-800 mb-4 opacity-50" /><h2 className="text-2xl font-black text-white mb-2">Select a conversation</h2><p className="text-neutral-600 text-sm">Choose a friend or group to start chatting.</p></div> )}
 
+      {/* Reaction Picker Portal */}
+      {activeReactionPickerId && reactionPickerPos && createPortal(
+          <div className="fixed inset-0 z-[1000]">
+            <div className="absolute inset-0 bg-transparent" onClick={() => setActiveReactionPickerId(null)}></div>
+            <div 
+                style={{ position: 'fixed', top: `${reactionPickerPos.y - 60}px`, left: reactionPickerPos.isMe ? `${reactionPickerPos.x - 240}px` : `${reactionPickerPos.x}px` }} 
+                className="bg-neutral-900/90 backdrop-blur-xl border border-white/10 rounded-full p-1.5 shadow-2xl flex gap-1 animate-in zoom-in"
+            >
+                {REACTION_EMOJIS.map(e => (
+                    <button key={e} onClick={() => handleReaction(activeReactionPickerId, e)} className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full text-xl transition-transform hover:scale-125 active:scale-90">
+                        {e}
+                    </button>
+                ))}
+            </div>
+          </div>, document.body
+      )}
+
+      {/* Unsend Confirmation Portal */}
+      {unsendConfirmId && createPortal(
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+              <div className="bg-neutral-900 border border-white/10 rounded-[32px] p-8 max-w-xs w-full text-center shadow-2xl animate-in zoom-in duration-200">
+                  <div className="w-16 h-16 bg-red-500/10 rounded-[24px] flex items-center justify-center mx-auto mb-6"><AlertCircle size={32} className="text-red-500" /></div>
+                  <h3 className="text-xl font-black text-white mb-2">Unsend message?</h3>
+                  <p className="text-neutral-400 text-sm mb-8">This will remove the message for everyone in this chat.</p>
+                  <div className="flex flex-col gap-2">
+                      <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all active:scale-95 shadow-lg shadow-red-900/20">Unsend</button>
+                      <button onClick={() => setUnsendConfirmId(null)} className="w-full py-3.5 bg-neutral-800 text-neutral-400 hover:text-white rounded-2xl transition-all">Cancel</button>
+                  </div>
+              </div>
+          </div>, document.body
+      )}
+
       {sidebarMenuId && sidebarMenuPos && createPortal(
-          <div className="fixed inset-0 z-[1000]"><div className="absolute inset-0 bg-transparent" onClick={() => setSidebarMenuId(null)}></div><div style={{ position: 'fixed', top: `${sidebarMenuPos.y + 8}px`, left: `${sidebarMenuPos.x - 160}px` }} className="w-40 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 animate-in zoom-in">{archivedChats[sidebarMenuId] ? <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><ArchiveRestore size={16} /> Unarchive</button> : <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Archive size={16} /> Archive</button>}<button onClick={() => handleDeleteChat(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 rounded-xl"><Trash2 size={16} /> Delete</button></div></div>, document.body
+          <div className="fixed inset-0 z-[1000]"><div className="absolute inset-0 bg-transparent" onClick={() => setSidebarMenuId(null)}></div><div style={{ position: 'fixed', top: `${sidebarMenuPos.y + 8}px`, left: `${sidebarMenuPos.x - 160}px` }} className="w-40 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 animate-in zoom-in">{archivedChats[sidebarMenuId] ? <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><ArchiveRestore size={16} /> Unarchive</button> : <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Archive size={16} /> Archive</button>}<button onClick={() => handleDeleteChat(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 rounded-xl"><Trash size={16} /> Delete</button></div></div>, document.body
       )}
     </div>
   );
