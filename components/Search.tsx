@@ -1,8 +1,10 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
-import { ref, get, set, onValue, remove } from "firebase/database";
+// Added missing 'update' import from firebase/database
+import { ref, get, set, onValue, remove, update } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
-import { Search as SearchIcon, Sparkles, Users, ArrowRight, Loader2, UserCircle2, Check, UserPlus } from 'lucide-react';
+import { Search as SearchIcon, Sparkles, Users, ArrowRight, Loader2, UserCircle2, Check, UserPlus, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const SearchPage: React.FC = () => {
@@ -15,18 +17,22 @@ export const SearchPage: React.FC = () => {
   const [discoverUsers, setDiscoverUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [following, setFollowing] = useState<Record<string, boolean>>({});
+  const [myRequests, setMyRequests] = useState<Record<string, boolean>>({});
   const [discoverLimit, setDiscoverLimit] = useState(5);
 
   // --- Data Sync ---
 
-  // 1. Listen to My Following
+  // 1. Listen to My Following & Sent Requests
   useEffect(() => {
     if (!user) return;
     const followingRef = ref(database, `following/${user.uid}`);
-    const unsub = onValue(followingRef, (snapshot) => {
+    onValue(followingRef, (snapshot) => {
         setFollowing(snapshot.val() || {});
     });
-    return () => unsub();
+
+    // We check sent requests by looking at target's nodes. 
+    // This is hard to listen to globally for all users, so we check specifically when needed or use a separate 'sentRequests' node.
+    // For simplicity and efficiency in this app scale, let's just listen to following.
   }, [user]);
 
   // 2. Discovery Logic
@@ -87,26 +93,38 @@ export const SearchPage: React.FC = () => {
     }
   };
 
-  const handleFollowToggle = async (e: React.MouseEvent, targetUid: string) => {
+  const handleFollowRequest = async (e: React.MouseEvent, targetUid: string) => {
     e.stopPropagation();
     if (!user) return;
     
-    const isCurrentlyFollowing = following[targetUid];
-    const myFollowingRef = ref(database, `following/${user.uid}/${targetUid}`);
-    const theirFollowersRef = ref(database, `followers/${targetUid}/${user.uid}`);
-
-    if (isCurrentlyFollowing) {
-        await remove(myFollowingRef);
-        await remove(theirFollowersRef);
-    } else {
-        await set(myFollowingRef, true);
-        await set(theirFollowersRef, true);
-    }
+    const requestRef = ref(database, `followRequests/${targetUid}/${user.uid}`);
+    await set(requestRef, {
+        name: user.displayName,
+        photoURL: user.photoURL,
+        timestamp: Date.now()
+    });
+    setMyRequests(prev => ({ ...prev, [targetUid]: true }));
   };
 
-  // Fixed: Typing sub-component as React.FC ensures React handles the reserved 'key' prop correctly in list iterations
+  const handleUnfollow = async (e: React.MouseEvent, targetUid: string) => {
+    e.stopPropagation();
+    if (!user) return;
+    const updates: any = {};
+    updates[`following/${user.uid}/${targetUid}`] = null;
+    updates[`followers/${targetUid}/${user.uid}`] = null;
+    // The 'update' function is now imported correctly above
+    await update(ref(database), updates);
+  };
+
   const UserCard: React.FC<{ u: any }> = ({ u }) => {
     const isFollowed = following[u.uid];
+    const [isRequested, setIsRequested] = useState(myRequests[u.uid] || false);
+
+    useEffect(() => {
+        if (!user || isFollowed) return;
+        const reqRef = ref(database, `followRequests/${u.uid}/${user.uid}`);
+        get(reqRef).then(snap => setIsRequested(snap.exists()));
+    }, [u.uid, isFollowed]);
     
     return (
       <div 
@@ -130,11 +148,16 @@ export const SearchPage: React.FC = () => {
         </div>
 
         <button 
-            onClick={(e) => handleFollowToggle(e, u.uid)}
-            className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg transition-all active:scale-95 relative z-10 ${isFollowed ? 'bg-neutral-800 text-neutral-400 border border-white/5' : 'bg-indigo-600 text-white shadow-lg'}`}
+            onClick={(e) => isFollowed ? handleUnfollow(e, u.uid) : handleFollowRequest(e, u.uid)}
+            disabled={isRequested && !isFollowed}
+            className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg transition-all active:scale-95 relative z-10 ${
+                isFollowed ? 'bg-neutral-800 text-neutral-400 border border-white/5' : 
+                isRequested ? 'bg-neutral-900 text-neutral-600 border border-white/5' :
+                'bg-indigo-600 text-white shadow-lg'
+            }`}
         >
-            {isFollowed ? <Check size={14} /> : <UserPlus size={14} />}
-            <span>{isFollowed ? 'Following' : 'Follow'}</span>
+            {isFollowed ? <Check size={14} /> : isRequested ? <Clock size={14} /> : <UserPlus size={14} />}
+            <span>{isFollowed ? 'Following' : isRequested ? 'Requested' : 'Follow'}</span>
         </button>
       </div>
     );

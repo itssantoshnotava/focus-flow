@@ -7,9 +7,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { getZodiacSign } from '../utils/zodiac';
 import { 
+  sendFollowRequest, unfollowUser, removeFollower, followBack 
+} from '../utils/followActions';
+import { 
   Camera, Edit2, Save, X, Settings, 
   Calendar, Sparkles, Flame, User, Trophy, MessageCircle, Loader2, Ban, 
-  Users as UsersIcon, ArrowLeft, ChevronRight, Unlock
+  Users as UsersIcon, ArrowLeft, ChevronRight, Unlock, UserMinus, UserPlus, Clock, Lock
 } from 'lucide-react';
 
 export const Profile: React.FC = () => {
@@ -26,6 +29,7 @@ export const Profile: React.FC = () => {
   // Follower/Following States
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowedBy, setIsFollowedBy] = useState(false);
+  const [hasSentRequest, setHasSentRequest] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   
@@ -34,7 +38,7 @@ export const Profile: React.FC = () => {
   const [listUsers, setListUsers] = useState<any[]>([]);
   const [listLoading, setListLoading] = useState(false);
 
-  // Block states (viewer perspective)
+  // Block states
   const [isBlockingThem, setIsBlockingThem] = useState(false);
   const [isBlockedByThem, setIsBlockedByThem] = useState(false);
 
@@ -61,35 +65,31 @@ export const Profile: React.FC = () => {
     });
 
     // Followers Count
-    const followersRef = ref(database, `followers/${uid}`);
-    const unsubFollowersCount = onValue(followersRef, (snap) => {
+    onValue(ref(database, `followers/${uid}`), (snap) => {
         setFollowersCount(snap.exists() ? Object.keys(snap.val()).length : 0);
     });
 
     // Following Count
-    const followingRef = ref(database, `following/${uid}`);
-    const unsubFollowingCount = onValue(followingRef, (snap) => {
+    onValue(ref(database, `following/${uid}`), (snap) => {
         setFollowingCount(snap.exists() ? Object.keys(snap.val()).length : 0);
     });
 
-    // Check relationship with current user
     if (user && !isMe) {
-        // Do I follow them?
+        // Am I following them?
         onValue(ref(database, `following/${user.uid}/${uid}`), (snap) => setIsFollowing(snap.exists()));
-        // Do they follow me?
-        onValue(ref(database, `following/${uid}/${user.uid}`), (snap) => setIsFollowedBy(snap.exists()));
+        // Do they follow me? (Am I in their following list? Or are they in my followers?)
+        // Path: followers/{myUid}/{uid} = true means uid follows me.
+        onValue(ref(database, `followers/${user.uid}/${uid}`), (snap) => setIsFollowedBy(snap.exists()));
+        // Did I send a request?
+        onValue(ref(database, `followRequests/${uid}/${user.uid}`), (snap) => setHasSentRequest(snap.exists()));
 
-        // Block logic (One-way)
-        // 1. Did I block them?
         onValue(ref(database, `blocks/${user.uid}/${uid}`), (snap) => setIsBlockingThem(snap.exists()));
-        // 2. Did they block me?
         onValue(ref(database, `blocks/${uid}/${user.uid}`), (snap) => setIsBlockedByThem(snap.exists()));
     }
 
     return () => unsub();
   }, [uid, user, isMe]);
 
-  // Fetch users for list view
   useEffect(() => {
     if (listView === 'none' || !uid) return;
     setListLoading(true);
@@ -105,17 +105,30 @@ export const Profile: React.FC = () => {
     });
   }, [listView, uid]);
 
-  const handleFollowToggle = async () => {
+  const handleFollowAction = async () => {
     if (!user || !uid || isMe || isBlockingThem || isBlockedByThem) return;
-    const myFollowingRef = ref(database, `following/${user.uid}/${uid}`);
-    const theirFollowersRef = ref(database, `followers/${uid}/${user.uid}`);
+    
     if (isFollowing) {
-        await remove(myFollowingRef);
-        await remove(theirFollowersRef);
+      await unfollowUser(user.uid, uid);
+    } else if (hasSentRequest) {
+      // Logic for canceling request can go here if needed
+    } else if (isFollowedBy) {
+      await followBack(user.uid, uid);
     } else {
-        await set(myFollowingRef, true);
-        await set(theirFollowersRef, true);
+      await sendFollowRequest(user.uid, user.displayName || 'User', user.photoURL, uid);
     }
+  };
+
+  const handleUnfollowInList = async (targetUid: string) => {
+    if (!user) return;
+    await unfollowUser(user.uid, targetUid);
+    setListUsers(prev => prev.filter(u => u.uid !== targetUid));
+  };
+
+  const handleRemoveFollowerInList = async (targetUid: string) => {
+    if (!user) return;
+    await removeFollower(user.uid, targetUid);
+    setListUsers(prev => prev.filter(u => u.uid !== targetUid));
   };
 
   const handleBlockToggle = async () => {
@@ -125,11 +138,15 @@ export const Profile: React.FC = () => {
         await remove(blockRef);
     } else {
         await set(blockRef, true);
-        // Force unfollow when blocking
-        await remove(ref(database, `following/${user.uid}/${uid}`));
-        await remove(ref(database, `followers/${uid}/${user.uid}`));
-        await remove(ref(database, `following/${uid}/${user.uid}`));
-        await remove(ref(database, `followers/${user.uid}/${uid}`));
+        // Wipe relationships
+        const updates: any = {};
+        updates[`following/${user.uid}/${uid}`] = null;
+        updates[`followers/${uid}/${user.uid}`] = null;
+        updates[`following/${uid}/${user.uid}`] = null;
+        updates[`followers/${user.uid}/${uid}`] = null;
+        updates[`followRequests/${uid}/${user.uid}`] = null;
+        updates[`followRequests/${user.uid}/${uid}`] = null;
+        await update(ref(database), updates);
     }
   };
 
@@ -184,12 +201,20 @@ export const Profile: React.FC = () => {
             <div className="flex-1 p-4 space-y-2 max-w-2xl mx-auto w-full">
                 {listLoading ? ( <div className="flex justify-center py-20"><Loader2 className="animate-spin text-indigo-500" /></div> ) : listUsers.length > 0 ? (
                     listUsers.map(u => (
-                        <div key={u.uid} onClick={() => { setListView('none'); navigate(`/profile/${u.uid}`); }} className="flex items-center justify-between p-4 bg-white/5 border border-white/[0.03] rounded-3xl hover:bg-white/[0.08] cursor-pointer transition-all">
-                            <div className="flex items-center gap-4">
+                        <div key={u.uid} className="flex items-center justify-between p-4 bg-white/5 border border-white/[0.03] rounded-3xl hover:bg-white/[0.08] transition-all">
+                            <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setListView('none'); navigate(`/profile/${u.uid}`); }}>
                                 {u.photoURL ? <img src={u.photoURL} className="w-12 h-12 rounded-2xl object-cover" /> : <div className="w-12 h-12 rounded-2xl bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{u.name?.charAt(0)}</div>}
                                 <span className="font-bold text-neutral-200">{u.name}</span>
                             </div>
-                            <ChevronRight size={18} className="text-neutral-600" />
+                            {isMe && (
+                                <button 
+                                    onClick={() => listView === 'following' ? handleUnfollowInList(u.uid) : handleRemoveFollowerInList(u.uid)}
+                                    className="p-2 text-neutral-500 hover:text-red-500 bg-white/5 hover:bg-red-500/10 rounded-xl transition-all"
+                                    title={listView === 'following' ? 'Unfollow' : 'Remove Follower'}
+                                >
+                                    <UserMinus size={18} />
+                                </button>
+                            )}
                         </div>
                     ))
                 ) : ( <div className="text-center py-20 text-neutral-600 font-medium">No {listView} yet.</div> )}
@@ -198,7 +223,6 @@ export const Profile: React.FC = () => {
     );
   }
 
-  // LOGIC: Profile visibility restricted if I am blocked by them
   const restrictedProfile = !isMe && isBlockedByThem;
   const limitedProfile = !isMe && isBlockingThem;
 
@@ -212,6 +236,13 @@ export const Profile: React.FC = () => {
   } : profileData;
 
   const zodiac = (displayProfile?.dob && !restrictedProfile && !limitedProfile) ? getZodiacSign(displayProfile.dob) : null;
+
+  const getFollowButtonLabel = () => {
+    if (isFollowing) return "Following";
+    if (hasSentRequest) return "Requested";
+    if (isFollowedBy) return "Follow back";
+    return "Follow";
+  };
 
   return (
     <div className="flex-1 h-full bg-neutral-950 overflow-y-auto custom-scrollbar relative">
@@ -277,8 +308,17 @@ export const Profile: React.FC = () => {
                               </button>
                           ) : (
                             <>
-                              <button onClick={handleFollowToggle} className={`flex-1 max-w-[140px] px-6 py-3 rounded-2xl font-bold transition-all shadow-lg active:scale-95 border ${isFollowing ? 'bg-neutral-800 border-white/10 text-neutral-300' : 'bg-indigo-600 border-indigo-500 text-white'}`}>
-                                {isFollowing ? 'Following' : 'Follow'}
+                              <button 
+                                onClick={handleFollowAction} 
+                                disabled={hasSentRequest}
+                                className={`flex-1 max-w-[160px] px-6 py-3 rounded-2xl font-bold transition-all shadow-lg active:scale-95 border flex items-center justify-center gap-2 ${
+                                    isFollowing ? 'bg-neutral-800 border-white/10 text-neutral-300' : 
+                                    hasSentRequest ? 'bg-neutral-900 border-white/5 text-neutral-600' :
+                                    'bg-indigo-600 border-indigo-500 text-white'
+                                }`}
+                              >
+                                {hasSentRequest ? <Clock size={16} /> : (isFollowing ? null : <UserPlus size={16} />)}
+                                {getFollowButtonLabel()}
                               </button>
                               {isMutual && (
                                   <button onClick={handleStartChat} className="flex-1 max-w-[140px] inline-flex items-center justify-center gap-2 bg-white text-black px-6 py-3 rounded-2xl font-bold transition-all shadow-lg active:scale-95"><MessageCircle size={18} /> Message</button>
