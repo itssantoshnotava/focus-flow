@@ -56,9 +56,11 @@ export const Inbox: React.FC = () => {
   const [pendingMedia, setPendingMedia] = useState<{ url: string, type: 'image' | 'video', duration?: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Animation Refs
+  // Animation & Typing Refs
   const animatedMessagesRef = useRef<Set<string>>(new Set());
   const sessionStartTimeRef = useRef<number>(Date.now());
+  const stopTypingTimeoutRef = useRef<number | null>(null);
+  const lastTypingWriteRef = useRef<number>(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -66,7 +68,6 @@ export const Inbox: React.FC = () => {
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const isAutoScrollEnabled = useRef(true);
   const isInitialLoadRef = useRef(false);
-  const typingTimeoutRef = useRef<number | null>(null);
 
   const getDmConvoId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
   const currentChatId = useMemo(() => {
@@ -86,6 +87,13 @@ export const Inbox: React.FC = () => {
       }
       return -1;
   }, [messages, user?.uid]);
+
+  // Cleanup typing status on unmount or chat switch
+  const clearMyTyping = (chatId: string | null) => {
+    if (user && chatId) {
+        remove(ref(database, `typing/${chatId}/${user.uid}`));
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -181,13 +189,15 @@ export const Inbox: React.FC = () => {
           setLastSeenMap({});
           isAutoScrollEnabled.current = true;
           
-          // Reset animation trackers for new chat
           animatedMessagesRef.current.clear();
           sessionStartTimeRef.current = Date.now();
 
           if (user) update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
       }
-  }, [selectedChat?.id, user]);
+      return () => {
+          if (currentChatId) clearMyTyping(currentChatId);
+      };
+  }, [selectedChat?.id, user, currentChatId]);
 
   useEffect(() => {
       if (!user || !selectedChat || !currentChatId) {
@@ -205,21 +215,26 @@ export const Inbox: React.FC = () => {
       });
       const unsubReactions = onValue(ref(database, `reactions/${currentChatId}`), (snap) => setAllReactions(snap.exists() ? snap.val() : {}));
       setTimeout(() => inputRef.current?.focus(), 100);
+      
+      // Improved Typing Listener
       const typingRef = ref(database, `typing/${currentChatId}`);
       const unsubTyping = onValue(typingRef, (snap) => {
           if (snap.exists()) {
-              const data = snap.val();
-              const typers = Object.entries(data).filter(([uid, isTyping]) => uid !== user.uid && isTyping === true).map(([uid]) => uid);
+              const now = Date.now();
+              const typers = Object.entries(snap.val())
+                  .filter(([uid, data]: [string, any]) => uid !== user.uid && (now - data.timestamp < 4000))
+                  .map(([_, data]: [string, any]) => data.name);
+              
               if (typers.length === 0) setTypingText('');
-              else if (selectedChat.type === 'dm') setTypingText('typing...');
+              else if (selectedChat.type === 'dm') setTypingText(`${selectedChat.name} is typing...`);
               else {
-                  if (typers.length === 1) {
-                      const name = groupMembersDetails.find(m => m.uid === typers[0])?.name || 'Someone';
-                      setTypingText(`${name} is typing...`);
-                  } else setTypingText('Multiple people are typing...');
+                  if (typers.length === 1) setTypingText(`${typers[0]} is typing...`);
+                  else if (typers.length === 2) setTypingText(`${typers[0]} and ${typers[1]} are typing...`);
+                  else setTypingText(`${typers.length} people are typing...`);
               }
           } else setTypingText('');
       });
+
       const seenRef = ref(database, `chatSeen/${currentChatId}`);
       update(ref(database, `chatSeen/${currentChatId}/${user.uid}`), { timestamp: Date.now() });
       const unsubSeen = onValue(seenRef, (snap) => {
@@ -315,11 +330,29 @@ export const Inbox: React.FC = () => {
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setInputText(e.target.value);
+      const val = e.target.value;
+      setInputText(val);
       if (!user || !currentChatId) return;
-      update(ref(database, `typing/${currentChatId}/${user.uid}`), true);
-      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-      typingTimeoutRef.current = window.setTimeout(() => { update(ref(database, `typing/${currentChatId}/${user.uid}`), false); }, 1500);
+
+      if (val.length > 0) {
+          const now = Date.now();
+          // Throttle writes to once every 1.5s
+          if (now - lastTypingWriteRef.current > 1500) {
+              set(ref(database, `typing/${currentChatId}/${user.uid}`), {
+                  name: user.displayName || 'Someone',
+                  timestamp: now
+              });
+              lastTypingWriteRef.current = now;
+          }
+
+          // Inactivity clear after 3s
+          if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
+          stopTypingTimeoutRef.current = window.setTimeout(() => {
+              clearMyTyping(currentChatId);
+          }, 3000);
+      } else {
+          clearMyTyping(currentChatId);
+      }
   };
 
   const handleSend = async (e?: React.FormEvent) => {
@@ -327,6 +360,11 @@ export const Inbox: React.FC = () => {
       const text = inputText.trim();
       if (!user || !selectedChat || !currentChatId) return;
       if (!text && !pendingMedia) return;
+
+      // Clear typing state immediately
+      clearMyTyping(currentChatId);
+      if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
+
       isAutoScrollEnabled.current = true;
       const timestamp = Date.now();
       const msgData: any = { senderUid: user.uid, senderName: user.displayName || 'Unknown', timestamp, type: pendingMedia ? pendingMedia.type : 'text', text: text || null };
@@ -369,8 +407,6 @@ export const Inbox: React.FC = () => {
               }));
           }
           setInputText(''); setReplyingTo(null); setPendingMedia(null);
-          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-          await update(ref(database, `typing/${currentChatId}/${user.uid}`), false);
       } catch (error) { console.error("Failed to send message:", error); }
   };
 
@@ -510,7 +546,7 @@ export const Inbox: React.FC = () => {
                                 </div>
                                 <div className="flex flex-col">
                                     <span className="font-bold text-neutral-200 text-sm cursor-pointer hover:text-white transition-colors" onClick={() => navigate(selectedChat.type === 'group' ? `/group/${selectedChat.id}/settings` : `/profile/${selectedChat.id}`)}>{ (activeGroupData && selectedChat.type === 'group') ? activeGroupData.name : selectedChat.name }</span>
-                                    {selectedChat.type === 'group' ? ( <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span> ) : ( typingText && <span className="text-[10px] text-indigo-400 animate-pulse font-medium">{typingText}</span> )}
+                                    {selectedChat.type === 'group' ? ( <span className="text-[10px] text-neutral-500">{Object.keys(activeGroupData?.members || {}).length} members</span> ) : ( friendPresence && <span className="text-[10px] text-neutral-500">{friendPresence.online ? 'Online' : 'Offline'}</span> )}
                                 </div>
                             </div>
                         </div>
@@ -533,7 +569,6 @@ export const Inbox: React.FC = () => {
                             const reactions = allReactions[msg.id];
                             const senderPhoto = selectedChat.type === 'group' && !isMe ? memberLookup[msg.senderUid]?.photoURL : (selectedChat.type === 'dm' && !isMe ? selectedChat.photoURL : null);
 
-                            // Animation Logic: Only animate if message is recent (session-wise) AND hasn't been animated yet
                             const isNewlyArrived = msg.timestamp > sessionStartTimeRef.current && !animatedMessagesRef.current.has(msg.id);
                             if (isNewlyArrived) {
                                 animatedMessagesRef.current.add(msg.id);
@@ -601,7 +636,18 @@ export const Inbox: React.FC = () => {
                         })}
                         <div ref={messagesEndRef} />
                     </div>
-                    {typingText && ( <div className="px-6 py-1 text-[10px] text-indigo-400 font-bold uppercase tracking-wider animate-pulse bg-neutral-950/20 backdrop-blur-sm">{typingText}</div> )}
+                    
+                    {typingText && ( 
+                        <div className="px-6 py-2 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
+                            <span className="text-[11px] text-neutral-500 font-medium italic">{typingText}</span>
+                            <div className="flex gap-1">
+                                <div className="w-1 h-1 bg-indigo-500 rounded-full animate-typing-dot typing-dot"></div>
+                                <div className="w-1 h-1 bg-indigo-500 rounded-full animate-typing-dot typing-dot"></div>
+                                <div className="w-1 h-1 bg-indigo-500 rounded-full animate-typing-dot typing-dot"></div>
+                            </div>
+                        </div>
+                    )}
+                    
                     {(pendingMedia || replyingTo) && (
                         <div className="mx-3 mt-1 bg-neutral-900 border border-neutral-800 rounded-t-xl border-b-0 overflow-hidden flex flex-col animate-in slide-in-from-bottom-2">
                             {replyingTo && (
