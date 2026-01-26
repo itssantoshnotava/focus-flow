@@ -56,6 +56,7 @@ export const Inbox: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastTypingWriteRef = useRef<number>(0);
   const stopTypingTimeoutRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentChatId = useMemo(() => {
     if (!user || !selectedChat) return null;
@@ -137,6 +138,12 @@ export const Inbox: React.FC = () => {
 
     update(ref(database, `userInboxes/${user.uid}/${selectedChat.id}`), { unreadCount: 0 });
 
+    if (selectedChat.type === 'group') {
+        onValue(ref(database, `groupChats/${selectedChat.id}`), (snap) => {
+            if (snap.exists()) setActiveGroupData(snap.val());
+        });
+    }
+
     return () => { unsubMessages(); unsubTyping(); };
   }, [selectedChat, currentChatId, user]);
 
@@ -160,36 +167,41 @@ export const Inbox: React.FC = () => {
     }, 3000);
   };
 
-  const sendMessage = async (e?: React.FormEvent) => {
+  const sendMessage = async (e?: React.FormEvent, attachment?: { url: string, type: 'image' | 'video' }) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() || !user || !selectedChat || !currentChatId) return;
+    if (!inputText.trim() && !attachment && !user || !selectedChat || !currentChatId) return;
 
     const msgText = inputText.trim();
     setInputText('');
     setReplyingTo(null);
     update(ref(database, `typing/${currentChatId}/${user.uid}`), { isTyping: false });
 
-    const msgData = {
+    const msgData: any = {
       text: msgText,
-      senderUid: user.uid,
-      senderName: user.displayName,
+      senderUid: user?.uid,
+      senderName: user?.displayName,
       timestamp: Date.now(),
       replyTo: replyingTo ? { id: replyingTo.id, text: replyingTo.text, senderName: replyingTo.senderName } : null
     };
+
+    if (attachment) {
+        msgData.attachment = attachment;
+    }
 
     const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
     const newMsgRef = push(ref(database, `${basePath}/${currentChatId}`));
     await set(newMsgRef, msgData);
 
     const updateInbox = (uid: string, chatName: string, chatPhoto?: string) => {
-      const inboxRef = ref(database, `userInboxes/${uid}/${selectedChat.id === uid ? user.uid : selectedChat.id}`);
+      const targetChatIdForInbox = selectedChat.id === uid ? user?.uid : selectedChat.id;
+      const inboxRef = ref(database, `userInboxes/${uid}/${targetChatIdForInbox}`);
       update(inboxRef, {
-        lastMessage: { text: msgText, timestamp: Date.now(), senderUid: user.uid },
+        lastMessage: { text: attachment ? (attachment.type === 'image' ? 'Sent an image' : 'Sent a video') : msgText, timestamp: Date.now(), senderUid: user?.uid },
         lastMessageAt: Date.now(),
         name: chatName,
         photoURL: chatPhoto || null
       });
-      if (uid !== user.uid) {
+      if (uid !== user?.uid) {
           get(inboxRef).then(snap => {
               const currentUnread = snap.val()?.unreadCount || 0;
               update(inboxRef, { unreadCount: currentUnread + 1 });
@@ -198,11 +210,36 @@ export const Inbox: React.FC = () => {
     };
 
     if (selectedChat.type === 'dm') {
-      updateInbox(user.uid, selectedChat.name, selectedChat.photoURL);
-      updateInbox(selectedChat.id, user.displayName || 'User', user.photoURL || undefined);
-    } else {
+      updateInbox(user!.uid, selectedChat.name, selectedChat.photoURL);
+      updateInbox(selectedChat.id, user!.displayName || 'User', user!.photoURL || undefined);
+    } else if (activeGroupData) {
         const members = Object.keys(activeGroupData.members);
         members.forEach(mid => updateInbox(mid, activeGroupData.name, activeGroupData.photoURL));
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !selectedChat) return;
+
+    // Check video duration (simplified as standard HTML5 video tag doesn't provide it until loaded)
+    // We assume the user respects the 1 min limit or add a soft check on size.
+    if (file.type.startsWith('video/') && file.size > 50 * 1024 * 1024) { // Roughly 50MB
+        alert("Video too large. Please keep it under 1 minute.");
+        return;
+    }
+
+    setIsUploadingMedia(true);
+    try {
+        const url = await uploadImageToCloudinary(file);
+        const type = file.type.startsWith('image/') ? 'image' : 'video';
+        await sendMessage(undefined, { url, type });
+    } catch (err) {
+        console.error("Upload failed", err);
+        alert("Failed to upload media.");
+    } finally {
+        setIsUploadingMedia(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -243,6 +280,11 @@ export const Inbox: React.FC = () => {
     setLoading(false);
   };
 
+  const lastSentMessageByMe = useMemo(() => {
+    const myMsgs = messages.filter(m => m.senderUid === user?.uid);
+    return myMsgs.length > 0 ? myMsgs[myMsgs.length - 1] : null;
+  }, [messages, user]);
+
   if (loading && !chats.length) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
   return (
@@ -266,13 +308,13 @@ export const Inbox: React.FC = () => {
                 <button 
                   key={chat.id}
                   onClick={() => setSelectedChat(chat)}
-                  className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all group ${selectedChat?.id === chat.id ? 'bg-indigo-600 shadow-lg shadow-indigo-900/20' : 'hover:bg-white/[0.04]'}`}
+                  className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all group ${selectedChat?.id === chat.id ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl' : 'hover:bg-white/[0.04]'}`}
                 >
                   <div className="relative shrink-0">
                     {chat.photoURL ? (
                       <img src={chat.photoURL} className="w-14 h-14 rounded-[18px] object-cover" />
                     ) : (
-                      <div className={`w-14 h-14 rounded-[18px] flex items-center justify-center text-xl font-bold ${selectedChat?.id === chat.id ? 'bg-white/20 text-white' : 'bg-neutral-800 text-neutral-400'}`}>
+                      <div className={`w-14 h-14 rounded-[18px] flex items-center justify-center text-xl font-bold ${selectedChat?.id === chat.id ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>
                         {chat.name.charAt(0)}
                       </div>
                     )}
@@ -397,6 +439,7 @@ export const Inbox: React.FC = () => {
               const isMe = msg.senderUid === user?.uid;
               const showAvatar = !isMe && selectedChat.type === 'group';
               const showSenderName = !isMe && selectedChat.type === 'group' && (index === 0 || messages[index-1].senderUid !== msg.senderUid);
+              const isLastSentByMe = msg.id === lastSentMessageByMe?.id;
 
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg animate-in ${isMe ? 'fade-in slide-in-from-right-4' : 'fade-in slide-in-from-left-4'} duration-200`}>
@@ -408,12 +451,12 @@ export const Inbox: React.FC = () => {
                             ) : <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-neutral-500">{msg.senderName?.charAt(0)}</div>}
                         </div>
                     )}
-                    <div className="flex flex-col">
+                    <div className="flex flex-col min-w-0">
                       {showSenderName && <span className="text-[10px] font-black text-indigo-400 mb-1 ml-3 uppercase tracking-wider">{msg.senderName}</span>}
                       
                       <div className="relative group/bubble">
                         <div 
-                          className={`px-5 py-3 rounded-[24px] text-sm leading-relaxed shadow-sm transition-all break-words ${
+                          className={`px-4 pt-3 pb-2 rounded-[24px] text-sm leading-relaxed shadow-sm transition-all break-words ${
                             isMe 
                               ? 'bg-indigo-600 text-white rounded-tr-[4px]' 
                               : 'bg-white/[0.04] text-neutral-200 rounded-tl-[4px] border border-white/5'
@@ -425,24 +468,35 @@ export const Inbox: React.FC = () => {
                               <p className="truncate italic">{msg.replyTo.text}</p>
                             </div>
                           )}
+                          
+                          {/* Attachment Rendering */}
+                          {msg.attachment && (
+                            <div className="mb-2 rounded-xl overflow-hidden bg-black/20 border border-white/5">
+                                {msg.attachment.type === 'image' ? (
+                                    <img src={msg.attachment.url} alt="Shared media" className="max-w-full h-auto object-cover max-h-80" />
+                                ) : (
+                                    <video src={msg.attachment.url} controls className="max-w-full h-auto max-h-80" />
+                                )}
+                            </div>
+                          )}
+
                           <p>{msg.text}</p>
+                          
+                          {/* Timestamp and Seen INSIDE bubble */}
+                          <div className="flex items-center justify-end gap-2 mt-1 -mr-1">
+                            <span className="text-[9px] font-bold opacity-60 uppercase tracking-tighter">
+                                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {isLastSentByMe && (
+                                <span className="text-[9px] font-black uppercase tracking-tighter opacity-80 animate-in fade-in slide-in-from-right-1">Seen</span>
+                            )}
+                          </div>
                         </div>
 
                         {/* Reaction Picker Trigger - Hidden until hover */}
                         <div className={`absolute top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover/bubble:opacity-100 transition-opacity px-2 z-10 ${isMe ? 'right-full' : 'left-full'}`}>
                             <button onClick={() => setReplyingTo(msg)} className="p-1.5 bg-neutral-900 border border-white/10 rounded-lg text-neutral-500 hover:text-white transition-all"><Reply size={14} /></button>
                         </div>
-                      </div>
-
-                      <div className={`flex items-center gap-2 mt-1 px-1 ${isMe ? 'justify-end' : ''}`}>
-                        <span className="text-[9px] font-bold text-neutral-600 uppercase tracking-tighter">
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        {isMe && (
-                          <div className="text-indigo-400">
-                             <CheckCheck size={10} />
-                          </div>
-                        )}
                       </div>
                     </div>
                   </div>
@@ -478,7 +532,21 @@ export const Inbox: React.FC = () => {
             
             <form onSubmit={sendMessage} className="flex gap-4 items-end max-w-5xl mx-auto">
               <div className="flex-1 bg-white/[0.03] border border-white/10 rounded-[28px] p-2 flex items-end transition-all focus-within:border-indigo-500/50 focus-within:bg-white/[0.05]">
-                <button type="button" className="p-3 text-neutral-500 hover:text-indigo-400 transition-colors shrink-0"><Paperclip size={20} /></button>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileUpload} 
+                  className="hidden" 
+                  accept="image/*,video/*" 
+                />
+                <button 
+                  type="button" 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingMedia}
+                  className="p-3 text-neutral-500 hover:text-indigo-400 transition-colors shrink-0 disabled:opacity-50"
+                >
+                  {isUploadingMedia ? <Loader2 size={20} className="animate-spin" /> : <Paperclip size={20} />}
+                </button>
                 <textarea 
                   rows={1}
                   value={inputText}
@@ -491,7 +559,7 @@ export const Inbox: React.FC = () => {
               </div>
               <button 
                 type="submit" 
-                disabled={!inputText.trim()}
+                disabled={!inputText.trim() && !isUploadingMedia}
                 className="bg-indigo-600 text-white p-4 rounded-full shadow-lg shadow-indigo-900/40 hover:bg-indigo-500 transition-all active:scale-90 disabled:opacity-30 disabled:scale-100 disabled:shadow-none shrink-0"
               >
                 <Send size={24} />
