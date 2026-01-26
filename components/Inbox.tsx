@@ -28,6 +28,7 @@ interface ChatItem {
   };
   timestamp: number;
   unreadCount?: number;
+  members?: Record<string, any>;
 }
 
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉', '👀'];
@@ -685,10 +686,31 @@ export const Inbox: React.FC = () => {
               })
             ) : ( <div className="flex flex-col items-center justify-center py-20 text-center px-6"><div className="w-16 h-16 bg-neutral-900 rounded-[20px] flex items-center justify-center mb-4 text-neutral-700">{showArchived ? <Archive size={32} /> : <MessageCircle size={32} />}</div><h3 className="text-white font-bold mb-1">{showArchived ? 'No archived chats' : 'No chats yet'}</h3><p className="text-neutral-500 text-sm">{showArchived ? 'Conversations you archive will appear here.' : 'Mutual followers will appear here.'}</p></div> )
           ) : (
-            <div className="space-y-6 p-2 flex flex-col h-full">
+            <div className="space-y-6 p-2 flex flex-col h-full overflow-hidden">
                 <div className="space-y-2"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Group Name</label><input value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder="E.g. Study Squad" className="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-5 py-3 text-white focus:outline-none focus:border-indigo-500 transition-all font-bold" /></div>
-                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-1"><label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Select Members ({selectedMembers.size})</label>{myFriends.length > 0 ? ( myFriends.map(friend => { const isSelected = selectedMembers.has(friend.uid); return ( <button key={friend.uid} onClick={() => toggleMemberSelection(friend.uid)} className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all border ${isSelected ? 'bg-indigo-600/10 border-indigo-500/50' : 'bg-white/[0.02] border-transparent hover:bg-white/[0.05]'}`}><div className="relative">{friend.photoURL ? <img src={friend.photoURL} className="w-10 h-10 rounded-full" /> : <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-bold text-neutral-400">{friend.name.charAt(0)}</div>}{isSelected && <div className="absolute -top-1 -right-1 bg-indigo-500 text-white rounded-full p-0.5 border-2 border-neutral-950"><Check size={10} strokeWidth={4} /></div>}</div><span className={`text-sm font-bold truncate ${isSelected ? 'text-white' : 'text-neutral-400'}`}>{friend.name}</span></button> ); }) ) : ( <div className="p-4 text-center text-neutral-600 text-xs italic">You need friends to create a group.</div> )}</div>
-                <div className="space-y-2 pt-4"><button onClick={handleCreateGroup} disabled={!newGroupName.trim() || selectedMembers.size === 0 || creatingGroup} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 hover:bg-indigo-500 disabled:opacity-50">{creatingGroup ? <Loader2 className="animate-spin" size={20} /> : 'Create Group'}</button><button onClick={() => setViewMode('list')} className="w-full bg-neutral-800 text-neutral-400 py-3 rounded-2xl font-black transition-all">Cancel</button></div>
+                <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-1">
+                    <label className="text-[10px] font-black text-neutral-500 uppercase tracking-widest ml-3">Select Members ({selectedMembers.size})</label>
+                    {myFriends.length > 0 ? ( 
+                        myFriends.map(friend => { 
+                            const isSelected = selectedMembers.has(friend.uid); 
+                            return ( 
+                                <button key={friend.uid} onClick={() => toggleMemberSelection(friend.uid)} className={`w-full flex items-center gap-3 p-3 rounded-2xl transition-all border ${isSelected ? 'bg-indigo-600/10 border-indigo-500/50' : 'bg-white/[0.02] border-transparent hover:bg-white/[0.05]'}`}>
+                                    <div className="relative">
+                                        {friend.photoURL ? <img src={friend.photoURL} className="w-10 h-10 rounded-full" /> : <div className="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center text-xs font-bold text-neutral-400">{friend.name.charAt(0)}</div>}
+                                        {isSelected && <div className="absolute -top-1 -right-1 bg-indigo-500 text-white rounded-full p-0.5 border-2 border-neutral-950"><Check size={10} strokeWidth={4} /></div>}
+                                    </div>
+                                    <span className={`text-sm font-bold truncate ${isSelected ? 'text-white' : 'text-neutral-400'}`}>{friend.name}</span>
+                                </button> 
+                            ); 
+                        }) 
+                    ) : ( 
+                        <div className="p-10 text-center space-y-2">
+                            <Users size={32} className="mx-auto text-neutral-700 opacity-50" />
+                            <p className="text-neutral-500 text-xs italic">No mutual followers found. You can only add people who follow you back.</p>
+                        </div> 
+                    )}
+                </div>
+                <div className="space-y-2 pt-4 bg-neutral-950 z-10"><button onClick={handleCreateGroup} disabled={!newGroupName.trim() || selectedMembers.size === 0 || creatingGroup} className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black transition-all flex items-center justify-center gap-2 hover:bg-indigo-500 disabled:opacity-50">{creatingGroup ? <Loader2 className="animate-spin" size={20} /> : 'Create Group'}</button><button onClick={() => setViewMode('list')} className="w-full bg-neutral-800 text-neutral-400 py-3 rounded-2xl font-black transition-all">Cancel</button></div>
             </div>
           )}
         </div>
