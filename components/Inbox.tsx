@@ -9,7 +9,7 @@ import {
     Circle, Settings, Camera, Trash2, UserPlus, 
     Save, Edit2, UserMinus, Loader2, X, Check, CheckCheck, Reply, CornerUpRight,
     SmilePlus, Paperclip, Play, Image as ImageIcon, Film, MoreVertical, Smile, AlertCircle,
-    VolumeX, Archive, Ban, Lock
+    VolumeX, Archive, Ban, Lock, Trash
 } from 'lucide-react';
 
 interface ChatItem {
@@ -47,21 +47,19 @@ export const Inbox: React.FC = () => {
   const [typingText, setTypingText] = useState('');
   const [inputText, setInputText] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
-  const [selectedGroupMembers, setSelectedGroupMembers] = useState<Set<string>>(new Set());
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
   const [activeReactionPickerId, setActiveReactionPickerId] = useState<string | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [loading, setLoading] = useState(true);
   const [unsendConfirmId, setUnsendConfirmId] = useState<string | null>(null);
   const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
-
-  // Follower/Following logic for mutual check
-  const [following, setFollowing] = useState<Record<string, boolean>>({});
-  const [followers, setFollowers] = useState<Record<string, boolean>>({});
+  const [messageMenuId, setMessageMenuId] = useState<string | null>(null);
 
   // Block & Social States
-  const [blocks, setBlocks] = useState<Record<string, boolean>>({}); 
-  const [blockedBy, setBlockedBy] = useState<Record<string, boolean>>({}); 
+  const [following, setFollowing] = useState<Record<string, boolean>>({});
+  const [followers, setFollowers] = useState<Record<string, boolean>>({});
+  const [iBlockedThem, setIBlockedThem] = useState<Record<string, boolean>>({}); 
+  const [theyBlockedMe, setTheyBlockedMe] = useState<Record<string, boolean>>({}); 
   const [mutedChats, setMutedChats] = useState<Record<string, boolean>>({});
   const [archivedChats, setArchivedChats] = useState<Record<string, boolean>>({});
 
@@ -84,16 +82,31 @@ export const Inbox: React.FC = () => {
     return () => { update(pRef, { activeChatId: null }); };
   }, [user, currentChatId]);
 
-  // Global Listeners
+  // Global Listeners for block/social
   useEffect(() => {
     if (!user) return;
     onValue(ref(database, `following/${user.uid}`), (snap) => setFollowing(snap.val() || {}));
     onValue(ref(database, `followers/${user.uid}`), (snap) => setFollowers(snap.val() || {}));
-    onValue(ref(database, `blocks/${user.uid}`), (snap) => setBlocks(snap.val() || {}));
+    onValue(ref(database, `blocks/${user.uid}`), (snap) => setIBlockedThem(snap.val() || {}));
     onValue(ref(database, `mutedChats/${user.uid}`), (snap) => setMutedChats(snap.val() || {}));
     onValue(ref(database, `archivedChats/${user.uid}`), (snap) => setArchivedChats(snap.val() || {}));
-    onValue(ref(database, `blockedUsers/${user.uid}`), (snap) => setBlockedBy(snap.val() || {}));
+    
+    // Reverse block check: listen to all users block lists is heavy, but for this app we'll check specifically for relevant users
   }, [user]);
+
+  // Special listener for "they blocked me" specifically for selected chat
+  useEffect(() => {
+    if (!user || !selectedChat || selectedChat.type !== 'dm') {
+        setTheyBlockedMe({});
+        return;
+    }
+    const targetUid = selectedChat.id;
+    const refPath = ref(database, `blocks/${targetUid}/${user.uid}`);
+    const unsub = onValue(refPath, (snap) => {
+        setTheyBlockedMe(prev => ({ ...prev, [targetUid]: snap.exists() }));
+    });
+    return () => unsub();
+  }, [user, selectedChat]);
 
   // Listen for inbox changes
   useEffect(() => {
@@ -132,9 +145,9 @@ export const Inbox: React.FC = () => {
       onValue(ref(database, `users/${uid}`), (snap) => {
         if (snap.exists()) {
           const data = snap.val();
-          const isBlocked = blocks[uid] || blockedBy[uid];
+          const isBlocked = iBlockedThem[uid] || theyBlockedMe[uid];
           setUserProfiles(prev => ({
-            ...prev, [uid]: { name: isBlocked ? 'Wishp User' : data.name, photoURL: isBlocked ? undefined : data.photoURL }
+            ...prev, [uid]: { name: isBlocked ? 'Wisp User' : data.name, photoURL: isBlocked ? undefined : data.photoURL }
           }));
         }
       });
@@ -143,7 +156,17 @@ export const Inbox: React.FC = () => {
     else get(ref(database, `groupChats/${selectedChat.id}/members`)).then(snap => {
         if (snap.exists()) Object.keys(snap.val()).forEach(mid => attachListener(mid));
     });
-  }, [selectedChat, blocks, blockedBy]);
+  }, [selectedChat, iBlockedThem, theyBlockedMe]);
+
+  const isCurrentChatBlocked = useMemo(() => {
+    if (!selectedChat || selectedChat.type !== 'dm') return false;
+    return iBlockedThem[selectedChat.id] || theyBlockedMe[selectedChat.id];
+  }, [selectedChat, iBlockedThem, theyBlockedMe]);
+
+  const isCurrentChatMutual = useMemo(() => {
+    if (!selectedChat || selectedChat.type !== 'dm') return true;
+    return following[selectedChat.id] && followers[selectedChat.id];
+  }, [selectedChat, following, followers]);
 
   // Filter chats: Main view vs Archived view
   const filteredChats = useMemo(() => {
@@ -152,19 +175,10 @@ export const Inbox: React.FC = () => {
         if (showArchived) return isArchived;
         if (isArchived) return false;
         if (c.type === 'group') return true;
+        // In the inbox list, show mutuals, but if we have a chat history even if not mutual, it might show
         return following[c.id] && followers[c.id];
     });
   }, [chats, archivedChats, following, followers, showArchived]);
-
-  const isCurrentChatBlocked = useMemo(() => {
-    if (!selectedChat || selectedChat.type !== 'dm') return false;
-    return blocks[selectedChat.id] || blockedBy[selectedChat.id];
-  }, [selectedChat, blocks, blockedBy]);
-
-  const isCurrentChatMutual = useMemo(() => {
-    if (!selectedChat || selectedChat.type !== 'dm') return true;
-    return following[selectedChat.id] && followers[selectedChat.id];
-  }, [selectedChat, following, followers]);
 
   // Messages logic
   useEffect(() => {
@@ -182,14 +196,23 @@ export const Inbox: React.FC = () => {
     return () => unsubMessages();
   }, [selectedChat, currentChatId, user]);
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, typingText]);
+
+  // --- Actions ---
 
   const handleBlock = async () => {
     if (!user || !selectedChat || selectedChat.type !== 'dm') return;
     const targetUid = selectedChat.id;
-    const isCurrentlyBlocked = blocks[targetUid];
-    if (isCurrentlyBlocked) await remove(ref(database, `blocks/${user.uid}/${targetUid}`));
-    else await set(ref(database, `blocks/${user.uid}/${targetUid}`), true);
+    const isCurrentlyBlocked = iBlockedThem[targetUid];
+    const blockRef = ref(database, `blocks/${user.uid}/${targetUid}`);
+    if (isCurrentlyBlocked) {
+        await remove(blockRef);
+    } else {
+        await set(blockRef, true);
+        // Force unfollow when blocking
+        await remove(ref(database, `following/${user.uid}/${targetUid}`));
+        await remove(ref(database, `followers/${targetUid}/${user.uid}`));
+    }
     setIsHeaderMenuOpen(false);
   };
 
@@ -208,25 +231,109 @@ export const Inbox: React.FC = () => {
     setIsHeaderMenuOpen(false);
   };
 
-  const sendMessage = async (e?: React.FormEvent) => {
+  const handleTyping = (text: string) => {
+    setInputText(text);
+    if (!user || !currentChatId) return;
+    const now = Date.now();
+    if (now - lastTypingWriteRef.current > 1500) {
+      update(ref(database, `typing/${currentChatId}/${user.uid}`), { isTyping: text.length > 0, name: user.displayName });
+      lastTypingWriteRef.current = now;
+    }
+    if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
+    stopTypingTimeoutRef.current = window.setTimeout(() => {
+        update(ref(database, `typing/${currentChatId}/${user.uid}`), { isTyping: false });
+    }, 2000);
+  };
+
+  const sendMessage = async (e?: React.FormEvent, attachment?: { url: string, type: 'image' | 'video' }) => {
     if (e) e.preventDefault();
-    if (!inputText.trim() && !user || !selectedChat || !currentChatId) return;
-    if (selectedChat.type === 'dm' && (isCurrentChatBlocked || !isCurrentChatMutual)) {
+    if (!inputText.trim() && !attachment && !user || !selectedChat || !currentChatId) return;
+    if (selectedChat.type === 'dm' && isCurrentChatBlocked) {
+        alert("Cannot send messages to a blocked account.");
+        return;
+    }
+    if (selectedChat.type === 'dm' && !isCurrentChatMutual) {
         alert("Mutual follow required to message.");
         return;
     }
+
     const msgText = inputText.trim();
     setInputText('');
-    const msgData: any = { text: msgText, senderUid: user?.uid, senderName: user?.displayName, timestamp: Date.now(), seen: false };
-    const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
-    await set(push(ref(database, `${basePath}/${currentChatId}`)), msgData);
-    const updateInbox = (uid: string, chatName: string, chatPhoto?: string) => {
-      const inboxRef = ref(database, `userInboxes/${uid}/${selectedChat.id === uid ? user?.uid : selectedChat.id}`);
-      update(inboxRef, { lastMessage: { text: msgText, timestamp: Date.now(), senderUid: user?.uid }, lastMessageAt: Date.now(), name: chatName, photoURL: chatPhoto || null });
+    setReplyingTo(null);
+    update(ref(database, `typing/${currentChatId}/${user.uid}`), { isTyping: false });
+
+    const msgData: any = { 
+        text: msgText, 
+        senderUid: user?.uid, 
+        senderName: user?.displayName, 
+        timestamp: Date.now(), 
+        seen: false,
+        replyTo: replyingTo ? { id: replyingTo.id, text: replyingTo.text, senderName: replyingTo.senderName } : null
     };
+
+    if (attachment) msgData.attachment = attachment;
+
+    const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
+    const newMsgRef = push(ref(database, `${basePath}/${currentChatId}`));
+    await set(newMsgRef, msgData);
+
+    const updateInbox = (uid: string, chatName: string, chatPhoto?: string) => {
+      const targetIdForInbox = selectedChat.id === uid ? user?.uid : selectedChat.id;
+      const inboxRef = ref(database, `userInboxes/${uid}/${targetIdForInbox}`);
+      update(inboxRef, { 
+          lastMessage: { text: attachment ? (attachment.type === 'image' ? 'Image' : 'Video') : msgText, timestamp: Date.now(), senderUid: user?.uid }, 
+          lastMessageAt: Date.now(), 
+          name: chatName, 
+          photoURL: chatPhoto || null 
+      });
+    };
+
     if (selectedChat.type === 'dm') {
       updateInbox(user!.uid, selectedChat.name, selectedChat.photoURL);
       updateInbox(selectedChat.id, user!.displayName || 'User', user!.photoURL || undefined);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !selectedChat) return;
+    setIsUploadingMedia(true);
+    try {
+        const url = await uploadImageToCloudinary(file);
+        const type = file.type.startsWith('image') ? 'image' : 'video';
+        await sendMessage(undefined, { url, type });
+    } catch (err) {
+        console.error("Upload failed", err);
+    } finally {
+        setIsUploadingMedia(false);
+    }
+  };
+
+  const handleUnsend = async (msgId: string) => {
+    if (!currentChatId || !selectedChat) return;
+    const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
+    await remove(ref(database, `${basePath}/${currentChatId}/${msgId}`));
+    setUnsendConfirmId(null);
+    setMessageMenuId(null);
+  };
+
+  const handleReaction = async (msgId: string, emoji: string) => {
+    if (!currentChatId || !selectedChat || !user) return;
+    const basePath = selectedChat.type === 'dm' ? 'messages' : 'groupMessages';
+    const reactionRef = ref(database, `${basePath}/${currentChatId}/${msgId}/reactions/${user.uid}`);
+    const snap = await get(reactionRef);
+    if (snap.exists() && snap.val() === emoji) {
+        await remove(reactionRef);
+    } else {
+        await set(reactionRef, emoji);
+    }
+    setActiveReactionPickerId(null);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
     }
   };
 
@@ -321,54 +428,183 @@ export const Inbox: React.FC = () => {
                     <MoreVertical size={20} />
                 </button>
                 {isHeaderMenuOpen && (
-                    <div className="absolute top-full right-0 mt-2 w-48 bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-[24px] shadow-2xl p-1 z-[100] animate-in fade-in zoom-in-95 duration-200">
-                        {selectedChat.type === 'dm' && (
-                            <button onClick={handleBlock} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/10 rounded-2xl transition-colors">
-                                <Ban size={18} /> {blocks[selectedChat.id] ? 'Unblock' : 'Block'}
+                    <>
+                        <div className="fixed inset-0 z-[90]" onClick={() => setIsHeaderMenuOpen(false)}></div>
+                        <div className="absolute top-full right-0 mt-2 w-48 bg-neutral-900/95 backdrop-blur-xl border border-white/10 rounded-[24px] shadow-2xl p-1 z-[100] animate-in fade-in zoom-in-95 duration-200">
+                            {selectedChat.type === 'dm' && (
+                                <button onClick={handleBlock} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/10 rounded-2xl transition-colors">
+                                    <Ban size={18} /> {iBlockedThem[selectedChat.id] ? 'Unblock' : 'Block'}
+                                </button>
+                            )}
+                            <button onClick={handleMute} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
+                                <VolumeX size={18} /> {mutedChats[selectedChat.id] ? 'Unmute' : 'Mute'}
                             </button>
-                        )}
-                        <button onClick={handleMute} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
-                            <VolumeX size={18} /> {mutedChats[selectedChat.id] ? 'Unmute' : 'Mute'}
-                        </button>
-                        <button onClick={handleArchive} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
-                            <Archive size={18} /> {archivedChats[selectedChat.id] ? 'Unarchive' : 'Archive'}
-                        </button>
-                        <div className="h-px bg-white/5 my-1" />
-                        <button onClick={() => setIsHeaderMenuOpen(false)} className="w-full px-4 py-3 text-[10px] font-black text-neutral-600 uppercase tracking-widest hover:text-white text-center">Close</button>
-                    </div>
+                            <button onClick={handleArchive} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl transition-colors">
+                                <Archive size={18} /> {archivedChats[selectedChat.id] ? 'Unarchive' : 'Archive'}
+                            </button>
+                            <div className="h-px bg-white/5 my-1" />
+                            <button onClick={() => setIsHeaderMenuOpen(false)} className="w-full px-4 py-3 text-[10px] font-black text-neutral-600 uppercase tracking-widest hover:text-white text-center">Close</button>
+                        </div>
+                    </>
                 )}
             </div>
           </div>
+
+          {/* Messages Area */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4 pb-20" ref={scrollContainerRef}>
             {messages.map((msg, index) => {
               const isMe = msg.senderUid === user?.uid;
+              const isFirstInStack = index === 0 || messages[index - 1]?.senderUid !== msg.senderUid;
+              const reactions = msg.reactions ? Object.entries(msg.reactions) : [];
+              const isLastSentByMe = msg.id === lastSentMessageByMe?.id;
+
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-1`}>
+                  
+                  {/* Reply Context */}
+                  {msg.replyTo && (
+                      <div className={`flex items-center gap-2 mb-1 px-3 py-1 bg-white/5 rounded-xl border border-white/5 max-w-[80%] ${isMe ? 'flex-row-reverse' : ''}`}>
+                          <Reply size={10} className="text-neutral-500" />
+                          <span className="text-[10px] text-neutral-500 truncate font-bold uppercase tracking-widest">
+                            {msg.replyTo.senderName}: {msg.replyTo.text}
+                          </span>
+                      </div>
+                  )}
+
                   <div className={`flex gap-2 max-w-[85%] md:max-w-[70%] ${isMe ? 'flex-row-reverse' : 'items-end'}`}>
                     <div className="flex flex-col min-w-0 relative">
-                        <div className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed transition-all break-words ${isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}>
-                          <p className="inline-block whitespace-pre-wrap">{msg.text}</p>
+                        <div 
+                            onContextMenu={(e) => { e.preventDefault(); setMessageMenuId(msg.id); }}
+                            className={`px-4 py-2.5 rounded-[22px] text-sm leading-relaxed transition-all break-words relative group ${isMe ? 'bg-gradient-to-br from-indigo-500 to-indigo-700 text-white rounded-3xl rounded-br-lg' : 'bg-[#1f1f1f] text-neutral-200 rounded-3xl rounded-bl-lg border border-white/5'}`}
+                        >
+                            {msg.attachment && (
+                                <div className="mb-2 rounded-xl overflow-hidden max-w-sm">
+                                    {msg.attachment.type === 'image' ? (
+                                        <img src={msg.attachment.url} className="w-full h-auto object-cover cursor-pointer hover:opacity-90 transition-opacity" onClick={() => window.open(msg.attachment.url, '_blank')} />
+                                    ) : (
+                                        <video src={msg.attachment.url} controls className="w-full h-auto" />
+                                    )}
+                                </div>
+                            )}
+                            <p className="inline-block whitespace-pre-wrap">{msg.text}</p>
+                            
+                            {/* Reactions Pill */}
+                            {reactions.length > 0 && (
+                                <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex gap-1 bg-neutral-900 border border-white/10 rounded-full px-1.5 py-0.5 shadow-xl`}>
+                                    {reactions.map(([uid, emoji]) => <span key={uid} className="text-[10px] animate-reaction-bounce">{emoji}</span>)}
+                                </div>
+                            )}
+
+                            {/* Hover Actions */}
+                            <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity ${isMe ? 'right-full mr-2' : 'left-full ml-2'}`}>
+                                <button onClick={() => setReplyingTo(msg)} className="p-1.5 text-neutral-500 hover:text-white hover:bg-white/5 rounded-lg transition-all" title="Reply"><Reply size={14} /></button>
+                                <button onClick={() => setActiveReactionPickerId(msg.id)} className="p-1.5 text-neutral-500 hover:text-white hover:bg-white/5 rounded-lg transition-all" title="React"><SmilePlus size={14} /></button>
+                                {isMe && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all" title="Unsend"><Trash size={14} /></button>}
+                            </div>
                         </div>
                     </div>
                   </div>
+
+                  {/* Reaction Picker */}
+                  {activeReactionPickerId === msg.id && (
+                      <div className={`flex gap-1 p-1 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl z-50 mt-1 animate-in zoom-in-95 duration-200 ${isMe ? 'origin-right' : 'origin-left'}`}>
+                          {REACTION_EMOJIS.map(emoji => (
+                              <button key={emoji} onClick={() => handleReaction(msg.id, emoji)} className="p-2 hover:bg-white/5 rounded-xl transition-all text-sm">{emoji}</button>
+                          ))}
+                          <button onClick={() => setActiveReactionPickerId(null)} className="p-2 text-neutral-500 hover:text-white"><X size={14} /></button>
+                      </div>
+                  )}
+
+                  {/* Seen Status for My Last Message */}
+                  {isLastSentByMe && (
+                      <div className="flex items-center gap-1 mt-1 mr-1 text-[10px] font-bold text-neutral-500 uppercase tracking-widest animate-in fade-in slide-in-from-right-2">
+                        {msg.seen ? <><CheckCheck size={12} className="text-indigo-500" /> Seen</> : <><Check size={12} /> Sent</>}
+                      </div>
+                  )}
                 </div>
               );
             })}
+            {typingText && (
+                <div className="flex flex-col items-start gap-1 max-w-[70%] animate-in slide-in-from-bottom-2 duration-300">
+                    <div className="flex items-center gap-1.5 px-4 py-2 bg-neutral-900/40 rounded-[22px] rounded-bl-lg border border-white/5">
+                        <div className="flex gap-1">
+                            <div className="w-1.5 h-1.5 bg-neutral-600 rounded-full animate-typing-dot"></div>
+                            <div className="w-1.5 h-1.5 bg-neutral-600 rounded-full animate-typing-dot [animation-delay:0.2s]"></div>
+                            <div className="w-1.5 h-1.5 bg-neutral-600 rounded-full animate-typing-dot [animation-delay:0.4s]"></div>
+                        </div>
+                    </div>
+                    <span className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.2em] ml-2">{typingText}</span>
+                </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Unsend Confirmation Overlay */}
+          {unsendConfirmId && (
+              <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                  <div className="bg-neutral-900 border border-white/10 rounded-[32px] p-8 max-w-xs w-full text-center shadow-2xl animate-in zoom-in-95 duration-200">
+                      <div className="w-16 h-16 bg-red-500/10 rounded-[24px] flex items-center justify-center mx-auto mb-6">
+                          <AlertCircle size={32} className="text-red-500" />
+                      </div>
+                      <h3 className="text-xl font-black text-white mb-2">Unsend message?</h3>
+                      <p className="text-neutral-400 text-sm mb-8">This will permanently remove the message for everyone.</p>
+                      <div className="flex flex-col gap-2">
+                          <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-[0.98]">Unsend</button>
+                          <button onClick={() => setUnsendConfirmId(null)} className="w-full py-3.5 bg-neutral-800 text-neutral-400 hover:text-white font-black rounded-2xl transition-all">Cancel</button>
+                      </div>
+                  </div>
+              </div>
+          )}
+
+          {/* Input Area */}
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
-            {isCurrentChatBlocked || !isCurrentChatMutual ? (
+            {replyingTo && (
+                <div className="flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded-2xl mb-3 animate-in slide-in-from-bottom-2">
+                    <div className="flex items-center gap-3">
+                        <Reply size={16} className="text-indigo-400" />
+                        <div className="flex flex-col">
+                            <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Replying to {replyingTo.senderName}</span>
+                            <p className="text-xs text-neutral-400 truncate max-w-[200px]">{replyingTo.text}</p>
+                        </div>
+                    </div>
+                    <button onClick={() => setReplyingTo(null)} className="p-1 text-neutral-600 hover:text-white transition-colors"><X size={16} /></button>
+                </div>
+            )}
+
+            {isCurrentChatBlocked || (selectedChat.type === 'dm' && !isCurrentChatMutual) ? (
                 <div className="flex items-center justify-center py-4 bg-neutral-900/50 border border-white/5 rounded-3xl gap-3">
                     <Lock size={16} className="text-neutral-500" />
-                    <span className="text-neutral-500 text-sm font-bold uppercase tracking-widest">{isCurrentChatBlocked ? 'Blocked Relationship' : 'Mutual Follow Required'}</span>
+                    <span className="text-neutral-500 text-sm font-bold uppercase tracking-widest">
+                        {isCurrentChatBlocked ? 'Blocked Relationship' : 'Mutual Follow Required to Message'}
+                    </span>
+                    {!isCurrentChatBlocked && !isCurrentChatMutual && (
+                        <button onClick={() => navigate(`/profile/${selectedChat.id}`)} className="text-indigo-500 text-xs font-bold hover:underline">View Profile</button>
+                    )}
                 </div>
             ) : (
-                <form onSubmit={sendMessage} className="flex gap-3 items-end max-w-5xl mx-auto">
-                  <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end">
-                    <textarea rows={1} value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Message…" className="flex-1 bg-transparent border-none text-white text-[15px] px-4 py-2.5 focus:outline-none resize-none custom-scrollbar" />
-                  </div>
-                  <button type="submit" className="bg-indigo-600 text-white p-3.5 rounded-full"><Send size={20} /></button>
-                </form>
+                <div className="flex gap-3 items-end max-w-5xl mx-auto">
+                    <div className="flex-1 bg-white/[0.04] border border-white/5 rounded-[28px] p-1.5 flex items-end">
+                        <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
+                        <button onClick={() => fileInputRef.current?.click()} className={`p-2.5 rounded-full transition-all ${isUploadingMedia ? 'text-indigo-500 animate-pulse' : 'text-neutral-500 hover:text-white hover:bg-white/5'}`} disabled={isUploadingMedia}>
+                            <Paperclip size={20} />
+                        </button>
+                        <textarea 
+                            rows={1} 
+                            value={inputText} 
+                            onChange={(e) => handleTyping(e.target.value)} 
+                            onKeyDown={handleKeyDown}
+                            placeholder="Message…" 
+                            className="flex-1 bg-transparent border-none text-white text-[15px] px-4 py-2.5 focus:outline-none resize-none custom-scrollbar" 
+                        />
+                    </div>
+                    <button 
+                        onClick={() => sendMessage()} 
+                        disabled={(!inputText.trim() && !isUploadingMedia) || isCurrentChatBlocked}
+                        className="bg-indigo-600 text-white p-3.5 rounded-full hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-900/20 active:scale-95 disabled:opacity-50"
+                    >
+                        <Send size={20} />
+                    </button>
+                </div>
             )}
           </div>
         </div>
@@ -376,7 +612,7 @@ export const Inbox: React.FC = () => {
         <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-neutral-950 text-center px-12">
            <div className="w-24 h-24 bg-neutral-900 border border-white/5 rounded-[32px] flex items-center justify-center mb-8"><MessageCircle size={40} className="text-indigo-500" /></div>
            <h2 className="text-3xl font-black text-white tracking-tight mb-3">Select a conversation</h2>
-           <p className="text-neutral-500 max-w-xs leading-relaxed">Choose a chat to start studying together.</p>
+           <p className="text-neutral-500 max-w-xs leading-relaxed">Choose a mutual follower to start chatting.</p>
         </div>
       )}
     </div>
