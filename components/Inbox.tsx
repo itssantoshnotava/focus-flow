@@ -145,7 +145,6 @@ export const Inbox: React.FC = () => {
         if (found) {
             setSelectedChat(found);
         } else {
-            // Handle scenario where chat item isn't in inbox yet (repairing a dead thread)
             get(ref(database, `users/${urlChatId}`)).then(snap => {
                 if (snap.exists()) {
                     const u = snap.val();
@@ -193,7 +192,6 @@ export const Inbox: React.FC = () => {
             const convoRef = ref(database, `conversations/${currentChatId}`);
             const convoSnap = await get(convoRef);
             
-            // If the thread is missing or corrupted, RE-CREATE IT
             if (!convoSnap.exists() || !convoSnap.val()?.members) {
                 await update(convoRef, {
                     type: 'dm',
@@ -281,10 +279,9 @@ export const Inbox: React.FC = () => {
     setIsHeaderMenuOpen(false);
   };
 
-  const handleRemoveChat = async (e: React.MouseEvent, chatId: string) => {
-      e.stopPropagation();
+  const handleRemoveChat = async (chatId: string) => {
       if (!user) return;
-      if (window.confirm("Remove this chat from your inbox? History remains but the entry will be cleared.")) {
+      if (window.confirm("Remove this chat from your inbox? This only clears it from your list, no messages will be deleted.")) {
           await remove(ref(database, `userInboxes/${user.uid}/${chatId}`));
           if (selectedChat?.id === chatId) setSelectedChat(null);
           setListMenuId(null);
@@ -423,8 +420,11 @@ export const Inbox: React.FC = () => {
                 const isSelected = selectedChat?.id === chat.id;
                 const isMenuOpen = listMenuId === chat.id;
                 return (
-                  <div key={chat.id} className="relative group/item">
-                      <button onClick={() => setSelectedChat(chat)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl opacity-100' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}>
+                  <div key={chat.id} className="relative group/item overflow-visible">
+                      <button 
+                        onClick={() => setSelectedChat(chat)} 
+                        className={`w-full flex items-center gap-4 p-4 rounded-[24px] transition-all relative ${isSelected ? 'bg-white/10 backdrop-blur-xl border border-white/10 shadow-xl opacity-100' : 'hover:bg-white/[0.04] opacity-80 hover:opacity-100'}`}
+                      >
                         <div className="relative shrink-0">
                           {chat.photoURL ? <img src={chat.photoURL} className="w-14 h-14 rounded-full object-cover" /> : <div className={`w-14 h-14 rounded-full flex items-center justify-center text-xl font-bold ${isSelected ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400'}`}>{chat.name.charAt(0)}</div>}
                           {chat.unreadCount ? chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-red-500 text-white text-[10px] font-black flex items-center justify-center rounded-full border-2 border-neutral-950">{chat.unreadCount}</div> : null}
@@ -437,10 +437,10 @@ export const Inbox: React.FC = () => {
                           <p className={`text-sm truncate font-medium ${isSelected ? 'text-white/80' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages yet'}</p>
                         </div>
                         
-                        <div className={`absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity`}>
+                        <div className={`absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity z-10`}>
                              <button 
                                 onClick={(e) => { e.stopPropagation(); setListMenuId(isMenuOpen ? null : chat.id); }}
-                                className="p-2 bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-full border border-white/10"
+                                className="p-2 bg-neutral-950/90 hover:bg-neutral-800 text-neutral-400 hover:text-white rounded-full border border-white/10 shadow-lg"
                              >
                                  <MoreVertical size={16} />
                              </button>
@@ -449,12 +449,20 @@ export const Inbox: React.FC = () => {
                       
                       {isMenuOpen && (
                           <>
-                            <div className="fixed inset-0 z-40" onClick={() => setListMenuId(null)}></div>
-                            <div className="absolute right-4 top-14 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl z-50 p-1 w-44 animate-in fade-in zoom-in-95 duration-200">
-                                <button onClick={(e) => handleRemoveChat(e, chat.id)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/10 rounded-xl transition-colors">
-                                    <Trash2 size={16} /> Remove Chat
+                            <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); setListMenuId(null); }}></div>
+                            <div className="absolute right-4 top-[85%] bg-neutral-900/95 backdrop-blur-2xl border border-white/10 rounded-[20px] shadow-2xl z-[70] p-1.5 w-48 animate-in fade-in zoom-in-95 duration-200 origin-top-right">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); handleRemoveChat(chat.id); }} 
+                                  className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/10 rounded-xl transition-colors"
+                                >
+                                    <Trash2 size={18} /> Remove Chat
                                 </button>
-                                <button onClick={(e) => { e.stopPropagation(); setListMenuId(null); }} className="w-full px-4 py-2 text-[10px] font-black text-neutral-500 uppercase tracking-widest text-center hover:text-white transition-colors">Cancel</button>
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setListMenuId(null); }} 
+                                  className="w-full px-4 py-2.5 text-[10px] font-black text-neutral-500 uppercase tracking-widest text-center hover:text-white transition-colors"
+                                >
+                                  Cancel
+                                </button>
                             </div>
                           </>
                       )}
