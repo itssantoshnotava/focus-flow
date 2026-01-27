@@ -84,7 +84,7 @@ export const Inbox: React.FC = () => {
   const [followers, setFollowers] = useState<Record<string, boolean>>({});
   const [archivedChats, setArchivedChats] = useState<Record<string, boolean>>({});
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -144,24 +144,30 @@ export const Inbox: React.FC = () => {
     }
   };
 
-  // --- SCROLL MANAGEMENT (FIXED: Snap to Bottom) ---
+  // --- SCROLL MANAGEMENT (FIXED: Absolutely Instant) ---
   const isOpeningChat = useRef(false);
   useEffect(() => { if (activeChatId) isOpeningChat.current = true; }, [activeChatId]);
 
   useLayoutEffect(() => {
-    if ((messages.length > 0 || typingUsers.length > 0) && messagesEndRef.current) {
-      if (isOpeningChat.current) {
-        messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
-        // Small timeout to catch late renders/images
-        setTimeout(() => {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
-            isOpeningChat.current = false;
-        }, 50);
-      } else {
-        messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    if (isOpeningChat.current) {
+        // Force scroll height recalculation and jump instantly
+        container.scrollTop = container.scrollHeight;
+        isOpeningChat.current = false;
+        // Small safeguard for dynamically sized content
+        requestAnimationFrame(() => {
+            if (container) container.scrollTop = container.scrollHeight;
+        });
+    } else {
+        // Standard smooth scroll for new messages
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+        if (isNearBottom) {
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        }
     }
-  }, [messages, typingUsers]);
+  }, [messages, typingUsers, activeChatId]);
 
   // --- REAL-TIME DATA SYNC ---
   useEffect(() => {
@@ -384,7 +390,7 @@ export const Inbox: React.FC = () => {
             <button className={`p-3 rounded-2xl transition-colors text-neutral-500 hover:text-white hover:bg-white/5`}><MoreVertical size={20} /></button>
           </div>
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-4">
             {messages.map((msg) => {
               const isMe = msg.senderUid === user?.uid;
               const senderPfp = userProfiles[msg.senderUid]?.photoURL;
@@ -426,9 +432,9 @@ export const Inbox: React.FC = () => {
               );
             })}
 
-            {/* TYPING INDICATOR AREA (FIXED: Dynamic Bubbles & Text) */}
+            {/* TYPING INDICATOR AREA */}
             {typingUsers.length > 0 && (
-                <div className="flex items-center gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="flex items-center gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-2">
                     <div className="flex -space-x-3 mr-1">
                         {typingUsers.slice(0, 5).map((u, i) => (
                             <div key={u.uid} className="relative transition-transform hover:translate-y-[-2px] hover:scale-110" style={{ zIndex: 10 - i }}>
@@ -456,7 +462,6 @@ export const Inbox: React.FC = () => {
                     </div>
                 </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           {/* Footer Input */}
