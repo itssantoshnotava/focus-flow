@@ -5,31 +5,30 @@ import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsLeaderboard } from './FriendsLeaderboard';
 import { EXAMS, getSubjectById } from '../constants';
 import { ProgressMap, Exam, UserProfile, StudySession } from '../types';
-import { Trophy, Flame, CalendarClock, Clock } from 'lucide-react';
+import { Trophy, Flame, CalendarClock, Clock, Share2, Zap } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimer } from '../contexts/TimerContext';
-import { ref, get } from 'firebase/database';
+import { ref, get, push, set } from 'firebase/database';
 import { database } from '../firebase';
+import { useNavigate } from 'react-router-dom';
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const { sessions } = useTimer();
+  const navigate = useNavigate();
   
-  // --- State: Syllabus Progress ---
   const [progress, setProgress] = useState<ProgressMap>(() => {
     const saved = localStorage.getItem('focusflow_progress');
     return saved ? JSON.parse(saved) : {};
   });
 
-  // --- State: User Profile Data ---
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [sharing, setSharing] = useState(false);
 
-  // --- Effects: Persistence ---
   useEffect(() => {
     localStorage.setItem('focusflow_progress', JSON.stringify(progress));
   }, [progress]);
 
-  // --- Effect: Fetch Profile ---
   useEffect(() => {
       if (user) {
           get(ref(database, `users/${user.uid}`)).then(snap => {
@@ -38,7 +37,6 @@ export const Dashboard: React.FC = () => {
       }
   }, [user, sessions]);
 
-  // --- Handlers ---
   const handleToggleProgress = useCallback((examId: string, subjectId: string, chapterId: string, type: 'completed' | 'pyqs') => {
     const key = `${examId}-${subjectId}-${chapterId}`;
     setProgress(prev => ({
@@ -50,7 +48,6 @@ export const Dashboard: React.FC = () => {
     }));
   }, []);
 
-  // --- Stats Calculation ---
   const stats = useMemo(() => {
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
@@ -73,6 +70,7 @@ export const Dashboard: React.FC = () => {
 
     return {
         rawTotalSeconds: totalSeconds,
+        todaySeconds,
         totalHours: (totalSeconds / 3600).toFixed(1),
         todayHours: (todaySeconds / 3600).toFixed(1),
         weekHours: (weekSeconds / 3600).toFixed(1),
@@ -81,32 +79,46 @@ export const Dashboard: React.FC = () => {
     };
   }, [sessions, userProfile]);
 
-  // --- Filtered Exams Logic ---
+  const handleShareSession = async () => {
+      if (!user || stats.todaySeconds < 60) return;
+      setSharing(true);
+      try {
+          const postRef = push(ref(database, 'posts'));
+          await set(postRef, {
+              authorUid: user.uid,
+              authorName: user.displayName,
+              authorPhoto: user.photoURL,
+              type: 'session',
+              content: `Just finished my study session! Feeling productive today. 🧠🔥`,
+              timestamp: Date.now(),
+              sessionData: {
+                  duration: stats.todaySeconds,
+                  mode: 'Deep Work',
+              }
+          });
+          navigate('/feed');
+      } finally {
+          setSharing(false);
+      }
+  };
+
   const filteredExams = useMemo(() => {
       if (!userProfile) return EXAMS;
-      
       const { stream, selectedExams, selectedSubjects } = userProfile;
       const allExams = [...EXAMS];
-
       if (stream === 'Commerce') {
-          const commerceExam: Exam = {
+          return [{
               id: 'boards-commerce',
               name: 'Class 12 Boards (Commerce)',
               date: '2026-02-20',
               subjects: (selectedSubjects || []).map(sid => getSubjectById(sid))
-          };
-          return [commerceExam];
+          }];
       }
-      
-      if (stream === 'IIT') {
-          return allExams.filter(e => ['boards', 'jee', 'bitsat', 'viteee'].includes(e.id));
-      }
-
+      if (stream === 'IIT') return allExams.filter(e => ['boards', 'jee', 'bitsat', 'viteee'].includes(e.id));
       if (stream === 'PCM') {
           const allowedIds = new Set(['boards', ...(selectedExams || [])]);
           return allExams.filter(e => allowedIds.has(e.id));
       }
-
       return allExams;
   }, [userProfile]);
 
@@ -115,9 +127,20 @@ export const Dashboard: React.FC = () => {
         <div className="max-w-7xl w-full mx-auto px-4 py-8 flex flex-col gap-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            {/* Left Column */}
             <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-4">
               <Timer />
+
+              <button 
+                onClick={handleShareSession}
+                disabled={sharing || stats.todaySeconds < 60}
+                className="w-full bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 p-4 rounded-xl border border-indigo-500/20 flex items-center justify-between group transition-all disabled:opacity-30"
+              >
+                  <div className="flex items-center gap-3">
+                      <Zap size={20} className="group-hover:scale-110 transition-transform" />
+                      <span className="text-sm font-bold">Share Today's Work</span>
+                  </div>
+                  <Share2 size={16} />
+              </button>
 
               <div className="grid grid-cols-2 gap-3">
                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1 group hover:border-orange-500/30 transition-colors">
@@ -141,7 +164,6 @@ export const Dashboard: React.FC = () => {
               <FriendsLeaderboard />
             </div>
 
-            {/* Right Column */}
             <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-4">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
                  {filteredExams.map(exam => (

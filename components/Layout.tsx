@@ -4,7 +4,7 @@ import { ref, onValue, update, onDisconnect } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  LayoutDashboard, Home, MessageCircle, Search, Bell, Globe, User 
+  LayoutDashboard, Home, MessageCircle, Search, Bell, Globe, User, Share2 
 } from 'lucide-react';
 
 export const Layout: React.FC = () => {
@@ -195,6 +195,7 @@ export const Layout: React.FC = () => {
 
         <div className="flex flex-col gap-5 flex-1 w-full items-center">
            <NavItem icon={Home} path="/" label="Home" />
+           <NavItem icon={Share2} path="/feed" label="Feed" />
            <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
            <NavItem icon={Search} path="/search" label="Search" />
            <NavItem icon={Bell} path="/notifications" label="Notifications" />
@@ -226,6 +227,7 @@ export const Layout: React.FC = () => {
       {/* --- MOBILE NAV --- */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-22 bg-[#1414148c] backdrop-blur-[24px] backdrop-saturate-[160%] border-t border-white/10 flex items-center justify-around z-50 pb-6 px-4 rounded-t-[32px] shadow-[0_-8px_30px_rgba(0,0,0,0.25)]">
          <NavItem icon={Home} path="/" label="Home" />
+         <NavItem icon={Share2} path="/feed" label="Feed" />
          <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
          <NavItem icon={Search} path="/search" label="Search" />
          <NavItem icon={Bell} path="/notifications" label="Notifications" />

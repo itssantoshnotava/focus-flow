@@ -9,6 +9,7 @@ import { GroupStudy } from './components/GroupStudy';
 import { GroupSettings } from './components/GroupSettings';
 import { Profile } from './components/Profile';
 import { SettingsPage } from './components/Settings';
+import { Feed } from './components/Feed';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimerProvider } from './contexts/TimerContext';
 import { Login } from './components/Login';
@@ -146,6 +147,7 @@ const AppContent: React.FC = () => {
         <Routes>
         <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/feed" element={<Feed />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
