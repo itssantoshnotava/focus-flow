@@ -4,10 +4,11 @@ import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Heart, MessageCircle, Send, Image as ImageIcon, X, Plus, 
-  Loader2, Zap, User, MoreVertical, Compass, Edit3
+  Loader2, Zap, User, MoreVertical, Compass, Edit3, Trash2, AlertCircle
 } from 'lucide-react';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 
 export interface Post {
   id: string;
@@ -85,7 +86,7 @@ export const Pulse: React.FC = () => {
           </h1>
         </div>
 
-        {/* Inline Create Trigger */}
+        {/* Inline Create Trigger - Visual emphasis on media */}
         <div 
           onClick={() => setShowCreateModal(true)}
           className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-[24px] p-4 mb-8 flex items-center gap-4 cursor-pointer hover:bg-white/[0.05] transition-all group shadow-xl"
@@ -94,10 +95,10 @@ export const Pulse: React.FC = () => {
              {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-500"><User size={20} /></div>}
           </div>
           <div className="flex-1 text-neutral-500 font-medium text-sm group-hover:text-neutral-400 transition-colors">
-            What's on your mind, {user?.displayName?.split(' ')[0]}?
+            Share a study update with photos...
           </div>
           <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl group-hover:bg-indigo-500 group-hover:text-white transition-all">
-            <Edit3 size={18} />
+            <ImageIcon size={18} />
           </div>
         </div>
 
@@ -136,11 +137,24 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
   const navigate = useNavigate();
   const [likes, setLikes] = useState<Record<string, boolean>>({});
   const [commentsCount, setCommentsCount] = useState(0);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     onValue(ref(database, `postLikes/${post.id}`), (snap) => setLikes(snap.val() || {}));
     onValue(ref(database, `postComments/${post.id}`), (snap) => setCommentsCount(snap.exists() ? Object.keys(snap.val()).length : 0));
   }, [post.id]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    if (showMenu) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMenu]);
 
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -150,8 +164,22 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
     else await set(likeRef, true);
   };
 
+  const handleDeletePost = async () => {
+    try {
+      await remove(ref(database, `posts/${post.id}`));
+      // Cleanup associated data
+      await remove(ref(database, `postLikes/${post.id}`));
+      await remove(ref(database, `postComments/${post.id}`));
+      setShowDeleteConfirm(false);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete post.");
+    }
+  };
+
   const isLiked = user ? likes[user.uid] : false;
   const likesCount = Object.keys(likes).length;
+  const isAuthor = user?.uid === post.authorUid;
 
   const formatTime = (ts: number) => {
     const diff = Date.now() - ts;
@@ -178,16 +206,36 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
               <span className="text-[10px] font-black text-neutral-600 uppercase tracking-widest leading-none mt-0.5">{formatTime(post.timestamp)}</span>
             </div>
           </div>
-          <button className="p-2 text-neutral-600 hover:text-white transition-colors"><MoreVertical size={16} /></button>
+          
+          <div className="relative" ref={menuRef}>
+            <button 
+              onClick={() => setShowMenu(!showMenu)} 
+              className="p-2 text-neutral-600 hover:text-white transition-colors"
+            >
+              <MoreVertical size={16} />
+            </button>
+            {showMenu && (
+              <div className="absolute right-0 mt-2 w-48 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl z-50 py-1 overflow-hidden animate-in fade-in zoom-in duration-200">
+                {isAuthor ? (
+                  <button 
+                    onClick={() => { setShowMenu(false); setShowDeleteConfirm(true); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 transition-colors"
+                  >
+                    <Trash2 size={16} /> Delete post
+                  </button>
+                ) : (
+                  <button 
+                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-400 hover:bg-white/5 transition-colors"
+                  >
+                    <AlertCircle size={16} /> Report
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="space-y-4">
-          {post.content && (
-            <p className="text-neutral-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
-              {post.content}
-            </p>
-          )}
-
           {post.type === 'image' && post.images && (
             <div className={`grid gap-2 overflow-hidden rounded-3xl border border-white/5 ${post.images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
               {post.images.map((img, i) => (
@@ -224,6 +272,12 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
               )}
             </div>
           )}
+
+          {post.content && (
+            <p className="text-neutral-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
+              {post.content}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-6 mt-7 pt-5 border-t border-white/[0.05]">
@@ -244,6 +298,31 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
           </button>
         </div>
       </div>
+
+      {showDeleteConfirm && createPortal(
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#1a1a1a] border border-white/10 rounded-[32px] p-8 max-w-xs w-full text-center shadow-2xl animate-in zoom-in duration-200">
+            <div className="w-16 h-16 bg-red-500/10 rounded-[24px] flex items-center justify-center mx-auto mb-6"><Trash2 size={32} className="text-red-500" /></div>
+            <h3 className="text-xl font-black text-white mb-2">Delete this post?</h3>
+            <p className="text-neutral-500 text-sm mb-8">This action can't be undone.</p>
+            <div className="flex flex-col gap-2">
+              <button 
+                onClick={handleDeletePost} 
+                className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-95"
+              >
+                Delete
+              </button>
+              <button 
+                onClick={() => setShowDeleteConfirm(false)} 
+                className="w-full py-4 bg-neutral-800 text-neutral-400 hover:text-white rounded-2xl transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };
@@ -271,7 +350,7 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   };
 
   const handlePost = async () => {
-    if (!user || (!text.trim() && images.length === 0)) return;
+    if (!user || images.length === 0) return;
     setLoading(true);
 
     try {
@@ -282,7 +361,7 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         authorUid: user.uid,
         authorName: user.displayName,
         authorPhoto: user.photoURL,
-        type: imageUrls.length > 0 ? 'image' : 'text',
+        type: 'image',
         content: text.trim(),
         images: imageUrls,
         timestamp: Date.now()
@@ -305,52 +384,70 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         </div>
 
         <div className="space-y-6">
+          {/* Media First Selection Area */}
+          <div className="flex flex-col gap-4">
+            {previews.length === 0 ? (
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full aspect-square md:aspect-video rounded-[32px] border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-4 hover:bg-white/5 hover:border-indigo-500/50 transition-all group"
+              >
+                <div className="w-16 h-16 bg-indigo-500/10 text-indigo-400 rounded-3xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <ImageIcon size={32} />
+                </div>
+                <div className="text-center">
+                  <p className="text-white font-bold">Select photos</p>
+                  <p className="text-neutral-500 text-xs mt-1 uppercase tracking-widest">Share what you're studying</p>
+                </div>
+              </button>
+            ) : (
+              <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
+                {previews.map((p, i) => (
+                  <div key={i} className="relative w-40 h-40 shrink-0 rounded-2xl overflow-hidden border border-white/10 group shadow-lg">
+                    <img src={p} className="w-full h-full object-cover" />
+                    <button onClick={() => removeImage(i)} className="absolute top-2 right-2 p-1.5 bg-black/60 text-white rounded-full hover:bg-black active:scale-90 transition-all"><X size={12} /></button>
+                  </div>
+                ))}
+                {previews.length < 3 && (
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-40 h-40 shrink-0 rounded-2xl border-2 border-dashed border-white/10 flex items-center justify-center text-neutral-500 hover:text-white hover:bg-white/5 transition-all"
+                  >
+                    <Plus size={24} />
+                  </button>
+                )}
+              </div>
+            )}
+            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" multiple />
+          </div>
+
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl overflow-hidden bg-neutral-900 border border-white/5 shadow-inner shrink-0">
+            <div className="w-12 h-12 rounded-2xl overflow-hidden bg-neutral-900 border border-white/5 shadow-inner shrink-0 mt-1">
               {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-500"><User size={24} /></div>}
             </div>
             <textarea 
-              autoFocus
               value={text}
               onChange={e => setText(e.target.value.slice(0, 500))}
-              placeholder="Share an update or a thought..."
-              className="flex-1 bg-transparent border-none text-white text-lg focus:outline-none resize-none min-h-[140px] placeholder:text-neutral-700 custom-scrollbar"
+              placeholder="Write a caption... (optional)"
+              className="flex-1 bg-transparent border-none text-white text-lg focus:outline-none resize-none min-h-[100px] placeholder:text-neutral-700 custom-scrollbar"
             />
           </div>
 
-          {previews.length > 0 && (
-            <div className="flex gap-3">
-              {previews.map((p, i) => (
-                <div key={i} className="relative w-28 h-28 rounded-2xl overflow-hidden border border-white/10 group shadow-lg">
-                  <img src={p} className="w-full h-full object-cover" />
-                  <button onClick={() => removeImage(i)} className="absolute top-2 right-2 p-1.5 bg-black/60 text-white rounded-full hover:bg-black active:scale-90 transition-all"><X size={12} /></button>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div className="flex items-center justify-between pt-6 border-t border-white/5">
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={images.length >= 3}
-              className="flex items-center gap-2 px-4 py-2.5 bg-white/5 text-indigo-400 rounded-xl hover:bg-white/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ImageIcon size={20} />
-              <span className="text-xs font-bold uppercase tracking-widest">Add Media</span>
-            </button>
-            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" multiple />
-            
             <div className="flex items-center gap-4">
               <span className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.2em]">{text.length}/500</span>
-              <button 
-                onClick={handlePost}
-                disabled={loading || (!text.trim() && images.length === 0)}
-                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-8 py-3 rounded-2xl font-bold shadow-lg shadow-indigo-900/20 flex items-center gap-2 transition-all active:scale-95"
-              >
-                {loading ? <Loader2 size={18} className="animate-spin" /> : 'Pulse'}
-              </button>
             </div>
+            
+            <button 
+              onClick={handlePost}
+              disabled={loading || images.length === 0}
+              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white px-10 py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-900/20 flex items-center gap-2 transition-all active:scale-95"
+            >
+              {loading ? <Loader2 size={18} className="animate-spin" /> : 'Pulse'}
+            </button>
           </div>
+          {images.length === 0 && (
+            <p className="text-[10px] text-center text-neutral-600 uppercase font-black tracking-widest animate-pulse">Photo required to post</p>
+          )}
         </div>
       </div>
     </div>
