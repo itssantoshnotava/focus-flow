@@ -4,11 +4,23 @@ import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Heart, MessageCircle, Send, Image as ImageIcon, X, Plus, 
-  Loader2, Zap, User, MoreVertical, Compass, Edit3, Trash2, AlertCircle
+  Loader2, Zap, User, MoreVertical, Compass, Edit3, Trash2, AlertCircle,
+  Music, Play, Pause, Search as SearchIcon, Volume2, VolumeX, Check
 } from 'lucide-react';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
+
+// Global reference to handle "Only one playing at a time"
+let globalAudioInstance: HTMLAudioElement | null = null;
+let globalSetIsPlaying: ((val: boolean) => void) | null = null;
+
+export interface MusicMetadata {
+  trackName: string;
+  artistName: string;
+  previewUrl: string;
+  artworkUrl: string;
+}
 
 export interface Post {
   id: string;
@@ -19,6 +31,7 @@ export interface Post {
   content: string;
   images?: string[];
   timestamp: number;
+  music?: MusicMetadata;
   sessionData?: {
     duration: number;
     mode: string;
@@ -86,7 +99,6 @@ export const Pulse: React.FC = () => {
           </h1>
         </div>
 
-        {/* Inline Create Trigger - Visual emphasis on media */}
         <div 
           onClick={() => setShowCreateModal(true)}
           className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-[24px] p-4 mb-8 flex items-center gap-4 cursor-pointer hover:bg-white/[0.05] transition-all group shadow-xl"
@@ -139,7 +151,12 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
   const [commentsCount, setCommentsCount] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  
   const menuRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     onValue(ref(database, `postLikes/${post.id}`), (snap) => setLikes(snap.val() || {}));
@@ -156,6 +173,56 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showMenu]);
 
+  // Audio & Autoplay logic
+  useEffect(() => {
+    if (!post.music || !post.music.previewUrl) return;
+
+    const audio = new Audio(post.music.previewUrl);
+    audio.loop = true;
+    audio.volume = 0.6;
+    audioRef.current = audio;
+
+    const handlePlay = () => {
+        // Stop any currently playing audio from other posts
+        if (globalAudioInstance && globalAudioInstance !== audio) {
+            globalAudioInstance.pause();
+            if (globalSetIsPlaying) globalSetIsPlaying(false);
+        }
+        audio.play().then(() => {
+            setIsPlaying(true);
+            globalAudioInstance = audio;
+            globalSetIsPlaying = setIsPlaying;
+        }).catch(() => setIsPlaying(false));
+    };
+
+    const handlePause = () => {
+        audio.pause();
+        setIsPlaying(false);
+        if (globalAudioInstance === audio) {
+            globalAudioInstance = null;
+            globalSetIsPlaying = null;
+        }
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+          handlePlay();
+        } else {
+          handlePause();
+        }
+      });
+    }, { threshold: 0.6 });
+
+    if (cardRef.current) observer.observe(cardRef.current);
+
+    return () => {
+      handlePause();
+      audio.src = "";
+      observer.disconnect();
+    };
+  }, [post.music]);
+
   const handleLike = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!user) return;
@@ -167,7 +234,6 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
   const handleDeletePost = async () => {
     try {
       await remove(ref(database, `posts/${post.id}`));
-      // Cleanup associated data
       await remove(ref(database, `postLikes/${post.id}`));
       await remove(ref(database, `postComments/${post.id}`));
       setShowDeleteConfirm(false);
@@ -175,6 +241,34 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
       console.error(err);
       alert("Failed to delete post.");
     }
+  };
+
+  const togglePlayback = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      // Re-trigger global stop
+      if (globalAudioInstance && globalAudioInstance !== audioRef.current) {
+          globalAudioInstance.pause();
+          if (globalSetIsPlaying) globalSetIsPlaying(false);
+      }
+      audioRef.current.play().then(() => {
+          setIsPlaying(true);
+          globalAudioInstance = audioRef.current;
+          globalSetIsPlaying = setIsPlaying;
+      }).catch(console.error);
+    }
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!audioRef.current) return;
+    const newMuted = !isMuted;
+    audioRef.current.muted = newMuted;
+    setIsMuted(newMuted);
   };
 
   const isLiked = user ? likes[user.uid] : false;
@@ -190,7 +284,7 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
   };
 
   return (
-    <div className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.06] rounded-[32px] overflow-hidden shadow-2xl transition-all hover:bg-white/[0.05] animate-in fade-in slide-in-from-bottom-4 duration-500 group/post">
+    <div ref={cardRef} className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.06] rounded-[32px] overflow-hidden shadow-2xl transition-all hover:bg-white/[0.05] animate-in fade-in slide-in-from-bottom-4 duration-500 group/post">
       <div className="p-6">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/profile/${post.authorUid}`)}>
@@ -235,17 +329,45 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-4 relative">
           {post.type === 'image' && post.images && (
-            <div className={`grid gap-2 overflow-hidden rounded-3xl border border-white/5 ${post.images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-              {post.images.map((img, i) => (
-                <img 
-                  key={i} 
-                  src={img} 
-                  className={`w-full object-cover hover:scale-105 transition-transform duration-700 ${post.images!.length === 3 && i === 0 ? 'col-span-2 h-72' : 'h-56'}`} 
-                  alt="Post content" 
-                />
-              ))}
+            <div className="relative rounded-3xl overflow-hidden border border-white/5 aspect-[4/5] bg-black/20">
+              <div className={`h-full grid gap-2 ${post.images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                {post.images.map((img, i) => (
+                  <img 
+                    key={i} 
+                    src={img} 
+                    className={`w-full h-full object-cover hover:scale-105 transition-transform duration-700 ${post.images!.length === 3 && i === 0 ? 'col-span-2' : ''}`} 
+                    alt="Post content" 
+                  />
+                ))}
+              </div>
+
+              {/* Music Badge Overlay */}
+              {post.music && (
+                <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+                   <div 
+                    onClick={togglePlayback}
+                    className="flex items-center gap-2.5 bg-black/50 backdrop-blur-xl border border-white/10 rounded-full px-3 py-1.5 cursor-pointer hover:bg-black/70 transition-all max-w-[75%]"
+                   >
+                     <div className="w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center text-white shrink-0 shadow-lg">
+                       {isPlaying ? <Music size={12} className="animate-pulse" /> : <Play size={12} fill="currentColor" />}
+                     </div>
+                     <div className="flex flex-col min-w-0 marquee-container">
+                       <span className={`text-[10px] text-white font-black tracking-tight whitespace-nowrap ${post.music.trackName.length > 18 ? 'animate-marquee' : ''}`}>
+                         {post.music.trackName}
+                       </span>
+                       <span className="text-[8px] text-neutral-400 font-bold uppercase tracking-widest truncate leading-none">{post.music.artistName}</span>
+                     </div>
+                   </div>
+                   <button 
+                    onClick={toggleMute}
+                    className="p-2.5 bg-black/50 backdrop-blur-xl border border-white/10 rounded-full text-white hover:bg-black/70 transition-all shadow-lg active:scale-90"
+                   >
+                     {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                   </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -274,7 +396,7 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
           )}
 
           {post.content && (
-            <p className="text-neutral-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium">
+            <p className="text-neutral-200 text-[15px] leading-relaxed whitespace-pre-wrap font-medium px-1">
               {post.content}
             </p>
           )}
@@ -285,16 +407,16 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
             onClick={handleLike}
             className={`flex items-center gap-2 transition-all ${isLiked ? 'text-red-500 scale-110' : 'text-neutral-500 hover:text-red-500'}`}
           >
-            <Heart size={20} className={isLiked ? 'fill-current' : ''} />
-            <span className="text-xs font-bold">{likesCount || ''}</span>
+            <Heart size={22} className={isLiked ? 'fill-current' : ''} />
+            <span className="text-xs font-black tracking-widest">{likesCount || ''}</span>
           </button>
           
           <button 
             onClick={(e) => { e.stopPropagation(); onOpenComments(); }}
             className="flex items-center gap-2 text-neutral-500 hover:text-indigo-400 transition-all"
           >
-            <MessageCircle size={20} />
-            <span className="text-xs font-bold">{commentsCount || ''}</span>
+            <MessageCircle size={22} />
+            <span className="text-xs font-black tracking-widest">{commentsCount || ''}</span>
           </button>
         </div>
       </div>
@@ -327,12 +449,125 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
   );
 };
 
+const MusicPickerModal: React.FC<{ onSelect: (music: MusicMetadata) => void, onClose: () => void }> = ({ onSelect, onClose }) => {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [previewingUrl, setPreviewingUrl] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handleSearch = async () => {
+    if (!query.trim()) return;
+    setLoading(true);
+    try {
+      const resp = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=20`);
+      const data = await resp.json();
+      setResults(data.results || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const togglePreview = (url: string) => {
+    if (previewingUrl === url) {
+      audioRef.current?.pause();
+      setPreviewingUrl(null);
+    } else {
+      if (audioRef.current) audioRef.current.pause();
+      const audio = new Audio(url);
+      audio.play();
+      audioRef.current = audio;
+      setPreviewingUrl(url);
+      audio.onended = () => setPreviewingUrl(null);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-[1100] flex items-end justify-center p-0 md:p-4 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={onClose}>
+      <div className="bg-[#1a1a1a] border-t md:border border-white/10 w-full max-w-lg rounded-t-[40px] md:rounded-[40px] h-[80vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-20 duration-500" onClick={e => e.stopPropagation()}>
+        <div className="p-6 border-b border-white/5 flex items-center justify-between shrink-0">
+          <h3 className="text-xl font-black text-white">Add Music</h3>
+          <button onClick={onClose} className="p-2 text-neutral-500 hover:text-white transition-colors"><X size={24} /></button>
+        </div>
+
+        <div className="p-6 border-b border-white/5 shrink-0">
+           <div className="relative">
+             <SearchIcon size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-700" />
+             <input 
+              autoFocus
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSearch()}
+              placeholder="Search tracks, artists..."
+              className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 py-4 text-white placeholder:text-neutral-700 focus:outline-none focus:border-indigo-500 transition-all text-sm"
+             />
+           </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+          {loading ? (
+            <div className="flex justify-center py-20"><Loader2 className="animate-spin text-indigo-500" /></div>
+          ) : results.length > 0 ? (
+            results.map(track => (
+              <div 
+                key={track.trackId}
+                className="flex items-center gap-4 p-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all group"
+                onClick={() => onSelect({
+                  trackName: track.trackName,
+                  artistName: track.artistName,
+                  previewUrl: track.previewUrl,
+                  artworkUrl: track.artworkUrl100
+                })}
+              >
+                <div className="relative shrink-0">
+                  <img src={track.artworkUrl100} className="w-12 h-12 rounded-xl object-cover shadow-lg" />
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); togglePreview(track.previewUrl); }}
+                    className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity rounded-xl ${previewingUrl === track.previewUrl ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                  >
+                    {previewingUrl === track.previewUrl ? <Pause size={18} className="text-white" /> : <Play size={18} className="text-white" />}
+                  </button>
+                </div>
+                <div className="flex-1 min-w-0">
+                   <p className="text-sm font-bold text-white truncate">{track.trackName}</p>
+                   <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest truncate">{track.artistName}</p>
+                </div>
+                <div className="p-2 text-indigo-400 opacity-0 group-hover:opacity-100">
+                  <Plus size={18} />
+                </div>
+              </div>
+            ))
+          ) : query ? (
+            <div className="py-20 text-center text-neutral-600 text-sm font-bold uppercase tracking-widest">No songs found</div>
+          ) : (
+            <div className="py-20 text-center flex flex-col items-center gap-4 text-neutral-700">
+               <Music size={40} className="opacity-10" />
+               <p className="text-xs font-black uppercase tracking-[0.2em]">Search to add vibes</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { user } = useAuth();
   const [text, setText] = useState('');
   const [images, setImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [music, setMusic] = useState<MusicMetadata | null>(null);
+  const [showMusicPicker, setShowMusicPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -364,7 +599,8 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         type: 'image',
         content: text.trim(),
         images: imageUrls,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        music: music || null
       });
       onClose();
     } catch (err) {
@@ -384,7 +620,6 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         </div>
 
         <div className="space-y-6">
-          {/* Media First Selection Area */}
           <div className="flex flex-col gap-4">
             {previews.length === 0 ? (
               <button 
@@ -420,6 +655,27 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" multiple />
           </div>
 
+          <div className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl shadow-inner">
+             {music ? (
+               <div className="flex items-center gap-3 flex-1 min-w-0 animate-in slide-in-from-left-2">
+                  <img src={music.artworkUrl} className="w-11 h-11 rounded-xl shadow-lg border border-white/5" />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-black text-white truncate tracking-tight">{music.trackName}</span>
+                    <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest truncate">{music.artistName}</span>
+                  </div>
+                  <button onClick={() => setMusic(null)} className="ml-auto p-2.5 text-neutral-600 hover:text-red-400 bg-white/5 rounded-xl transition-all"><X size={16} /></button>
+               </div>
+             ) : (
+               <button 
+                onClick={() => setShowMusicPicker(true)}
+                className="w-full flex items-center justify-center gap-2.5 py-1.5 text-neutral-400 hover:text-indigo-400 transition-all group"
+               >
+                 <Music size={18} className="group-hover:scale-110 transition-transform" />
+                 <span className="text-xs font-black uppercase tracking-[0.2em]">Add Music</span>
+               </button>
+             )}
+          </div>
+
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-2xl overflow-hidden bg-neutral-900 border border-white/5 shadow-inner shrink-0 mt-1">
               {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-500"><User size={24} /></div>}
@@ -440,7 +696,7 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             <button 
               onClick={handlePost}
               disabled={loading || images.length === 0}
-              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white px-10 py-3.5 rounded-2xl font-bold shadow-lg shadow-indigo-900/20 flex items-center gap-2 transition-all active:scale-95"
+              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white px-10 py-4 rounded-2xl font-black uppercase tracking-[0.1em] text-sm shadow-xl shadow-indigo-900/20 flex items-center gap-2 transition-all active:scale-95"
             >
               {loading ? <Loader2 size={18} className="animate-spin" /> : 'Pulse'}
             </button>
@@ -450,6 +706,7 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           )}
         </div>
       </div>
+      {showMusicPicker && <MusicPickerModal onSelect={(m) => { setMusic(m); setShowMusicPicker(false); }} onClose={() => setShowMusicPicker(false)} />}
     </div>
   );
 };
