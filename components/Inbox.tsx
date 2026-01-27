@@ -120,6 +120,11 @@ export const Inbox: React.FC = () => {
     return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
   }, [user, activeChatId, selectedChat]);
 
+  // Check if current user has an active signal
+  const mySignal = useMemo(() => {
+    return signals.find(s => s.userUid === user?.uid);
+  }, [signals, user?.uid]);
+
   // Derived map for Group Seen Bubbles: uid -> last msgId they saw
   const lastSeenByPerUser = useMemo(() => {
     const map: Record<string, string> = {};
@@ -163,7 +168,7 @@ export const Inbox: React.FC = () => {
   }, [user, following, followers]);
 
   const handlePostManualSignal = async () => {
-    if (!user || !manualSignalText.trim() || isTimerActive) return;
+    if (!user || !manualSignalText.trim() || isTimerActive || mySignal) return;
     const signalRef = ref(database, `signals/${user.uid}`);
     await set(signalRef, {
         text: manualSignalText.trim(),
@@ -177,6 +182,14 @@ export const Inbox: React.FC = () => {
     });
     setManualSignalText('');
     setShowSignalCreator(false);
+  };
+
+  const handleDeleteSignal = async (targetUid: string) => {
+    if (!user || targetUid !== user.uid) return;
+    if (window.confirm("Delete your current signal?")) {
+        await remove(ref(database, `signals/${user.uid}`));
+        setSelectedSignalModal(null);
+    }
   };
 
   const handleLikeSignal = async (signalId: string, targetUid: string) => {
@@ -507,18 +520,20 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS ROW (NEW) --- */}
+        {/* --- SIGNALS ROW --- */}
         {!showArchived && (
             <div className="p-4 border-b border-neutral-900 overflow-x-auto custom-scrollbar flex items-center gap-3 bg-neutral-950/20">
-                {/* MY SIGNAL CREATOR */}
-                <button 
-                  onClick={() => !isTimerActive && setShowSignalCreator(true)}
-                  disabled={isTimerActive}
-                  className={`shrink-0 w-14 h-14 rounded-full border-2 border-dashed flex items-center justify-center transition-all ${isTimerActive ? 'border-indigo-500/30 text-indigo-500/40 bg-indigo-500/5' : 'border-neutral-800 text-neutral-500 hover:border-indigo-500 hover:text-indigo-400 bg-neutral-900 hover:bg-neutral-800 active:scale-95'}`}
-                  title={isTimerActive ? "Focusing..." : "Add Signal"}
-                >
-                    {isTimerActive ? <Clock size={20} className="animate-pulse" /> : <Plus size={24} />}
-                </button>
+                {/* MY SIGNAL CREATOR - Only show if NO signal exists */}
+                {!mySignal && (
+                  <button 
+                    onClick={() => !isTimerActive && setShowSignalCreator(true)}
+                    disabled={isTimerActive}
+                    className={`shrink-0 w-14 h-14 rounded-full border-2 border-dashed flex items-center justify-center transition-all ${isTimerActive ? 'border-indigo-500/30 text-indigo-500/40 bg-indigo-500/5' : 'border-neutral-800 text-neutral-500 hover:border-indigo-500 hover:text-indigo-400 bg-neutral-900 hover:bg-neutral-800 active:scale-95'}`}
+                    title={isTimerActive ? "Focusing..." : "Add Signal"}
+                  >
+                      {isTimerActive ? <Clock size={20} className="animate-pulse" /> : <Plus size={24} />}
+                  </button>
+                )}
 
                 {signals.map(s => (
                     <div 
@@ -527,7 +542,7 @@ export const Inbox: React.FC = () => {
                       onClick={() => setSelectedSignalModal(s)}
                       className="shrink-0 group relative cursor-pointer"
                     >
-                        <div className="w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr from-indigo-500/50 to-purple-500/50 relative">
+                        <div className={`w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr ${s.userUid === user?.uid ? 'from-indigo-600 to-indigo-400' : 'from-indigo-500/50 to-purple-500/50'} relative`}>
                             <div className="w-full h-full rounded-full overflow-hidden bg-neutral-950 border border-neutral-900 relative">
                                 {s.photoURL ? (
                                     <img src={s.photoURL} className="w-full h-full object-cover" />
@@ -538,8 +553,8 @@ export const Inbox: React.FC = () => {
                             </div>
                         </div>
                         {/* Status Label Pill */}
-                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap px-1.5 py-0.5 bg-neutral-900/90 backdrop-blur-md border border-white/10 rounded-full text-[8px] font-black uppercase text-white shadow-lg tracking-tighter truncate max-w-[64px]">
-                            {s.text}
+                        <div className={`absolute -bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap px-1.5 py-0.5 ${s.userUid === user?.uid ? 'bg-indigo-600' : 'bg-neutral-900/90'} backdrop-blur-md border border-white/10 rounded-full text-[8px] font-black uppercase text-white shadow-lg tracking-tighter truncate max-w-[64px]`}>
+                            {s.userUid === user?.uid ? 'You' : s.text}
                         </div>
                         {s.likes && Object.keys(s.likes).length > 0 && (
                             <div className="absolute -top-1 -right-1 bg-neutral-900 border border-white/10 rounded-full p-1 shadow-xl">
@@ -846,20 +861,29 @@ export const Inbox: React.FC = () => {
                       </p>
                       
                       <div className="w-full flex gap-3 mt-4">
-                          <button 
-                            onClick={() => handleLikeSignal(selectedSignalModal.id, selectedSignalModal.userUid)}
-                            className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black transition-all active:scale-95 ${selectedSignalModal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white shadow-red-900/20' : 'bg-white/5 text-neutral-400 border border-white/10 hover:bg-white/10'}`}
-                          >
-                            <Heart size={20} className={selectedSignalModal.likes?.[user?.uid || ''] ? 'fill-white' : ''} />
-                            {Object.keys(selectedSignalModal.likes || {}).length || ''}
-                          </button>
-                          {selectedSignalModal.userUid !== user?.uid && (
+                          {selectedSignalModal.userUid === user?.uid ? (
+                              <button 
+                                onClick={() => handleDeleteSignal(selectedSignalModal.userUid)}
+                                className="flex-1 bg-red-600 hover:bg-red-500 text-white py-4 rounded-2xl font-black shadow-lg shadow-red-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                              >
+                                <Trash size={20} /> Delete Signal
+                              </button>
+                          ) : (
+                            <>
+                              <button 
+                                onClick={() => handleLikeSignal(selectedSignalModal.id, selectedSignalModal.userUid)}
+                                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black transition-all active:scale-95 ${selectedSignalModal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white shadow-red-900/20' : 'bg-white/5 text-neutral-400 border border-white/10 hover:bg-white/10'}`}
+                              >
+                                <Heart size={20} className={selectedSignalModal.likes?.[user?.uid || ''] ? 'fill-white' : ''} />
+                                {Object.keys(selectedSignalModal.likes || {}).length || ''}
+                              </button>
                               <button 
                                 onClick={() => handleReplyToSignal(selectedSignalModal)}
                                 className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
                               >
                                 <MessageCircle size={20} /> Reply
                               </button>
+                            </>
                           )}
                       </div>
                   </div>
