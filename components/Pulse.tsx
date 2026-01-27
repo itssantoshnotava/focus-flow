@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+// Fix: Added useMemo to the React imports
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ref, onValue, push, set, remove, query, orderByChild, limitToLast } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Heart, MessageCircle, Send, Image as ImageIcon, X, Plus, 
   Loader2, Zap, User, MoreVertical, Compass, Edit3, Trash2, AlertCircle,
-  Music, Play, Pause, Search as SearchIcon, Volume2, VolumeX, Check
+  Music, Play, Pause, Search as SearchIcon, Volume2, VolumeX, Check,
+  Film, ChevronLeft, ChevronRight
 } from 'lucide-react';
-import { uploadImageToCloudinary } from '../utils/cloudinary';
+import { uploadMediaToCloudinary } from '../utils/cloudinary';
 import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 
@@ -22,14 +24,20 @@ export interface MusicMetadata {
   artworkUrl: string;
 }
 
+export interface MediaItem {
+  url: string;
+  type: 'image' | 'video';
+}
+
 export interface Post {
   id: string;
   authorUid: string;
   authorName: string;
   authorPhoto?: string;
-  type: 'text' | 'image' | 'session';
+  type: 'text' | 'image' | 'video' | 'session';
   content: string;
-  images?: string[];
+  images?: string[]; // Legacy support
+  media?: MediaItem[];
   timestamp: number;
   music?: MusicMetadata;
   sessionData?: {
@@ -107,10 +115,15 @@ export const Pulse: React.FC = () => {
              {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-500"><User size={20} /></div>}
           </div>
           <div className="flex-1 text-neutral-500 font-medium text-sm group-hover:text-neutral-400 transition-colors">
-            Share a study update with photos...
+            Pulse your study progress...
           </div>
-          <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl group-hover:bg-indigo-500 group-hover:text-white transition-all">
-            <ImageIcon size={18} />
+          <div className="flex gap-2">
+            <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl group-hover:bg-indigo-500 group-hover:text-white transition-all">
+              <ImageIcon size={18} />
+            </div>
+            <div className="p-2 bg-purple-500/10 text-purple-400 rounded-xl group-hover:bg-purple-500 group-hover:text-white transition-all">
+              <Film size={18} />
+            </div>
           </div>
         </div>
 
@@ -153,10 +166,18 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   
   const menuRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+
+  const mediaItems = useMemo(() => {
+    if (post.media) return post.media;
+    if (post.images) return post.images.map(url => ({ url, type: 'image' as const }));
+    return [];
+  }, [post.media, post.images]);
 
   useEffect(() => {
     onValue(ref(database, `postLikes/${post.id}`), (snap) => setLikes(snap.val() || {}));
@@ -175,50 +196,59 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
 
   // Audio & Autoplay logic
   useEffect(() => {
-    if (!post.music || !post.music.previewUrl) return;
-
-    const audio = new Audio(post.music.previewUrl);
-    audio.loop = true;
-    audio.volume = 0.6;
-    audioRef.current = audio;
-
-    const handlePlay = () => {
-        // Stop any currently playing audio from other posts
-        if (globalAudioInstance && globalAudioInstance !== audio) {
-            globalAudioInstance.pause();
-            if (globalSetIsPlaying) globalSetIsPlaying(false);
-        }
-        audio.play().then(() => {
-            setIsPlaying(true);
-            globalAudioInstance = audio;
-            globalSetIsPlaying = setIsPlaying;
-        }).catch(() => setIsPlaying(false));
-    };
-
-    const handlePause = () => {
-        audio.pause();
-        setIsPlaying(false);
-        if (globalAudioInstance === audio) {
-            globalAudioInstance = null;
-            globalSetIsPlaying = null;
-        }
-    };
+    const audio = post.music?.previewUrl ? new Audio(post.music.previewUrl) : null;
+    if (audio) {
+      audio.loop = true;
+      audio.volume = 0.6;
+      audioRef.current = audio;
+    }
 
     const observer = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
-          handlePlay();
-        } else {
-          handlePause();
+        const isVisible = entry.isIntersecting && entry.intersectionRatio >= 0.6;
+        
+        // Handle Music
+        if (audio) {
+          if (isVisible) {
+            if (globalAudioInstance && globalAudioInstance !== audio) {
+                globalAudioInstance.pause();
+                if (globalSetIsPlaying) globalSetIsPlaying(false);
+            }
+            audio.play().then(() => {
+                setIsPlaying(true);
+                globalAudioInstance = audio;
+                globalSetIsPlaying = setIsPlaying;
+            }).catch(() => setIsPlaying(false));
+          } else {
+            audio.pause();
+            setIsPlaying(false);
+            if (globalAudioInstance === audio) {
+                globalAudioInstance = null;
+                globalSetIsPlaying = null;
+            }
+          }
         }
+
+        // Handle Video Autoplay
+        videoRefs.current.forEach(video => {
+          if (video) {
+            if (isVisible) {
+              video.play().catch(() => {});
+            } else {
+              video.pause();
+            }
+          }
+        });
       });
     }, { threshold: 0.6 });
 
     if (cardRef.current) observer.observe(cardRef.current);
 
     return () => {
-      handlePause();
-      audio.src = "";
+      if (audio) {
+        audio.pause();
+        audio.src = "";
+      }
       observer.disconnect();
     };
   }, [post.music]);
@@ -250,7 +280,6 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      // Re-trigger global stop
       if (globalAudioInstance && globalAudioInstance !== audioRef.current) {
           globalAudioInstance.pause();
           if (globalSetIsPlaying) globalSetIsPlaying(false);
@@ -265,9 +294,9 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!audioRef.current) return;
     const newMuted = !isMuted;
-    audioRef.current.muted = newMuted;
+    if (audioRef.current) audioRef.current.muted = newMuted;
+    videoRefs.current.forEach(v => { if (v) v.muted = newMuted; });
     setIsMuted(newMuted);
   };
 
@@ -302,25 +331,17 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
           </div>
           
           <div className="relative" ref={menuRef}>
-            <button 
-              onClick={() => setShowMenu(!showMenu)} 
-              className="p-2 text-neutral-600 hover:text-white transition-colors"
-            >
+            <button onClick={() => setShowMenu(!showMenu)} className="p-2 text-neutral-600 hover:text-white transition-colors">
               <MoreVertical size={16} />
             </button>
             {showMenu && (
               <div className="absolute right-0 mt-2 w-48 bg-[#1a1a1a] border border-white/10 rounded-2xl shadow-2xl z-50 py-1 overflow-hidden animate-in fade-in zoom-in duration-200">
                 {isAuthor ? (
-                  <button 
-                    onClick={() => { setShowMenu(false); setShowDeleteConfirm(true); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 transition-colors"
-                  >
+                  <button onClick={() => { setShowMenu(false); setShowDeleteConfirm(true); }} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 transition-colors">
                     <Trash2 size={16} /> Delete post
                   </button>
                 ) : (
-                  <button 
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-400 hover:bg-white/5 transition-colors"
-                  >
+                  <button className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-400 hover:bg-white/5 transition-colors">
                     <AlertCircle size={16} /> Report
                   </button>
                 )}
@@ -330,22 +351,54 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
         </div>
 
         <div className="space-y-4 relative">
-          {post.type === 'image' && post.images && (
-            <div className="relative rounded-3xl overflow-hidden border border-white/5 aspect-[4/5] bg-black/20">
-              <div className={`h-full grid gap-2 ${post.images.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                {post.images.map((img, i) => (
-                  <img 
-                    key={i} 
-                    src={img} 
-                    className={`w-full h-full object-cover hover:scale-105 transition-transform duration-700 ${post.images!.length === 3 && i === 0 ? 'col-span-2' : ''}`} 
-                    alt="Post content" 
-                  />
+          {mediaItems.length > 0 && (
+            <div className="relative rounded-3xl overflow-hidden border border-white/5 aspect-[4/5] bg-black/20 group/media">
+              <div className="flex h-full transition-transform duration-500 ease-out" style={{ transform: `translateX(-${currentMediaIndex * 100}%)` }}>
+                {mediaItems.map((item, i) => (
+                  <div key={i} className="w-full h-full shrink-0 relative">
+                    {item.type === 'video' ? (
+                      <video 
+                        ref={el => videoRefs.current[i] = el}
+                        src={item.url}
+                        className="w-full h-full object-cover"
+                        loop
+                        muted
+                        playsInline
+                      />
+                    ) : (
+                      <img src={item.url} className="w-full h-full object-cover" alt="Post content" />
+                    )}
+                  </div>
                 ))}
               </div>
 
+              {/* Media Navigation */}
+              {mediaItems.length > 1 && (
+                <>
+                  <button 
+                    onClick={() => setCurrentMediaIndex(prev => Math.max(0, prev - 1))}
+                    className={`absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-black/40 backdrop-blur-md rounded-full text-white transition-opacity ${currentMediaIndex === 0 ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover/media:opacity-100'}`}
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <button 
+                    onClick={() => setCurrentMediaIndex(prev => Math.min(mediaItems.length - 1, prev + 1))}
+                    className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 bg-black/40 backdrop-blur-md rounded-full text-white transition-opacity ${currentMediaIndex === mediaItems.length - 1 ? 'opacity-0 pointer-events-none' : 'opacity-0 group-hover/media:opacity-100'}`}
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                  {/* Dots */}
+                  <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+                    {mediaItems.map((_, i) => (
+                      <div key={i} className={`w-1.5 h-1.5 rounded-full transition-all ${i === currentMediaIndex ? 'bg-indigo-500 w-3' : 'bg-white/30'}`} />
+                    ))}
+                  </div>
+                </>
+              )}
+
               {/* Music Badge Overlay */}
               {post.music && (
-                <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+                <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between z-20">
                    <div 
                     onClick={togglePlayback}
                     className="flex items-center gap-2.5 bg-black/50 backdrop-blur-xl border border-white/10 rounded-full px-3 py-1.5 cursor-pointer hover:bg-black/70 transition-all max-w-[75%]"
@@ -452,9 +505,23 @@ export const PostCard: React.FC<{ post: Post, onOpenComments: () => void }> = ({
 const MusicPickerModal: React.FC<{ onSelect: (music: MusicMetadata) => void, onClose: () => void }> = ({ onSelect, onClose }) => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
+  const [popular, setPopular] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [previewingUrl, setPreviewingUrl] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    fetchPopular();
+  }, []);
+
+  const fetchPopular = async () => {
+    try {
+      // Fetching study-friendly / trending music
+      const resp = await fetch(`https://itunes.apple.com/search?term=study+lofi&media=music&entity=song&limit=10`);
+      const data = await resp.json();
+      setPopular(data.results || []);
+    } catch (e) { console.error(e); }
+  };
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -513,45 +580,31 @@ const MusicPickerModal: React.FC<{ onSelect: (music: MusicMetadata) => void, onC
            </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-6">
+          {!query && popular.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="px-3 text-[10px] font-black uppercase text-neutral-500 tracking-widest">Popular for studying</h4>
+              {popular.map(track => (
+                <TrackItem key={track.trackId} track={track} onSelect={onSelect} previewingUrl={previewingUrl} togglePreview={togglePreview} />
+              ))}
+            </div>
+          )}
+
           {loading ? (
             <div className="flex justify-center py-20"><Loader2 className="animate-spin text-indigo-500" /></div>
           ) : results.length > 0 ? (
-            results.map(track => (
-              <div 
-                key={track.trackId}
-                className="flex items-center gap-4 p-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all group"
-                onClick={() => onSelect({
-                  trackName: track.trackName,
-                  artistName: track.artistName,
-                  previewUrl: track.previewUrl,
-                  artworkUrl: track.artworkUrl100
-                })}
-              >
-                <div className="relative shrink-0">
-                  <img src={track.artworkUrl100} className="w-12 h-12 rounded-xl object-cover shadow-lg" />
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); togglePreview(track.previewUrl); }}
-                    className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity rounded-xl ${previewingUrl === track.previewUrl ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                  >
-                    {previewingUrl === track.previewUrl ? <Pause size={18} className="text-white" /> : <Play size={18} className="text-white" />}
-                  </button>
-                </div>
-                <div className="flex-1 min-w-0">
-                   <p className="text-sm font-bold text-white truncate">{track.trackName}</p>
-                   <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest truncate">{track.artistName}</p>
-                </div>
-                <div className="p-2 text-indigo-400 opacity-0 group-hover:opacity-100">
-                  <Plus size={18} />
-                </div>
-              </div>
-            ))
+            <div className="space-y-1">
+              <h4 className="px-3 text-[10px] font-black uppercase text-neutral-500 tracking-widest">Search Results</h4>
+              {results.map(track => (
+                <TrackItem key={track.trackId} track={track} onSelect={onSelect} previewingUrl={previewingUrl} togglePreview={togglePreview} />
+              ))}
+            </div>
           ) : query ? (
             <div className="py-20 text-center text-neutral-600 text-sm font-bold uppercase tracking-widest">No songs found</div>
-          ) : (
+          ) : popular.length === 0 && (
             <div className="py-20 text-center flex flex-col items-center gap-4 text-neutral-700">
                <Music size={40} className="opacity-10" />
-               <p className="text-xs font-black uppercase tracking-[0.2em]">Search to add vibes</p>
+               <p className="text-xs font-black uppercase tracking-[0.2em]">Add vibes to your pulse</p>
             </div>
           )}
         </div>
@@ -560,11 +613,39 @@ const MusicPickerModal: React.FC<{ onSelect: (music: MusicMetadata) => void, onC
   );
 };
 
+const TrackItem: React.FC<{ track: any, onSelect: (m: MusicMetadata) => void, previewingUrl: string | null, togglePreview: (u: string) => void }> = ({ track, onSelect, previewingUrl, togglePreview }) => (
+  <div 
+    className="flex items-center gap-4 p-3 rounded-2xl hover:bg-white/5 cursor-pointer transition-all group"
+    onClick={() => onSelect({
+      trackName: track.trackName,
+      artistName: track.artistName,
+      previewUrl: track.previewUrl,
+      artworkUrl: track.artworkUrl100
+    })}
+  >
+    <div className="relative shrink-0">
+      <img src={track.artworkUrl100} className="w-12 h-12 rounded-xl object-cover shadow-lg" />
+      <button 
+        onClick={(e) => { e.stopPropagation(); togglePreview(track.previewUrl); }}
+        className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity rounded-xl ${previewingUrl === track.previewUrl ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+      >
+        {previewingUrl === track.previewUrl ? <Pause size={18} className="text-white" /> : <Play size={18} className="text-white" />}
+      </button>
+    </div>
+    <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-white truncate">{track.trackName}</p>
+        <p className="text-[10px] font-black text-neutral-500 uppercase tracking-widest truncate">{track.artistName}</p>
+    </div>
+    <div className="p-2 text-indigo-400 opacity-0 group-hover:opacity-100">
+      <Plus size={18} />
+    </div>
+  </div>
+);
+
 const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const { user } = useAuth();
   const [text, setText] = useState('');
-  const [images, setImages] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
+  const [files, setFiles] = useState<{ file: File; preview: string; type: 'image' | 'video' }[]>([]);
   const [loading, setLoading] = useState(false);
   const [music, setMusic] = useState<MusicMetadata | null>(null);
   const [showMusicPicker, setShowMusicPicker] = useState(false);
@@ -572,33 +653,41 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const files = Array.from(e.target.files).slice(0, 3 - images.length) as File[];
-      setImages([...images, ...files]);
-      const newPreviews = files.map((f: Blob) => URL.createObjectURL(f));
-      setPreviews([...previews, ...newPreviews]);
+      const remainingSlots = 7 - files.length;
+      // Fix: Explicitly cast Array.from result to File[] to ensure correct type inference for URL.createObjectURL
+      const selected = Array.from(e.target.files).slice(0, remainingSlots) as File[];
+      
+      const newItems = selected.map((file: File) => ({
+        file,
+        preview: URL.createObjectURL(file),
+        type: file.type.startsWith('video/') ? 'video' as const : 'image' as const
+      }));
+
+      setFiles(prev => [...prev, ...newItems]);
     }
   };
 
-  const removeImage = (index: number) => {
-    setImages(images.filter((_, i) => i !== index));
-    setPreviews(previews.filter((_, i) => i !== index));
+  const removeFile = (index: number) => {
+    const item = files[index];
+    URL.revokeObjectURL(item.preview);
+    setFiles(files.filter((_, i) => i !== index));
   };
 
   const handlePost = async () => {
-    if (!user || images.length === 0) return;
+    if (!user || files.length === 0) return;
     setLoading(true);
 
     try {
-      const imageUrls = await Promise.all(images.map(img => uploadImageToCloudinary(img)));
+      const mediaResults = await Promise.all(files.map(item => uploadMediaToCloudinary(item.file)));
       
       const newPostRef = push(ref(database, 'posts'));
       await set(newPostRef, {
         authorUid: user.uid,
         authorName: user.displayName,
         authorPhoto: user.photoURL,
-        type: 'image',
+        type: mediaResults[0].type, // Primary type
         content: text.trim(),
-        images: imageUrls,
+        media: mediaResults,
         timestamp: Date.now(),
         music: music || null
       });
@@ -613,97 +702,135 @@ const CreatePostModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in" onClick={onClose}>
-      <div className="bg-[#1a1a1a] border border-white/10 w-full max-w-lg rounded-[40px] p-8 shadow-2xl animate-in zoom-in duration-300" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-8">
-          <h3 className="text-xl font-black text-white">Create Pulse</h3>
+      <div className="bg-[#121212] border border-white/10 w-full max-w-xl rounded-[40px] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in duration-300" onClick={e => e.stopPropagation()}>
+        
+        {/* Modal Header */}
+        <div className="p-6 border-b border-white/5 flex items-center justify-between shrink-0">
+          <h3 className="text-xl font-black text-white">New Pulse</h3>
           <button onClick={onClose} className="p-2 text-neutral-500 hover:text-white transition-colors"><X size={24} /></button>
         </div>
 
-        <div className="space-y-6">
-          <div className="flex flex-col gap-4">
-            {previews.length === 0 ? (
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
+          
+          {/* Media Section */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-[10px] font-black uppercase text-neutral-500 tracking-[0.2em]">Media Gallery ({files.length}/7)</h4>
+              {files.length < 7 && (
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1.5"
+                >
+                  <Plus size={14} /> Add more
+                </button>
+              )}
+            </div>
+
+            {files.length === 0 ? (
               <button 
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full aspect-square md:aspect-video rounded-[32px] border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-4 hover:bg-white/5 hover:border-indigo-500/50 transition-all group"
+                className="w-full aspect-[4/3] rounded-[32px] border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-4 hover:bg-white/5 hover:border-indigo-500/50 transition-all group"
               >
-                <div className="w-16 h-16 bg-indigo-500/10 text-indigo-400 rounded-3xl flex items-center justify-center group-hover:scale-110 transition-transform">
-                  <ImageIcon size={32} />
+                <div className="flex gap-3">
+                  <div className="w-16 h-16 bg-indigo-500/10 text-indigo-400 rounded-3xl flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <ImageIcon size={32} />
+                  </div>
+                  <div className="w-16 h-16 bg-purple-500/10 text-purple-400 rounded-3xl flex items-center justify-center group-hover:scale-110 transition-transform [transition-delay:100ms]">
+                    <Film size={32} />
+                  </div>
                 </div>
                 <div className="text-center">
-                  <p className="text-white font-bold">Select photos</p>
-                  <p className="text-neutral-500 text-xs mt-1 uppercase tracking-widest">Share what you're studying</p>
+                  <p className="text-white font-bold">Select photos or videos</p>
+                  <p className="text-neutral-500 text-[10px] mt-1 uppercase tracking-widest">Videos max 15 seconds</p>
                 </div>
               </button>
             ) : (
-              <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
-                {previews.map((p, i) => (
-                  <div key={i} className="relative w-40 h-40 shrink-0 rounded-2xl overflow-hidden border border-white/10 group shadow-lg">
-                    <img src={p} className="w-full h-full object-cover" />
-                    <button onClick={() => removeImage(i)} className="absolute top-2 right-2 p-1.5 bg-black/60 text-white rounded-full hover:bg-black active:scale-90 transition-all"><X size={12} /></button>
+              <div className="grid grid-cols-3 gap-3">
+                {files.map((item, i) => (
+                  <div key={i} className="relative aspect-square rounded-2xl overflow-hidden border border-white/10 group shadow-lg">
+                    {item.type === 'video' ? (
+                      <video src={item.preview} className="w-full h-full object-cover" muted />
+                    ) : (
+                      <img src={item.preview} className="w-full h-full object-cover" />
+                    )}
+                    <button onClick={() => removeFile(i)} className="absolute top-2 right-2 p-1.5 bg-black/60 text-white rounded-full hover:bg-black active:scale-90 transition-all opacity-0 group-hover:opacity-100"><X size={12} /></button>
+                    {item.type === 'video' && <div className="absolute bottom-2 left-2 p-1 bg-black/60 rounded text-[8px] text-white font-black uppercase tracking-widest">Video</div>}
                   </div>
                 ))}
-                {previews.length < 3 && (
-                  <button 
+                {files.length < 7 && (
+                   <button 
                     onClick={() => fileInputRef.current?.click()}
-                    className="w-40 h-40 shrink-0 rounded-2xl border-2 border-dashed border-white/10 flex items-center justify-center text-neutral-500 hover:text-white hover:bg-white/5 transition-all"
+                    className="aspect-square rounded-2xl border-2 border-dashed border-white/10 flex items-center justify-center text-neutral-500 hover:text-white hover:bg-white/5 transition-all"
                   >
                     <Plus size={24} />
                   </button>
                 )}
               </div>
             )}
-            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" multiple />
+            <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*,video/*" multiple />
           </div>
 
-          <div className="flex items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl shadow-inner">
-             {music ? (
-               <div className="flex items-center gap-3 flex-1 min-w-0 animate-in slide-in-from-left-2">
-                  <img src={music.artworkUrl} className="w-11 h-11 rounded-xl shadow-lg border border-white/5" />
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-black text-white truncate tracking-tight">{music.trackName}</span>
-                    <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest truncate">{music.artistName}</span>
-                  </div>
-                  <button onClick={() => setMusic(null)} className="ml-auto p-2.5 text-neutral-600 hover:text-red-400 bg-white/5 rounded-xl transition-all"><X size={16} /></button>
-               </div>
-             ) : (
-               <button 
-                onClick={() => setShowMusicPicker(true)}
-                className="w-full flex items-center justify-center gap-2.5 py-1.5 text-neutral-400 hover:text-indigo-400 transition-all group"
-               >
-                 <Music size={18} className="group-hover:scale-110 transition-transform" />
-                 <span className="text-xs font-black uppercase tracking-[0.2em]">Add Music</span>
-               </button>
-             )}
-          </div>
-
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-2xl overflow-hidden bg-neutral-900 border border-white/5 shadow-inner shrink-0 mt-1">
-              {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-500"><User size={24} /></div>}
+          {/* Music Section */}
+          <div className="space-y-4">
+            <h4 className="text-[10px] font-black uppercase text-neutral-500 tracking-[0.2em]">Background Music</h4>
+            <div className={`p-5 rounded-[24px] border transition-all ${music ? 'bg-indigo-600/5 border-indigo-500/20 shadow-inner' : 'bg-white/5 border-white/10 hover:bg-white/[0.08]'}`}>
+               {music ? (
+                 <div className="flex items-center gap-4 animate-in slide-in-from-left-2">
+                    <img src={music.artworkUrl} className="w-14 h-14 rounded-xl shadow-lg border border-white/10" />
+                    <div className="flex-1 min-w-0">
+                      <span className="block text-sm font-black text-white truncate tracking-tight">{music.trackName}</span>
+                      <span className="block text-[10px] font-bold text-neutral-500 uppercase tracking-widest truncate mt-0.5">{music.artistName}</span>
+                    </div>
+                    <button onClick={() => setMusic(null)} className="p-3 text-neutral-500 hover:text-red-400 bg-white/5 rounded-xl transition-all"><Trash2 size={18} /></button>
+                 </div>
+               ) : (
+                 <button 
+                  onClick={() => setShowMusicPicker(true)}
+                  className="w-full flex items-center justify-center gap-3 py-2 text-neutral-400 hover:text-indigo-400 transition-all group"
+                 >
+                   <div className="p-2 bg-white/5 rounded-xl group-hover:bg-indigo-500/10 transition-all">
+                    <Music size={20} className="group-hover:scale-110 transition-transform" />
+                   </div>
+                   <span className="text-sm font-black uppercase tracking-[0.2em]">Add Music</span>
+                 </button>
+               )}
             </div>
-            <textarea 
-              value={text}
-              onChange={e => setText(e.target.value.slice(0, 500))}
-              placeholder="Write a caption... (optional)"
-              className="flex-1 bg-transparent border-none text-white text-lg focus:outline-none resize-none min-h-[100px] placeholder:text-neutral-700 custom-scrollbar"
-            />
           </div>
 
-          <div className="flex items-center justify-between pt-6 border-t border-white/5">
-            <div className="flex items-center gap-4">
-              <span className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.2em]">{text.length}/500</span>
+          {/* Caption Section */}
+          <div className="space-y-4">
+            <h4 className="text-[10px] font-black uppercase text-neutral-500 tracking-[0.2em]">Share your thoughts</h4>
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl overflow-hidden bg-neutral-900 border border-white/5 shadow-inner shrink-0 mt-1">
+                {user?.photoURL ? <img src={user.photoURL} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-neutral-500"><User size={24} /></div>}
+              </div>
+              <textarea 
+                value={text}
+                onChange={e => setText(e.target.value.slice(0, 500))}
+                placeholder="Write a caption... (optional)"
+                className="flex-1 bg-transparent border-none text-white text-lg focus:outline-none resize-none min-h-[120px] placeholder:text-neutral-800 custom-scrollbar"
+              />
             </div>
-            
-            <button 
-              onClick={handlePost}
-              disabled={loading || images.length === 0}
-              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white px-10 py-4 rounded-2xl font-black uppercase tracking-[0.1em] text-sm shadow-xl shadow-indigo-900/20 flex items-center gap-2 transition-all active:scale-95"
-            >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : 'Pulse'}
-            </button>
           </div>
-          {images.length === 0 && (
-            <p className="text-[10px] text-center text-neutral-600 uppercase font-black tracking-widest animate-pulse">Photo required to post</p>
-          )}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-6 bg-neutral-900/50 border-t border-white/5 shrink-0 flex items-center justify-between">
+          <div className="flex flex-col">
+            <span className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.2em]">{text.length}/500</span>
+            {files.length === 0 && (
+              <span className="text-[9px] text-red-500/80 font-black uppercase tracking-widest mt-1">Media required</span>
+            )}
+          </div>
+          
+          <button 
+            onClick={handlePost}
+            disabled={loading || files.length === 0}
+            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white px-12 py-4 rounded-2xl font-black uppercase tracking-[0.1em] text-sm shadow-xl shadow-indigo-900/20 flex items-center gap-3 transition-all active:scale-95"
+          >
+            {loading ? <Loader2 size={20} className="animate-spin" /> : <>Pulse <Send size={18} /></>}
+          </button>
         </div>
       </div>
       {showMusicPicker && <MusicPickerModal onSelect={(m) => { setMusic(m); setShowMusicPicker(false); }} onClose={() => setShowMusicPicker(false)} />}
