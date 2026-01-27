@@ -463,7 +463,7 @@ export const Inbox: React.FC = () => {
                         </div>
                         {reactions.length > 0 && <div className={`absolute -bottom-2 ${isMe ? 'right-2' : 'left-2'} flex gap-1 bg-neutral-900 border border-white/10 rounded-full px-1.5 py-0.5 shadow-xl z-10 animate-in zoom-in`}>{reactions.map(([uid, emoji]) => <span key={uid} className="text-[10px]">{emoji as string}</span>)}</div>}
                         <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover/msg:opacity-100 transition-all ${isMe ? 'right-full mr-3' : 'left-full ml-3'}`}>
-                            <button onClick={() => setReplyingTo(msg)} className="p-2 text-neutral-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-full"><Reply size={16} /></button>
+                            <button onClick={() => { setReplyingTo(msg); setTimeout(() => messageInputRef.current?.focus(), 50); }} className="p-2 text-neutral-500 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-full"><Reply size={16} /></button>
                             <button onClick={(e) => { const rect = e.currentTarget.getBoundingClientRect(); setReactionPickerPos({ x: rect.left, y: rect.top, isMe }); setActiveReactionPickerId(msg.id); }} className="p-2 text-neutral-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-full"><SmilePlus size={16} /></button>
                             {(isMe) && <button onClick={() => setUnsendConfirmId(msg.id)} className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-full"><Trash size={16} /></button>}
                         </div>
