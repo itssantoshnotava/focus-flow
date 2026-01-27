@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -36,6 +35,23 @@ export const GroupSettings: React.FC = () => {
   const activeMember = useMemo(() => 
     membersDetails.find(m => m.uid === activeMenuId),
   [activeMenuId, membersDetails]);
+
+  // Sorted Members list: Admins first, then Alphabetical
+  const sortedMembers = useMemo(() => {
+    return [...membersDetails].sort((a, b) => {
+      const aIsAdmin = a.uid === groupData?.hostUid || groupData?.admins?.[a.uid];
+      const bIsAdmin = b.uid === groupData?.hostUid || groupData?.admins?.[b.uid];
+      
+      // Admins at top
+      if (aIsAdmin && !bIsAdmin) return -1;
+      if (!aIsAdmin && bIsAdmin) return 1;
+      
+      // Secondary sort: Alphabetical
+      const nameA = a.name || "";
+      const nameB = b.name || "";
+      return nameA.localeCompare(nameB);
+    });
+  }, [membersDetails, groupData]);
 
   // Robust Friends Sync (Intersection of following and followers)
   useEffect(() => {
@@ -201,17 +217,17 @@ export const GroupSettings: React.FC = () => {
             )}
             
             <div className="space-y-4">
-                {membersDetails.map(member => {
+                {sortedMembers.map(member => {
                     const isMemberHost = member.uid === groupData.hostUid;
                     const isMemberAdmin = groupData.admins?.[member.uid] || isMemberHost;
                     return (
                         <div key={member.uid} className="flex items-center justify-between p-4 bg-white/5 border border-white/[0.03] rounded-[24px] hover:bg-white/[0.08] transition-all">
                             <div className="flex items-center gap-4">
-                                {member.photoURL ? <img src={member.photoURL} className="w-12 h-12 rounded-[18px] object-cover" /> : <div className="w-12 h-12 rounded-[18px] bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{member.name.charAt(0)}</div>}
+                                {member.photoURL ? <img src={member.photoURL} className="w-12 h-12 rounded-[18px] object-cover" /> : <div className="w-12 h-12 rounded-[18px] bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{member.name?.charAt(0)}</div>}
                                 <div className="flex flex-col">
                                     <div className="flex items-center gap-2">
                                         <span className="text-sm font-bold text-white">{member.name}</span>
-                                        {isMemberHost ? <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 text-[9px] rounded-full border border-amber-500/20 uppercase font-black">Host</span> : isMemberAdmin ? <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-[9px] rounded-full border border-indigo-500/20 uppercase font-black">Admin</span> : null}
+                                        {isMemberAdmin ? <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-[9px] rounded-full border border-indigo-500/20 uppercase font-black">Admin</span> : null}
                                     </div>
                                 </div>
                             </div>
@@ -229,7 +245,6 @@ export const GroupSettings: React.FC = () => {
         {activeMenuId && menuPos && createPortal(
             <div className="fixed inset-0 z-[9999]" onClick={() => setActiveMenuId(null)}>
                 <div style={{ position: 'fixed', top: `${menuPos.y + 8}px`, left: `${menuPos.x - 224}px` }} className="w-56 bg-neutral-900 border border-white/10 rounded-[24px] shadow-2xl p-1 animate-in zoom-in">
-                    {/* Fixed 'groupAdmins' error by correctly referencing groupData.admins */}
                     <button onClick={() => toggleAdmin(activeMenuId)} className="w-full text-left px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-2xl">{groupData?.admins?.[activeMenuId] ? 'Remove Admin' : 'Make Admin'}</button>
                     <button onClick={() => removeMember(activeMenuId)} className="w-full text-left px-4 py-3 text-sm font-bold text-red-400 hover:bg-red-400/5 rounded-2xl">Remove Member</button>
                 </div>

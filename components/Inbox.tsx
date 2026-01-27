@@ -59,7 +59,7 @@ export const Inbox: React.FC = () => {
   const [activeChatId, setActiveChatId] = useState<string | null>(urlChatId);
 
   const [userProfiles, setUserProfiles] = useState<Record<string, { name: string, photoURL?: string }>>({});
-  const [groupMetadata, setGroupMetadata] = useState<Record<string, { name: string, photoURL?: string }>>({});
+  const [groupMetadata, setGroupMetadata] = useState<Record<string, { name: string, photoURL?: string, memberCount?: number }>>({});
   const [listPresences, setListPresences] = useState<Record<string, { online: boolean, lastSeen: number }>>({});
   const [messages, setMessages] = useState<any[]>([]);
   const [friendPresence, setFriendPresence] = useState<{online: boolean, lastSeen: number, activeChatId?: string} | null>(null);
@@ -213,13 +213,17 @@ export const Inbox: React.FC = () => {
                         if (pSnap.exists()) setListPresences(prev => ({ ...prev, [chat.id]: pSnap.val() }));
                     });
                 } else {
-                    // Force authoritative group metadata sync for the PFP
+                    // Force authoritative group metadata sync for the PFP and member count
                     onValue(ref(database, `groupChats/${chat.id}`), (gSnap) => {
                         if (gSnap.exists()) {
                             const gData = gSnap.val();
                             setGroupMetadata(prev => ({ 
                                 ...prev, 
-                                [chat.id]: { name: gData.name, photoURL: gData.photoURL } 
+                                [chat.id]: { 
+                                  name: gData.name, 
+                                  photoURL: gData.photoURL,
+                                  memberCount: gData.members ? Object.keys(gData.members).length : 0
+                                } 
                             }));
                         }
                     });
@@ -416,7 +420,12 @@ export const Inbox: React.FC = () => {
               </div>
               <div className="flex flex-col min-w-0">
                   <span className="font-bold text-white truncate text-base md:text-lg">{selectedChat.type === 'dm' ? (userProfiles[activeChatId]?.name || selectedChat.name) : groupMetadata[activeChatId]?.name || selectedChat.name}</span>
-                  <span className="text-[10px] uppercase font-black text-neutral-500 tracking-wider">{selectedChat.type === 'dm' ? (friendPresence?.online ? 'Online' : 'Offline') : `${Object.keys(selectedChat.members || {}).length} members`}</span>
+                  <span className="text-[10px] uppercase font-black text-neutral-500 tracking-wider">
+                    {selectedChat.type === 'dm' 
+                      ? (friendPresence?.online ? 'Online' : 'Offline') 
+                      : `${groupMetadata[activeChatId]?.memberCount || 0} members`
+                    }
+                  </span>
               </div>
             </div>
             <button className={`p-3 rounded-2xl transition-colors text-neutral-500 hover:text-white hover:bg-white/5`}><MoreVertical size={20} /></button>
