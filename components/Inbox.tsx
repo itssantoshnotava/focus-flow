@@ -144,30 +144,57 @@ export const Inbox: React.FC = () => {
     }
   };
 
-  // --- SCROLL MANAGEMENT (FIXED: Absolutely Instant) ---
+  // --- SCROLL MANAGEMENT (ULTIMATE FIX) ---
   const isOpeningChat = useRef(false);
-  useEffect(() => { if (activeChatId) isOpeningChat.current = true; }, [activeChatId]);
+  useEffect(() => { 
+    if (activeChatId) {
+        isOpeningChat.current = true;
+        // Immediate jump on chat change
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+    }
+  }, [activeChatId]);
+
+  // Use ResizeObserver to force bottom pinning during initial load even if content (images) shifts
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !activeChatId) return;
+
+    const observer = new ResizeObserver(() => {
+      if (isOpeningChat.current) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+
+    observer.observe(container);
+    
+    // Stop pinning after a short period to allow user to scroll up
+    const timeout = setTimeout(() => {
+      isOpeningChat.current = false;
+    }, 1200);
+
+    return () => {
+      observer.disconnect();
+      clearTimeout(timeout);
+    };
+  }, [activeChatId, messages.length]);
 
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
     if (isOpeningChat.current) {
-        // Force scroll height recalculation and jump instantly
+        container.style.scrollBehavior = 'auto';
         container.scrollTop = container.scrollHeight;
-        isOpeningChat.current = false;
-        // Small safeguard for dynamically sized content
-        requestAnimationFrame(() => {
-            if (container) container.scrollTop = container.scrollHeight;
-        });
     } else {
-        // Standard smooth scroll for new messages
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 200;
+        container.style.scrollBehavior = 'smooth';
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 300;
         if (isNearBottom) {
-            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+            container.scrollTop = container.scrollHeight;
         }
     }
-  }, [messages, typingUsers, activeChatId]);
+  }, [messages, typingUsers]);
 
   // --- REAL-TIME DATA SYNC ---
   useEffect(() => {
@@ -186,7 +213,7 @@ export const Inbox: React.FC = () => {
                         if (pSnap.exists()) setListPresences(prev => ({ ...prev, [chat.id]: pSnap.val() }));
                     });
                 } else {
-                    // Authoritative Group Metadata Sync for PFP
+                    // Force authoritative group metadata sync for the PFP
                     onValue(ref(database, `groupChats/${chat.id}`), (gSnap) => {
                         if (gSnap.exists()) {
                             const gData = gSnap.val();
@@ -347,13 +374,16 @@ export const Inbox: React.FC = () => {
             const gMeta = groupMetadata[chat.id];
             const presence = listPresences[chat.id];
             const hasDraft = (drafts[chat.id]?.trim().length > 0) || (chat.id === activeChatId && inputText.trim().length > 0);
-            const photo = chat.type === 'dm' ? profile?.photoURL : gMeta?.photoURL;
+            
+            // PRIORITY: Use authoritative metadata for groups
+            const photo = chat.type === 'dm' ? profile?.photoURL : gMeta?.photoURL || chat.photoURL;
             const name = chat.type === 'dm' ? profile?.name || chat.name : gMeta?.name || chat.name;
+            
             return (
               <div key={chat.id} className="group/tile relative">
                   <button onClick={() => handleSelectChat(chat.id)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10 shadow-lg' : 'hover:bg-white/[0.04] border-transparent'}`}>
                     <div className="relative shrink-0">
-                      {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name.charAt(0)}</div>}
+                      {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name?.charAt(0)}</div>}
                       {chat.type === 'dm' && <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
                       {chat.unreadCount ? <div className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full border-2 border-neutral-950 flex items-center justify-center text-[10px] font-black text-white">{chat.unreadCount}</div> : null}
                     </div>
@@ -379,7 +409,7 @@ export const Inbox: React.FC = () => {
             <div className="flex items-center gap-4 min-w-0">
               <button onClick={() => setActiveChatId(null)} className="md:hidden p-2 text-neutral-500 hover:text-white"><ArrowLeft size={24} /></button>
               <div className="cursor-pointer relative" onClick={() => navigate(selectedChat.type === 'dm' ? `/profile/${activeChatId}` : `/group/${activeChatId}/settings`)}>
-                  { (selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : groupMetadata[activeChatId]?.photoURL) ? <img src={selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : groupMetadata[activeChatId]?.photoURL} className="w-11 h-11 rounded-full object-cover border border-white/5 shadow-lg" /> : <div className="w-11 h-11 rounded-full bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.name : groupMetadata[activeChatId]?.name || selectedChat.name)?.charAt(0)}</div> }
+                  { (selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : groupMetadata[activeChatId]?.photoURL || selectedChat.photoURL) ? <img src={selectedChat.type === 'dm' ? userProfiles[activeChatId]?.photoURL : groupMetadata[activeChatId]?.photoURL || selectedChat.photoURL} className="w-11 h-11 rounded-full object-cover border border-white/5 shadow-lg" /> : <div className="w-11 h-11 rounded-full bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{(selectedChat.type === 'dm' ? userProfiles[activeChatId]?.name : groupMetadata[activeChatId]?.name || selectedChat.name)?.charAt(0)}</div> }
                   {selectedChat.type === 'dm' && friendPresence?.online && <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-neutral-950 shadow-sm animate-pulse"></div>}
               </div>
               <div className="flex flex-col min-w-0">
@@ -441,7 +471,7 @@ export const Inbox: React.FC = () => {
                                 {u.photoURL ? (
                                     <img src={u.photoURL} className="w-7 h-7 rounded-full border-2 border-neutral-950 object-cover shadow-lg" alt={u.name} />
                                 ) : (
-                                    <div className="w-7 h-7 rounded-full border-2 border-neutral-950 bg-neutral-800 flex items-center justify-center text-[8px] font-black text-neutral-500 uppercase">{u.name.charAt(0)}</div>
+                                    <div className="w-7 h-7 rounded-full border-2 border-neutral-950 bg-neutral-800 flex items-center justify-center text-[8px] font-black text-neutral-500 uppercase">{u.name?.charAt(0)}</div>
                                 )}
                             </div>
                         ))}
