@@ -387,7 +387,8 @@ export const Inbox: React.FC = () => {
                       {chat.type === 'dm' && <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
                       {chat.unreadCount ? <div className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full border-2 border-neutral-950 flex items-center justify-center text-[10px] font-black text-white">{chat.unreadCount}</div> : null}
                     </div>
-                    <div className="flex-1 text-left min-w-0">
+                    {/* Fixed padding-right (pr-10) to prevent text overlap with absolute More button */}
+                    <div className="flex-1 text-left min-w-0 pr-10">
                         <div className="flex justify-between items-center mb-0.5">
                             <span className="font-bold text-white truncate">{name}</span>
                             {hasDraft && <span className="text-[9px] font-black uppercase text-indigo-400 bg-indigo-400/10 px-1.5 py-0.5 rounded tracking-widest">Draft</span>}
@@ -395,7 +396,8 @@ export const Inbox: React.FC = () => {
                         <p className={`text-sm truncate ${chat.unreadCount ? 'text-neutral-200 font-medium' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages'}</p>
                     </div>
                   </button>
-                  <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSidebarMenuPos({ x: r.right, y: r.bottom }); setSidebarMenuId(chat.id); }} className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-neutral-500 hover:text-white opacity-0 group-hover/tile:opacity-100 transition-opacity"><MoreVertical size={16} /></button>
+                  {/* Changed More button position to top-right corner to stay clear of message body */}
+                  <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSidebarMenuPos({ x: r.right, y: r.bottom }); setSidebarMenuId(chat.id); }} className="absolute right-4 top-4 p-2 text-neutral-500 hover:text-white opacity-0 group-hover/tile:opacity-100 transition-opacity"><MoreVertical size={16} /></button>
               </div>
             );
           })}
