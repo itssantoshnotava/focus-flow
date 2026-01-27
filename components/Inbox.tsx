@@ -7,8 +7,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
     Send, MessageCircle, ArrowLeft, Users, Plus, X, Check, CheckCheck, Reply,
     SmilePlus, Paperclip, MoreVertical, Smile, AlertCircle, Archive, Trash, 
-    UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings, Search
+    UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings, Search, Heart, Edit3,
+    Clock
 } from 'lucide-react';
+import { useTimer } from '../contexts/TimerContext';
 
 interface ChatItem {
   id: string; 
@@ -26,6 +28,19 @@ interface ChatItem {
   lastMessageAt: number;
   unreadCount?: number;
   members?: Record<string, any>;
+}
+
+interface Signal {
+  id: string;
+  text: string;
+  type: 'auto' | 'manual';
+  userUid: string;
+  userName: string;
+  photoURL?: string;
+  timestamp: number;
+  expiresAt: number;
+  likes?: Record<string, boolean>;
+  isActive?: boolean;
 }
 
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉', '👀'];
@@ -49,6 +64,7 @@ const EMOJI_DATA = [
 
 export const Inbox: React.FC = () => {
   const { user } = useAuth();
+  const { isActive: isTimerActive } = useTimer();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const urlChatId = searchParams.get('chatId');
@@ -84,6 +100,12 @@ export const Inbox: React.FC = () => {
   const [followers, setFollowers] = useState<Record<string, boolean>>({});
   const [archivedChats, setArchivedChats] = useState<Record<string, boolean>>({});
 
+  // --- SIGNALS STATE ---
+  const [signals, setSignals] = useState<Signal[]>([]);
+  const [showSignalCreator, setShowSignalCreator] = useState(false);
+  const [manualSignalText, setManualSignalText] = useState('');
+  const [selectedSignalModal, setSelectedSignalModal] = useState<Signal | null>(null);
+
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -114,6 +136,79 @@ export const Inbox: React.FC = () => {
     });
     return map;
   }, [messages, user?.uid, selectedChat]);
+
+  // --- SIGNALS SYNC ---
+  useEffect(() => {
+    if (!user) return;
+    const signalsRef = ref(database, 'signals');
+    const unsub = onValue(signalsRef, (snap) => {
+        if (snap.exists()) {
+            const now = Date.now();
+            const data = snap.val();
+            const list = Object.entries(data)
+                .map(([id, val]: [string, any]) => ({ id, ...val }))
+                .filter(s => {
+                    const isFriend = following[s.userUid] && followers[s.userUid];
+                    const isMe = s.userUid === user.uid;
+                    const isExpired = s.expiresAt < now && !s.isActive;
+                    return (isFriend || isMe) && !isExpired;
+                })
+                .sort((a, b) => b.timestamp - a.timestamp);
+            setSignals(list);
+        } else {
+            setSignals([]);
+        }
+    });
+    return () => unsub();
+  }, [user, following, followers]);
+
+  const handlePostManualSignal = async () => {
+    if (!user || !manualSignalText.trim() || isTimerActive) return;
+    const signalRef = ref(database, `signals/${user.uid}`);
+    await set(signalRef, {
+        text: manualSignalText.trim(),
+        type: 'manual',
+        userUid: user.uid,
+        userName: user.displayName || 'User',
+        photoURL: user.photoURL || null,
+        timestamp: Date.now(),
+        expiresAt: Date.now() + 86400000, // Manual signals last 24h
+        isActive: false
+    });
+    setManualSignalText('');
+    setShowSignalCreator(false);
+  };
+
+  const handleLikeSignal = async (signalId: string, targetUid: string) => {
+    if (!user) return;
+    const likeRef = ref(database, `signals/${targetUid}/likes/${user.uid}`);
+    const snap = await get(likeRef);
+    if (snap.exists()) await remove(likeRef);
+    else await set(likeRef, true);
+  };
+
+  const handleReplyToSignal = async (signal: Signal) => {
+    if (!user) return;
+    const targetUid = signal.userUid;
+    const convoId = [user.uid, targetUid].sort().join('_');
+    const contextText = `Replying to your signal: "${signal.text}"\n\n`;
+    
+    // Check if chat exists
+    const inboxRef = ref(database, `userInboxes/${user.uid}/${targetUid}`);
+    const snap = await get(inboxRef);
+    
+    if (!snap.exists()) {
+        await update(ref(database, `conversations/${convoId}`), { type: 'dm', members: { [user.uid]: true, [targetUid]: true }, createdAt: Date.now() });
+        await set(inboxRef, { type: 'dm', name: signal.userName, photoURL: signal.photoURL || null, lastMessage: null, lastMessageAt: Date.now(), unreadCount: 0 });
+        const theirInboxRef = ref(database, `userInboxes/${targetUid}/${user.uid}`);
+        await set(theirInboxRef, { type: 'dm', name: user.displayName, photoURL: user.photoURL || null, lastMessage: null, lastMessageAt: Date.now(), unreadCount: 0 });
+    }
+    
+    setActiveChatId(targetUid);
+    setInputText(contextText);
+    setSelectedSignalModal(null);
+    setTimeout(() => messageInputRef.current?.focus(), 100);
+  };
 
   // --- TYPING SYNC ---
   useEffect(() => {
@@ -411,6 +506,51 @@ export const Inbox: React.FC = () => {
             <button onClick={() => setViewMode(viewMode === 'list' ? 'create_group' : 'list')} className="p-2 bg-indigo-600/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-colors">{viewMode === 'list' ? <Plus size={20} /> : <X size={20} />}</button>
           </div>
         </div>
+
+        {/* --- SIGNALS ROW (NEW) --- */}
+        {!showArchived && (
+            <div className="p-4 border-b border-neutral-900 overflow-x-auto custom-scrollbar flex items-center gap-3 bg-neutral-950/20">
+                {/* MY SIGNAL CREATOR */}
+                <button 
+                  onClick={() => !isTimerActive && setShowSignalCreator(true)}
+                  disabled={isTimerActive}
+                  className={`shrink-0 w-14 h-14 rounded-full border-2 border-dashed flex items-center justify-center transition-all ${isTimerActive ? 'border-indigo-500/30 text-indigo-500/40 bg-indigo-500/5' : 'border-neutral-800 text-neutral-500 hover:border-indigo-500 hover:text-indigo-400 bg-neutral-900 hover:bg-neutral-800 active:scale-95'}`}
+                  title={isTimerActive ? "Focusing..." : "Add Signal"}
+                >
+                    {isTimerActive ? <Clock size={20} className="animate-pulse" /> : <Plus size={24} />}
+                </button>
+
+                {signals.map(s => (
+                    <div 
+                      key={s.id} 
+                      onDoubleClick={() => handleLikeSignal(s.id, s.userUid)}
+                      onClick={() => setSelectedSignalModal(s)}
+                      className="shrink-0 group relative cursor-pointer"
+                    >
+                        <div className="w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr from-indigo-500/50 to-purple-500/50 relative">
+                            <div className="w-full h-full rounded-full overflow-hidden bg-neutral-950 border border-neutral-900 relative">
+                                {s.photoURL ? (
+                                    <img src={s.photoURL} className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-xs font-black text-neutral-600">{s.userName.charAt(0)}</div>
+                                )}
+                                {s.isActive && <div className="absolute inset-0 bg-indigo-600/20 animate-pulse"></div>}
+                            </div>
+                        </div>
+                        {/* Status Label Pill */}
+                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap px-1.5 py-0.5 bg-neutral-900/90 backdrop-blur-md border border-white/10 rounded-full text-[8px] font-black uppercase text-white shadow-lg tracking-tighter truncate max-w-[64px]">
+                            {s.text}
+                        </div>
+                        {s.likes && Object.keys(s.likes).length > 0 && (
+                            <div className="absolute -top-1 -right-1 bg-neutral-900 border border-white/10 rounded-full p-1 shadow-xl">
+                                <Heart size={8} className="text-red-500 fill-red-500" />
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </div>
+        )}
+
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
           {filteredChats.map(chat => {
             const isSelected = activeChatId === chat.id;
@@ -643,6 +783,88 @@ export const Inbox: React.FC = () => {
 
       {sidebarMenuId && sidebarMenuPos && createPortal(
           <div className="fixed inset-0 z-[1000]"><div className="absolute inset-0 bg-transparent" onClick={() => setSidebarMenuId(null)}></div><div style={{ position: 'fixed', top: `${sidebarMenuPos.y + 8}px`, left: `${sidebarMenuPos.x - 160}px` }} className="w-40 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 animate-in zoom-in">{archivedChats[sidebarMenuId] ? <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><ArchiveRestore size={16} /> Unarchive</button> : <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Archive size={16} /> Archive</button>}<button onClick={() => handleDeleteChat(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 rounded-xl"><Trash size={16} /> Delete</button></div></div>, document.body
+      )}
+
+      {/* --- SIGNAL CREATOR MODAL --- */}
+      {showSignalCreator && createPortal(
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
+              <div className="bg-[#1a1a1a]/95 backdrop-blur-[40px] border border-white/10 rounded-[32px] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in">
+                  <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-xl font-black text-white flex items-center gap-2"><Edit3 size={20} className="text-indigo-500" /> New Signal</h3>
+                      <button onClick={() => setShowSignalCreator(false)} className="p-2 text-neutral-500 hover:text-white"><X size={20} /></button>
+                  </div>
+                  <textarea 
+                    autoFocus
+                    value={manualSignalText}
+                    onChange={e => setManualSignalText(e.target.value.slice(0, 60))}
+                    placeholder="What's on your mind?"
+                    className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-white focus:outline-none focus:border-indigo-500 transition-all resize-none mb-2"
+                  />
+                  <div className="flex justify-between items-center mb-6 px-1">
+                      <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">{manualSignalText.length}/60</span>
+                      <span className="text-[10px] font-black uppercase text-indigo-500/60 tracking-widest">Friends only</span>
+                  </div>
+                  <button 
+                    onClick={handlePostManualSignal}
+                    disabled={!manualSignalText.trim()}
+                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black rounded-2xl shadow-xl shadow-indigo-900/20 active:scale-95 transition-all"
+                  >
+                      Broadcast Signal
+                  </button>
+              </div>
+          </div>, document.body
+      )}
+
+      {/* --- SIGNAL VIEW MODAL --- */}
+      {selectedSignalModal && createPortal(
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={() => setSelectedSignalModal(null)}>
+              <div 
+                className="bg-[#1a1a1a]/95 backdrop-blur-[60px] border border-white/10 rounded-[40px] p-10 max-w-sm w-full shadow-2xl animate-in zoom-in relative overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                  {/* Subtle Glow Background */}
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 rounded-full blur-[60px] pointer-events-none"></div>
+
+                  <div className="flex flex-col items-center text-center gap-6 relative z-10">
+                      <div className="w-24 h-24 rounded-[32px] p-1 bg-gradient-to-tr from-indigo-500/30 to-purple-500/30">
+                          <div className="w-full h-full rounded-[28px] overflow-hidden bg-neutral-900 border border-white/5">
+                              {selectedSignalModal.photoURL ? (
+                                  <img src={selectedSignalModal.photoURL} className="w-full h-full object-cover" />
+                              ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-3xl font-black text-neutral-600">{selectedSignalModal.userName.charAt(0)}</div>
+                              )}
+                          </div>
+                      </div>
+                      <div className="space-y-1">
+                          <h4 className="text-xl font-black text-white">{selectedSignalModal.userName}</h4>
+                          <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">
+                            {selectedSignalModal.type === 'auto' ? 'Activity Signal' : 'Status Signal'}
+                          </span>
+                      </div>
+                      <p className="text-lg font-medium text-neutral-200 leading-relaxed italic">
+                        "{selectedSignalModal.text}"
+                      </p>
+                      
+                      <div className="w-full flex gap-3 mt-4">
+                          <button 
+                            onClick={() => handleLikeSignal(selectedSignalModal.id, selectedSignalModal.userUid)}
+                            className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black transition-all active:scale-95 ${selectedSignalModal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white shadow-red-900/20' : 'bg-white/5 text-neutral-400 border border-white/10 hover:bg-white/10'}`}
+                          >
+                            <Heart size={20} className={selectedSignalModal.likes?.[user?.uid || ''] ? 'fill-white' : ''} />
+                            {Object.keys(selectedSignalModal.likes || {}).length || ''}
+                          </button>
+                          {selectedSignalModal.userUid !== user?.uid && (
+                              <button 
+                                onClick={() => handleReplyToSignal(selectedSignalModal)}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                              >
+                                <MessageCircle size={20} /> Reply
+                              </button>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          </div>, document.body
       )}
     </div>
   );

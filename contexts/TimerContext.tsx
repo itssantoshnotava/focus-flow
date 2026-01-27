@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { TimerMode, StudySession } from '../types';
 import { useAuth } from './AuthContext';
-import { ref, update, get, push, set } from "firebase/database";
+import { ref, update, get, push, set, remove } from "firebase/database";
 import { database } from "../firebase";
 
 export enum TimerPhase {
@@ -83,6 +83,41 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const intervalRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(Date.now());
+
+  // --- SIGNALS SYNC LOGIC ---
+  useEffect(() => {
+    if (!user) return;
+
+    const signalRef = ref(database, `signals/${user.uid}`);
+    
+    if (isActive) {
+      let text = "Deep focus mode 📚";
+      if (mode === TimerMode.POMODORO) {
+        text = phase === TimerPhase.FOCUS ? "In a pomodoro 🧠" : "On a short break ☕";
+      }
+
+      set(signalRef, {
+        text,
+        type: 'auto',
+        userUid: user.uid,
+        userName: user.displayName || 'User',
+        photoURL: user.photoURL || null,
+        timestamp: Date.now(),
+        expiresAt: Date.now() + 7200000, // 2 hours buffer while active, updated continuously
+        isActive: true
+      });
+    } else {
+      // If we were active and just stopped, update the expiration to 2 hours from now
+      get(signalRef).then(snap => {
+        if (snap.exists() && snap.val().type === 'auto') {
+          update(signalRef, {
+            isActive: false,
+            expiresAt: Date.now() + 7200000 // Persist for 2 hours
+          });
+        }
+      });
+    }
+  }, [isActive, mode, phase, user]);
 
   const calculateStreak = useCallback((sessionList: StudySession[]) => {
     const STREAK_THRESHOLD = 30 * 60; 
