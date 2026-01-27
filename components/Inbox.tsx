@@ -8,7 +8,7 @@ import {
     Send, MessageCircle, ArrowLeft, Users, Plus, X, Check, CheckCheck, Reply,
     SmilePlus, Paperclip, MoreVertical, Smile, AlertCircle, Archive, Trash, 
     UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings, Search, Heart, Edit3,
-    Clock
+    Clock, Zap, Coffee, Timer
 } from 'lucide-react';
 import { useTimer } from '../contexts/TimerContext';
 
@@ -34,11 +34,13 @@ interface Signal {
   id: string;
   text: string;
   type: 'auto' | 'manual';
+  statusType?: 'pomodoro' | 'break' | 'focus';
   userUid: string;
   userName: string;
   photoURL?: string;
   timestamp: number;
   expiresAt: number;
+  targetTimestamp?: number | null;
   likes?: Record<string, boolean>;
   isActive?: boolean;
 }
@@ -104,8 +106,8 @@ export const Inbox: React.FC = () => {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [showSignalCreator, setShowSignalCreator] = useState(false);
   const [manualSignalText, setManualSignalText] = useState('');
-  const [selectedSignalModal, setSelectedSignalModal] = useState<Signal | null>(null);
-
+  const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null);
+  
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
@@ -120,12 +122,11 @@ export const Inbox: React.FC = () => {
     return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
   }, [user, activeChatId, selectedChat]);
 
-  // Check if current user has an active signal
   const mySignal = useMemo(() => {
     return signals.find(s => s.userUid === user?.uid);
   }, [signals, user?.uid]);
 
-  // Derived map for Group Seen Bubbles: uid -> last msgId they saw
+  // Derived map for Group Seen Bubbles
   const lastSeenByPerUser = useMemo(() => {
     const map: Record<string, string> = {};
     if (!selectedChat || selectedChat.type !== 'group') return map;
@@ -133,7 +134,7 @@ export const Inbox: React.FC = () => {
     messages.forEach(m => {
       if (m.seenBy) {
         Object.keys(m.seenBy).forEach(uid => {
-          if (uid !== user?.uid) { // Standard: exclude me
+          if (uid !== user?.uid) {
             map[uid] = m.id;
           }
         });
@@ -177,7 +178,7 @@ export const Inbox: React.FC = () => {
         userName: user.displayName || 'User',
         photoURL: user.photoURL || null,
         timestamp: Date.now(),
-        expiresAt: Date.now() + 86400000, // Manual signals last 24h
+        expiresAt: Date.now() + 86400000, 
         isActive: false
     });
     setManualSignalText('');
@@ -188,7 +189,7 @@ export const Inbox: React.FC = () => {
     if (!user || targetUid !== user.uid) return;
     if (window.confirm("Delete your current signal?")) {
         await remove(ref(database, `signals/${user.uid}`));
-        setSelectedSignalModal(null);
+        setExpandedSignalId(null);
     }
   };
 
@@ -206,7 +207,6 @@ export const Inbox: React.FC = () => {
     const convoId = [user.uid, targetUid].sort().join('_');
     const contextText = `Replying to your signal: "${signal.text}"\n\n`;
     
-    // Check if chat exists
     const inboxRef = ref(database, `userInboxes/${user.uid}/${targetUid}`);
     const snap = await get(inboxRef);
     
@@ -219,7 +219,7 @@ export const Inbox: React.FC = () => {
     
     setActiveChatId(targetUid);
     setInputText(contextText);
-    setSelectedSignalModal(null);
+    setExpandedSignalId(null);
     setTimeout(() => messageInputRef.current?.focus(), 100);
   };
 
@@ -269,19 +269,17 @@ export const Inbox: React.FC = () => {
     }
   };
 
-  // --- SCROLL MANAGEMENT (ULTIMATE FIX) ---
+  // --- SCROLL MANAGEMENT ---
   const isOpeningChat = useRef(false);
   useEffect(() => { 
     if (activeChatId) {
         isOpeningChat.current = true;
-        // Immediate jump on chat change
         if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
         }
     }
   }, [activeChatId]);
 
-  // Use ResizeObserver to force bottom pinning during initial load even if content (images) shifts
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container || !activeChatId) return;
@@ -294,7 +292,6 @@ export const Inbox: React.FC = () => {
 
     observer.observe(container);
     
-    // Stop pinning after a short period to allow user to scroll up
     const timeout = setTimeout(() => {
       isOpeningChat.current = false;
     }, 1200);
@@ -338,7 +335,6 @@ export const Inbox: React.FC = () => {
                         if (pSnap.exists()) setListPresences(prev => ({ ...prev, [chat.id]: pSnap.val() }));
                     });
                 } else {
-                    // Force authoritative group metadata sync for the PFP and member count
                     onValue(ref(database, `groupChats/${chat.id}`), (gSnap) => {
                         if (gSnap.exists()) {
                             const gData = gSnap.val();
@@ -378,14 +374,11 @@ export const Inbox: React.FC = () => {
         const list = Object.entries(snapshot.val()).map(([id, val]: [string, any]) => ({ id, ...val })).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(list);
         
-        // Handle Seen Logic
         if (selectedChat.type === 'group') {
             const lastMsg = list[list.length - 1];
-            // Only update seenBy on the LATEST message in groups
             if (lastMsg && (!lastMsg.seenBy || !lastMsg.seenBy[user.uid])) {
                 update(ref(database, `${path}/${lastMsg.id}/seenBy`), { [user.uid]: Date.now() });
             }
-            // Fetch missing profiles for anyone who has seen messages to show bubbles
             list.forEach(m => {
               if (m.seenBy) {
                 Object.keys(m.seenBy).forEach(uid => {
@@ -398,7 +391,6 @@ export const Inbox: React.FC = () => {
               }
             });
         } else {
-            // One-on-one seen logic
             list.forEach(m => {
                 if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${path}/${m.id}`), { seen: true });
             });
@@ -506,63 +498,171 @@ export const Inbox: React.FC = () => {
     return following[c.id] && followers[c.id];
   });
 
+  const SignalCard: React.FC<{ signal: Signal }> = ({ signal }) => {
+    const isMe = signal.userUid === user?.uid;
+    const isExpanded = expandedSignalId === signal.id;
+    const [timeLeftStr, setTimeLeftStr] = useState<string>('');
+
+    useEffect(() => {
+      if (!signal.targetTimestamp) {
+        setTimeLeftStr('');
+        return;
+      }
+      const updateTimer = () => {
+        const remaining = Math.max(0, Math.floor((signal.targetTimestamp! - Date.now()) / 1000));
+        if (remaining <= 0) {
+            setTimeLeftStr('just now');
+            return;
+        }
+        const mins = Math.floor(remaining / 60);
+        setTimeLeftStr(`${mins} min left`);
+      };
+      updateTimer();
+      const interval = setInterval(updateTimer, 15000);
+      return () => clearInterval(interval);
+    }, [signal.targetTimestamp]);
+
+    const getStatusIcon = () => {
+        if (signal.type === 'manual') return <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>;
+        if (signal.statusType === 'pomodoro') return <Zap size={10} className="text-orange-400" />;
+        if (signal.statusType === 'break') return <Coffee size={10} className="text-emerald-400" />;
+        return <Timer size={10} className="text-indigo-400" />;
+    };
+
+    const handleCardClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setExpandedSignalId(isExpanded ? null : signal.id);
+    };
+
+    const handleCardDoubleClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        handleLikeSignal(signal.id, signal.userUid);
+    };
+
+    return (
+        <div 
+            onClick={handleCardClick}
+            onDoubleClick={handleCardDoubleClick}
+            className={`shrink-0 min-w-[200px] max-w-[260px] p-4 transition-all duration-300 rounded-[28px] relative border flex flex-col gap-3 group/card cursor-pointer
+                ${isExpanded ? 'bg-white/20 ring-1 ring-white/30 z-40' : 'bg-white/10 hover:bg-white/[0.15] border-white/10'}
+                backdrop-blur-[20px] shadow-xl overflow-hidden
+                ${signal.isActive ? 'shadow-indigo-500/10' : ''}
+            `}
+        >
+            {/* Background Glow for active signals */}
+            {signal.isActive && (
+                <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-2xl -mr-10 -mt-10 animate-pulse pointer-events-none"></div>
+            )}
+
+            <div className="flex items-center gap-3">
+                <div className="relative shrink-0">
+                    <div className={`w-10 h-10 rounded-full p-[1.5px] bg-gradient-to-tr ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-white/5'} overflow-hidden`}>
+                        {signal.photoURL ? (
+                            <img src={signal.photoURL} className="w-full h-full rounded-full object-cover" alt={signal.userName} />
+                        ) : (
+                            <div className="w-full h-full rounded-full bg-neutral-900 flex items-center justify-center text-[10px] font-black text-neutral-500 uppercase">{signal.userName.charAt(0)}</div>
+                        )}
+                    </div>
+                </div>
+                <div className="flex-1 min-w-0 flex flex-col">
+                    <span className="text-[13px] font-black text-white truncate tracking-tight">{isMe ? 'My Signal' : signal.userName}</span>
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-white/50 uppercase tracking-widest whitespace-nowrap">
+                        {signal.type === 'auto' ? (
+                            <span className="flex items-center gap-1">
+                                {signal.statusType === 'pomodoro' ? 'Studying' : signal.statusType === 'break' ? 'Resting' : 'Focusing'}
+                                {timeLeftStr && ` · ${timeLeftStr}`}
+                            </span>
+                        ) : 'Status'}
+                    </div>
+                </div>
+                <div className="shrink-0">
+                    {getStatusIcon()}
+                </div>
+            </div>
+
+            <div className={`transition-all duration-300 ${isExpanded ? 'opacity-100 mt-1' : 'opacity-100'}`}>
+                <p className={`text-[13px] font-medium text-white leading-snug ${!isExpanded ? 'truncate' : 'whitespace-pre-wrap'}`}>
+                    "{signal.text}"
+                </p>
+                
+                {isExpanded && (
+                    <div className="flex items-center gap-2 mt-4 animate-in slide-in-from-top-2 duration-300">
+                        {isMe ? (
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteSignal(signal.userUid); }}
+                                className="flex-1 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-widest rounded-xl border border-red-500/20 transition-all flex items-center justify-center gap-1.5"
+                            >
+                                <Trash size={12} /> Remove
+                            </button>
+                        ) : (
+                            <>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); handleLikeSignal(signal.id, signal.userUid); }}
+                                    className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 active:scale-95 ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white' : 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10'}`}
+                                >
+                                    <Heart size={12} className={signal.likes?.[user?.uid || ''] ? 'fill-white' : ''} />
+                                    {Object.keys(signal.likes || {}).length || 'Like'}
+                                </button>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); handleReplyToSignal(signal); }}
+                                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                                >
+                                    <MessageCircle size={12} /> Reply
+                                </button>
+                            </>
+                        )}
+                    </div>
+                )}
+            </div>
+            
+            {/* Heart indicator if liked but not expanded */}
+            {!isExpanded && signal.likes && Object.keys(signal.likes).length > 0 && (
+                <div className="absolute top-3 right-3 text-red-500 drop-shadow-lg">
+                    <Heart size={8} className="fill-red-500" />
+                </div>
+            )}
+        </div>
+    );
+  };
+
   if (loading && !chats.length) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
   return (
-    <div className="flex h-full bg-neutral-950 overflow-hidden font-sans">
-      {/* --- SIDEBAR --- */}
+    <div className="flex h-full bg-neutral-950 overflow-hidden font-sans" onClick={() => setExpandedSignalId(null)}>
       <div className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-col border-r border-neutral-900 bg-neutral-950 shrink-0`}>
         <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/50 backdrop-blur-xl sticky top-0 z-20">
           <h1 className="text-2xl font-black text-white tracking-tight">{showArchived ? 'Archive' : 'Messages'}</h1>
           <div className="flex gap-2">
-            <button onClick={() => setShowArchived(!showArchived)} className={`p-2 rounded-xl transition-colors ${showArchived ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}><Archive size={20} /></button>
-            <button onClick={() => setViewMode(viewMode === 'list' ? 'create_group' : 'list')} className="p-2 bg-indigo-600/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-colors">{viewMode === 'list' ? <Plus size={20} /> : <X size={20} />}</button>
+            <button onClick={(e) => { e.stopPropagation(); setShowArchived(!showArchived); }} className={`p-2 rounded-xl transition-colors ${showArchived ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}><Archive size={20} /></button>
+            <button onClick={(e) => { e.stopPropagation(); setViewMode(viewMode === 'list' ? 'create_group' : 'list'); }} className="p-2 bg-indigo-600/10 text-indigo-400 rounded-xl hover:bg-indigo-600 hover:text-white transition-colors">{viewMode === 'list' ? <Plus size={20} /> : <X size={20} />}</button>
           </div>
         </div>
 
-        {/* --- SIGNALS ROW --- */}
+        {/* --- SIGNALS SECTION (REDESIGNED) --- */}
         {!showArchived && (
-            <div className="p-4 border-b border-neutral-900 overflow-x-auto custom-scrollbar flex items-center gap-3 bg-neutral-950/20">
-                {/* MY SIGNAL CREATOR - Only show if NO signal exists */}
-                {!mySignal && (
-                  <button 
-                    onClick={() => !isTimerActive && setShowSignalCreator(true)}
-                    disabled={isTimerActive}
-                    className={`shrink-0 w-14 h-14 rounded-full border-2 border-dashed flex items-center justify-center transition-all ${isTimerActive ? 'border-indigo-500/30 text-indigo-500/40 bg-indigo-500/5' : 'border-neutral-800 text-neutral-500 hover:border-indigo-500 hover:text-indigo-400 bg-neutral-900 hover:bg-neutral-800 active:scale-95'}`}
-                    title={isTimerActive ? "Focusing..." : "Add Signal"}
-                  >
-                      {isTimerActive ? <Clock size={20} className="animate-pulse" /> : <Plus size={24} />}
-                  </button>
-                )}
-
-                {signals.map(s => (
-                    <div 
-                      key={s.id} 
-                      onDoubleClick={() => handleLikeSignal(s.id, s.userUid)}
-                      onClick={() => setSelectedSignalModal(s)}
-                      className="shrink-0 group relative cursor-pointer"
-                    >
-                        <div className={`w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr ${s.userUid === user?.uid ? 'from-indigo-600 to-indigo-400' : 'from-indigo-500/50 to-purple-500/50'} relative`}>
-                            <div className="w-full h-full rounded-full overflow-hidden bg-neutral-950 border border-neutral-900 relative">
-                                {s.photoURL ? (
-                                    <img src={s.photoURL} className="w-full h-full object-cover" />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-xs font-black text-neutral-600">{s.userName.charAt(0)}</div>
-                                )}
-                                {s.isActive && <div className="absolute inset-0 bg-indigo-600/20 animate-pulse"></div>}
-                            </div>
+            <div className="border-b border-neutral-900 flex flex-col gap-3 py-6 bg-neutral-950/40">
+                <div className="flex items-center justify-between px-6">
+                    <h3 className="text-[10px] font-black uppercase text-neutral-500 tracking-[0.2em]">Signals</h3>
+                    {!mySignal && (
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); !isTimerActive && setShowSignalCreator(true); }}
+                            disabled={isTimerActive}
+                            className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors disabled:opacity-30"
+                        >
+                            <Plus size={14} />
+                        </button>
+                    )}
+                </div>
+                <div className="overflow-x-auto custom-scrollbar flex items-start gap-4 px-6 pb-2">
+                    {/* Signal Cards */}
+                    {signals.map(s => <SignalCard key={s.id} signal={s} />)}
+                    
+                    {signals.length === 0 && (
+                        <div className="py-4 text-center w-full">
+                            <p className="text-[10px] font-black uppercase text-neutral-700 tracking-widest">No active signals</p>
                         </div>
-                        {/* Status Label Pill */}
-                        <div className={`absolute -bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap px-1.5 py-0.5 ${s.userUid === user?.uid ? 'bg-indigo-600' : 'bg-neutral-900/90'} backdrop-blur-md border border-white/10 rounded-full text-[8px] font-black uppercase text-white shadow-lg tracking-tighter truncate max-w-[64px]`}>
-                            {s.userUid === user?.uid ? 'You' : s.text}
-                        </div>
-                        {s.likes && Object.keys(s.likes).length > 0 && (
-                            <div className="absolute -top-1 -right-1 bg-neutral-900 border border-white/10 rounded-full p-1 shadow-xl">
-                                <Heart size={8} className="text-red-500 fill-red-500" />
-                            </div>
-                        )}
-                    </div>
-                ))}
+                    )}
+                </div>
             </div>
         )}
 
@@ -574,7 +674,6 @@ export const Inbox: React.FC = () => {
             const presence = listPresences[chat.id];
             const hasDraft = (drafts[chat.id]?.trim().length > 0) || (chat.id === activeChatId && inputText.trim().length > 0);
             
-            // PRIORITY: Use authoritative metadata for groups
             const photo = chat.type === 'dm' ? profile?.photoURL : gMeta?.photoURL || chat.photoURL;
             const name = chat.type === 'dm' ? profile?.name || chat.name : gMeta?.name || chat.name;
             
@@ -586,7 +685,6 @@ export const Inbox: React.FC = () => {
                       {chat.type === 'dm' && <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
                       {chat.unreadCount ? <div className="absolute -top-1 -right-1 w-5 h-5 bg-indigo-600 rounded-full border-2 border-neutral-950 flex items-center justify-center text-[10px] font-black text-white">{chat.unreadCount}</div> : null}
                     </div>
-                    {/* Fixed padding-right (pr-10) to prevent text overlap with absolute More button */}
                     <div className="flex-1 text-left min-w-0 pr-10">
                         <div className="flex justify-between items-center mb-0.5">
                             <span className="font-bold text-white truncate">{name}</span>
@@ -595,8 +693,7 @@ export const Inbox: React.FC = () => {
                         <p className={`text-sm truncate ${chat.unreadCount ? 'text-neutral-200 font-medium' : 'text-neutral-500'}`}>{chat.lastMessage?.senderUid === user?.uid && 'You: '}{chat.lastMessage?.text || 'No messages'}</p>
                     </div>
                   </button>
-                  {/* Changed More button position to top-right corner to stay clear of message body */}
-                  <button onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSidebarMenuPos({ x: r.right, y: r.bottom }); setSidebarMenuId(chat.id); }} className="absolute right-4 top-4 p-2 text-neutral-500 hover:text-white opacity-0 group-hover/tile:opacity-100 transition-opacity"><MoreVertical size={16} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setSidebarMenuPos({ x: r.right, y: r.bottom }); setSidebarMenuId(chat.id); }} className="absolute right-4 top-4 p-2 text-neutral-500 hover:text-white opacity-0 group-hover/tile:opacity-100 transition-opacity"><MoreVertical size={16} /></button>
               </div>
             );
           })}
@@ -605,7 +702,7 @@ export const Inbox: React.FC = () => {
 
       {/* --- CHAT AREA --- */}
       {activeChatId && selectedChat ? (
-        <div className="flex-1 flex flex-col bg-neutral-950 relative overflow-hidden">
+        <div className="flex-1 flex flex-col bg-neutral-950 relative overflow-hidden" onClick={(e) => e.stopPropagation()}>
           <div className="p-4 md:p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/80 backdrop-blur-2xl z-20">
             <div className="flex items-center gap-4 min-w-0">
               <button onClick={() => setActiveChatId(null)} className="md:hidden p-2 text-neutral-500 hover:text-white"><ArrowLeft size={24} /></button>
@@ -633,7 +730,6 @@ export const Inbox: React.FC = () => {
               const reactions = Object.entries(msg.reactions || {});
               const isStatusMsg = lastUserMessageId === msg.id;
               
-              // Get users who saw this specific message (Groups only)
               const groupViewers = Object.entries(lastSeenByPerUser)
                 .filter(([uid, mid]) => mid === msg.id)
                 .map(([uid]) => uid);
@@ -656,7 +752,6 @@ export const Inbox: React.FC = () => {
                             )}
                             <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
                             
-                            {/* Seen Indicators for DMs */}
                             {selectedChat.type === 'dm' && isMe && isStatusMsg && (
                                 <div className="absolute -bottom-5 right-0 flex items-center gap-1 opacity-100 transition-opacity">
                                     <span className="text-[9px] font-black uppercase text-neutral-600 tracking-tighter">{msg.seen ? 'Seen' : 'Sent'}</span>
@@ -664,7 +759,6 @@ export const Inbox: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* Seen Bubbles for Groups */}
                             {selectedChat.type === 'group' && groupViewers.length > 0 && (
                                 <div className={`absolute -bottom-5 ${isMe ? 'right-0' : 'left-0'} flex -space-x-1.5 animate-in fade-in zoom-in duration-300`}>
                                     {groupViewers.map(uid => {
@@ -694,7 +788,6 @@ export const Inbox: React.FC = () => {
               );
             })}
 
-            {/* TYPING INDICATOR AREA */}
             {typingUsers.length > 0 && (
                 <div className="flex items-center gap-2 mt-4 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-2">
                     <div className="flex -space-x-3 mr-1">
@@ -726,7 +819,6 @@ export const Inbox: React.FC = () => {
             )}
           </div>
 
-          {/* Footer Input */}
           <div className="p-4 md:p-6 bg-neutral-950 border-t border-neutral-900 z-30">
               <div className="max-w-5xl mx-auto flex flex-col gap-2 relative">
                   {showEmojiPicker && (
@@ -800,10 +892,9 @@ export const Inbox: React.FC = () => {
           <div className="fixed inset-0 z-[1000]"><div className="absolute inset-0 bg-transparent" onClick={() => setSidebarMenuId(null)}></div><div style={{ position: 'fixed', top: `${sidebarMenuPos.y + 8}px`, left: `${sidebarMenuPos.x - 160}px` }} className="w-40 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl p-1 animate-in zoom-in">{archivedChats[sidebarMenuId] ? <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><ArchiveRestore size={16} /> Unarchive</button> : <button onClick={() => handleArchive(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-neutral-300 hover:bg-white/5 rounded-xl"><Archive size={16} /> Archive</button>}<button onClick={() => handleDeleteChat(sidebarMenuId)} className="w-full flex items-center gap-3 px-4 py-3 text-sm font-bold text-red-500 hover:bg-red-500/5 rounded-xl"><Trash size={16} /> Delete</button></div></div>, document.body
       )}
 
-      {/* --- SIGNAL CREATOR MODAL --- */}
       {showSignalCreator && createPortal(
-          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
-              <div className="bg-[#1a1a1a]/95 backdrop-blur-[40px] border border-white/10 rounded-[32px] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in">
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={() => setShowSignalCreator(false)}>
+              <div className="bg-[#1a1a1a]/95 backdrop-blur-[40px] border border-white/10 rounded-[32px] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in" onClick={e => e.stopPropagation()}>
                   <div className="flex justify-between items-center mb-6">
                       <h3 className="text-xl font-black text-white flex items-center gap-2"><Edit3 size={20} className="text-indigo-500" /> New Signal</h3>
                       <button onClick={() => setShowSignalCreator(false)} className="p-2 text-neutral-500 hover:text-white"><X size={20} /></button>
@@ -826,67 +917,6 @@ export const Inbox: React.FC = () => {
                   >
                       Broadcast Signal
                   </button>
-              </div>
-          </div>, document.body
-      )}
-
-      {/* --- SIGNAL VIEW MODAL --- */}
-      {selectedSignalModal && createPortal(
-          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={() => setSelectedSignalModal(null)}>
-              <div 
-                className="bg-[#1a1a1a]/95 backdrop-blur-[60px] border border-white/10 rounded-[40px] p-10 max-w-sm w-full shadow-2xl animate-in zoom-in relative overflow-hidden"
-                onClick={e => e.stopPropagation()}
-              >
-                  {/* Subtle Glow Background */}
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/10 rounded-full blur-[60px] pointer-events-none"></div>
-
-                  <div className="flex flex-col items-center text-center gap-6 relative z-10">
-                      <div className="w-24 h-24 rounded-[32px] p-1 bg-gradient-to-tr from-indigo-500/30 to-purple-500/30">
-                          <div className="w-full h-full rounded-[28px] overflow-hidden bg-neutral-900 border border-white/5">
-                              {selectedSignalModal.photoURL ? (
-                                  <img src={selectedSignalModal.photoURL} className="w-full h-full object-cover" />
-                              ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-3xl font-black text-neutral-600">{selectedSignalModal.userName.charAt(0)}</div>
-                              )}
-                          </div>
-                      </div>
-                      <div className="space-y-1">
-                          <h4 className="text-xl font-black text-white">{selectedSignalModal.userName}</h4>
-                          <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">
-                            {selectedSignalModal.type === 'auto' ? 'Activity Signal' : 'Status Signal'}
-                          </span>
-                      </div>
-                      <p className="text-lg font-medium text-neutral-200 leading-relaxed italic">
-                        "{selectedSignalModal.text}"
-                      </p>
-                      
-                      <div className="w-full flex gap-3 mt-4">
-                          {selectedSignalModal.userUid === user?.uid ? (
-                              <button 
-                                onClick={() => handleDeleteSignal(selectedSignalModal.userUid)}
-                                className="flex-1 bg-red-600 hover:bg-red-500 text-white py-4 rounded-2xl font-black shadow-lg shadow-red-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
-                              >
-                                <Trash size={20} /> Delete Signal
-                              </button>
-                          ) : (
-                            <>
-                              <button 
-                                onClick={() => handleLikeSignal(selectedSignalModal.id, selectedSignalModal.userUid)}
-                                className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-black transition-all active:scale-95 ${selectedSignalModal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white shadow-red-900/20' : 'bg-white/5 text-neutral-400 border border-white/10 hover:bg-white/10'}`}
-                              >
-                                <Heart size={20} className={selectedSignalModal.likes?.[user?.uid || ''] ? 'fill-white' : ''} />
-                                {Object.keys(selectedSignalModal.likes || {}).length || ''}
-                              </button>
-                              <button 
-                                onClick={() => handleReplyToSignal(selectedSignalModal)}
-                                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-4 rounded-2xl font-black shadow-lg shadow-indigo-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
-                              >
-                                <MessageCircle size={20} /> Reply
-                              </button>
-                            </>
-                          )}
-                      </div>
-                  </div>
               </div>
           </div>, document.body
       )}

@@ -91,33 +91,44 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const signalRef = ref(database, `signals/${user.uid}`);
     
     if (isActive) {
-      let text = "Deep focus mode 📚";
+      let text = "Focusing 📚";
+      let statusType = "focus";
+      
       if (mode === TimerMode.POMODORO) {
-        text = phase === TimerPhase.FOCUS ? "In a pomodoro 🧠" : "On a short break ☕";
+        text = phase === TimerPhase.FOCUS ? "Studying 🧠" : "Break ☕";
+        statusType = phase === TimerPhase.FOCUS ? "pomodoro" : "break";
+      } else if (mode === TimerMode.COUNTDOWN) {
+        text = "Countdown ⏱️";
+        statusType = "focus";
+      } else {
+        text = "Deep Focus ⚡";
+        statusType = "focus";
       }
 
       set(signalRef, {
         text,
         type: 'auto',
+        statusType,
         userUid: user.uid,
         userName: user.displayName || 'User',
         photoURL: user.photoURL || null,
         timestamp: Date.now(),
-        expiresAt: Date.now() + 7200000, // 2 hours buffer while active, updated continuously
+        targetTimestamp: mode !== TimerMode.STOPWATCH ? Date.now() + (seconds * 1000) : null,
+        expiresAt: Date.now() + 7200000, 
         isActive: true
       });
     } else {
-      // If we were active and just stopped, update the expiration to 2 hours from now
       get(signalRef).then(snap => {
         if (snap.exists() && snap.val().type === 'auto') {
           update(signalRef, {
             isActive: false,
-            expiresAt: Date.now() + 7200000 // Persist for 2 hours
+            targetTimestamp: null,
+            expiresAt: Date.now() + 7200000 // Persist for 2 hours post-session
           });
         }
       });
     }
-  }, [isActive, mode, phase, user]);
+  }, [isActive, mode, phase, user, seconds]); // Added seconds to dependency to keep targetTimestamp relatively accurate
 
   const calculateStreak = useCallback((sessionList: StudySession[]) => {
     const STREAK_THRESHOLD = 30 * 60; 

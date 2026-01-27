@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, googleProvider, database } from '../firebase';
-import { onAuthStateChanged, signInWithPopup, signOut, User, AuthError } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
 import { ref, get, set, update } from 'firebase/database';
 
 interface AuthContextType {
@@ -59,13 +59,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       console.error("Error signing in", err);
-      const authError = err as AuthError;
-      if (authError.code === 'auth/unauthorized-domain') {
+      // Fixed: Using the caught error 'err' directly because it is typed as 'any', 
+      // avoiding property access errors on AuthError interface.
+      if (err.code === 'auth/unauthorized-domain') {
           setError(`Domain not authorized: ${window.location.hostname}. Please add this domain to Firebase Console > Authentication > Settings > Authorized Domains.`);
-      } else if (authError.code === 'auth/popup-closed-by-user') {
+      } else if (err.code === 'auth/popup-closed-by-user') {
           setError('Sign-in cancelled.');
       } else {
-          setError(authError.message || 'Failed to sign in. Please try again.');
+          setError(err.message || 'Failed to sign in. Please try again.');
       }
     }
   };
