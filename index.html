@@ -29,6 +29,7 @@
               'fire-flicker': 'fireFlicker 1.5s ease-in-out infinite',
               'typing-dot': 'typingDot 1.4s infinite ease-in-out',
               'marquee': 'marquee 10s linear infinite',
+              'waveform': 'waveform 0.6s ease-in-out infinite alternate',
             },
             keyframes: {
               msgSent: {
@@ -55,6 +56,10 @@
               marquee: {
                 '0%': { transform: 'translateX(100%)' },
                 '100%': { transform: 'translateX(-100%)' }
+              },
+              waveform: {
+                '0%': { height: '4px' },
+                '100%': { height: '12px' }
               }
             }
           },
@@ -92,6 +97,13 @@
       .marquee-text {
         display: inline-block;
         padding-left: 10px;
+      }
+
+      /* Frosted Glass Utilities */
+      .glass-premium {
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(20px) saturate(160%);
+        border: 1px solid rgba(255, 255, 255, 0.08);
       }
     </style>
   <script type="importmap">

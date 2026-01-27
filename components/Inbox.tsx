@@ -8,9 +8,13 @@ import {
     Send, MessageCircle, ArrowLeft, Users, Plus, X, Check, CheckCheck, Reply,
     SmilePlus, Paperclip, MoreVertical, Smile, AlertCircle, Archive, Trash, 
     UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings, Search, Heart, Edit3,
-    Clock, Zap, Coffee, Timer
+    Clock, Zap, Coffee, Timer, Music, Play, Pause, ChevronRight
 } from 'lucide-react';
 import { useTimer } from '../contexts/TimerContext';
+
+// Unified global reference for all audio in the app (to prevent overlaps)
+let globalAudioInstance: HTMLAudioElement | null = null;
+let globalSetIsPlaying: ((val: boolean) => void) | null = null;
 
 interface ChatItem {
   id: string; 
@@ -30,6 +34,13 @@ interface ChatItem {
   members?: Record<string, any>;
 }
 
+interface MusicMetadata {
+  trackName: string;
+  artistName: string;
+  previewUrl: string;
+  artworkUrl: string;
+}
+
 interface Signal {
   id: string;
   text: string;
@@ -43,6 +54,7 @@ interface Signal {
   targetTimestamp?: number | null;
   likes?: Record<string, boolean>;
   isActive?: boolean;
+  music?: MusicMetadata;
 }
 
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉', '👀'];
@@ -106,6 +118,7 @@ export const Inbox: React.FC = () => {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [showSignalCreator, setShowSignalCreator] = useState(false);
   const [manualSignalText, setManualSignalText] = useState('');
+  const [signalMusic, setSignalMusic] = useState<MusicMetadata | null>(null);
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -178,10 +191,12 @@ export const Inbox: React.FC = () => {
         userName: user.displayName || 'User',
         photoURL: user.photoURL || null,
         timestamp: Date.now(),
-        expiresAt: Date.now() + 86400000, 
-        isActive: false
+        expiresAt: Date.now() + 21600000, // 6 hours
+        isActive: false,
+        music: signalMusic || null
     });
     setManualSignalText('');
+    setSignalMusic(null);
     setShowSignalCreator(false);
   };
 
@@ -502,6 +517,8 @@ export const Inbox: React.FC = () => {
     const isMe = signal.userUid === user?.uid;
     const isExpanded = expandedSignalId === signal.id;
     const [timeLeftStr, setTimeLeftStr] = useState<string>('');
+    const [isPlaying, setIsPlaying] = useState(false);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
       if (!signal.targetTimestamp) {
@@ -522,8 +539,51 @@ export const Inbox: React.FC = () => {
       return () => clearInterval(interval);
     }, [signal.targetTimestamp]);
 
+    // Handle music playback logic for signal
+    const togglePlayback = (e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        if (!signal.music?.previewUrl) return;
+
+        if (isPlaying) {
+            audioRef.current?.pause();
+            setIsPlaying(false);
+            if (globalAudioInstance === audioRef.current) {
+                globalAudioInstance = null;
+                globalSetIsPlaying = null;
+            }
+        } else {
+            if (globalAudioInstance && globalAudioInstance !== audioRef.current) {
+                globalAudioInstance.pause();
+                if (globalSetIsPlaying) globalSetIsPlaying(false);
+            }
+            if (!audioRef.current) {
+                audioRef.current = new Audio(signal.music.previewUrl);
+                audioRef.current.loop = true;
+                audioRef.current.onended = () => setIsPlaying(false);
+            }
+            audioRef.current.play().then(() => {
+                setIsPlaying(true);
+                globalAudioInstance = audioRef.current;
+                globalSetIsPlaying = setIsPlaying;
+            }).catch(console.error);
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause();
+                if (globalAudioInstance === audioRef.current) {
+                    globalAudioInstance = null;
+                    globalSetIsPlaying = null;
+                }
+            }
+        };
+    }, []);
+
     const getStatusIcon = () => {
-        if (signal.type === 'manual') return <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>;
+        if (signal.type === 'manual' && !signal.music) return <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>;
+        if (signal.music) return <Music size={12} className={`${isPlaying ? 'text-indigo-400 animate-pulse' : 'text-neutral-500'}`} />;
         if (signal.statusType === 'pomodoro') return <Zap size={10} className="text-orange-400" />;
         if (signal.statusType === 'break') return <Coffee size={10} className="text-emerald-400" />;
         return <Timer size={10} className="text-indigo-400" />;
@@ -543,20 +603,20 @@ export const Inbox: React.FC = () => {
         <div 
             onClick={handleCardClick}
             onDoubleClick={handleCardDoubleClick}
-            className={`shrink-0 min-w-[200px] max-w-[260px] p-4 transition-all duration-300 rounded-[28px] relative border flex flex-col gap-3 group/card cursor-pointer
-                ${isExpanded ? 'bg-white/20 ring-1 ring-white/30 z-40' : 'bg-white/10 hover:bg-white/[0.15] border-white/10'}
-                backdrop-blur-[20px] shadow-xl overflow-hidden
-                ${signal.isActive ? 'shadow-indigo-500/10' : ''}
+            className={`shrink-0 min-w-[200px] max-w-[260px] p-4 transition-all duration-500 rounded-[32px] relative border flex flex-col gap-3 group/card cursor-pointer
+                ${isExpanded ? 'bg-white/20 ring-1 ring-white/30 z-40' : 'bg-white/5 hover:bg-white/10 border-white/[0.08]'}
+                backdrop-blur-[30px] shadow-2xl overflow-hidden
+                ${isPlaying ? 'shadow-[0_0_30px_rgba(99,102,241,0.15)] ring-1 ring-indigo-500/30' : ''}
             `}
         >
-            {/* Background Glow for active signals */}
-            {signal.isActive && (
-                <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-2xl -mr-10 -mt-10 animate-pulse pointer-events-none"></div>
+            {/* Liquid Glow for active music */}
+            {isPlaying && (
+                <div className="absolute inset-0 bg-gradient-to-tr from-indigo-600/5 via-transparent to-purple-600/5 animate-pulse pointer-events-none"></div>
             )}
 
             <div className="flex items-center gap-3">
                 <div className="relative shrink-0">
-                    <div className={`w-10 h-10 rounded-full p-[1.5px] bg-gradient-to-tr ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-white/5'} overflow-hidden`}>
+                    <div className={`w-10 h-10 rounded-full p-[1.5px] bg-gradient-to-tr ${isMe ? 'from-indigo-400 to-indigo-600 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'from-white/20 to-white/5'} overflow-hidden`}>
                         {signal.photoURL ? (
                             <img src={signal.photoURL} className="w-full h-full rounded-full object-cover" alt={signal.userName} />
                         ) : (
@@ -570,9 +630,11 @@ export const Inbox: React.FC = () => {
                         {signal.type === 'auto' ? (
                             <span className="flex items-center gap-1">
                                 {signal.statusType === 'pomodoro' ? 'Studying' : signal.statusType === 'break' ? 'Resting' : 'Focusing'}
-                                {timeLeftStr && ` · ${timeLeftStr}`}
+                                {timeLeftStr && ` • ${timeLeftStr}`}
                             </span>
-                        ) : 'Status'}
+                        ) : (
+                           <span>Status</span>
+                        )}
                     </div>
                 </div>
                 <div className="shrink-0">
@@ -580,17 +642,45 @@ export const Inbox: React.FC = () => {
                 </div>
             </div>
 
-            <div className={`transition-all duration-300 ${isExpanded ? 'opacity-100 mt-1' : 'opacity-100'}`}>
-                <p className={`text-[13px] font-medium text-white leading-snug ${!isExpanded ? 'truncate' : 'whitespace-pre-wrap'}`}>
+            <div className="flex flex-col gap-3">
+                <p className={`text-[13px] font-medium text-white leading-snug ${!isExpanded ? 'line-clamp-2' : 'whitespace-pre-wrap'}`}>
                     "{signal.text}"
                 </p>
+
+                {/* Music Pill */}
+                {signal.music && (
+                    <div 
+                        onClick={togglePlayback}
+                        className={`flex items-center gap-2 p-1.5 rounded-full transition-all duration-300 ${isPlaying ? 'bg-indigo-500/20 ring-1 ring-indigo-400/30' : 'bg-white/5 border border-white/5 hover:bg-white/10'}`}
+                    >
+                        <div className="relative shrink-0">
+                            <img src={signal.music.artworkUrl} className="w-6 h-6 rounded-full object-cover" alt="Art" />
+                            {isPlaying && (
+                                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center">
+                                    <Pause size={10} className="text-white fill-white" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col">
+                            <span className="text-[9px] font-black text-white truncate leading-none mb-0.5">{signal.music.trackName}</span>
+                            <span className="text-[8px] font-bold text-neutral-500 uppercase tracking-tighter truncate">{signal.music.artistName}</span>
+                        </div>
+                        {isPlaying && (
+                            <div className="flex items-end gap-0.5 px-2">
+                                <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-2"></div>
+                                <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-3 [animation-delay:0.1s]"></div>
+                                <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-1 [animation-delay:0.2s]"></div>
+                            </div>
+                        )}
+                    </div>
+                )}
                 
                 {isExpanded && (
-                    <div className="flex items-center gap-2 mt-4 animate-in slide-in-from-top-2 duration-300">
+                    <div className="flex items-center gap-2 mt-2 animate-in slide-in-from-top-2 duration-300">
                         {isMe ? (
                             <button 
                                 onClick={(e) => { e.stopPropagation(); handleDeleteSignal(signal.userUid); }}
-                                className="flex-1 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-widest rounded-xl border border-red-500/20 transition-all flex items-center justify-center gap-1.5"
+                                className="flex-1 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-black uppercase tracking-widest rounded-2xl border border-red-500/20 transition-all flex items-center justify-center gap-1.5"
                             >
                                 <Trash size={12} /> Remove
                             </button>
@@ -598,14 +688,14 @@ export const Inbox: React.FC = () => {
                             <>
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); handleLikeSignal(signal.id, signal.userUid); }}
-                                    className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 active:scale-95 ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white' : 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10'}`}
+                                    className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 active:scale-95 ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white shadow-lg' : 'bg-white/5 text-white/40 border border-white/10 hover:bg-white/10'}`}
                                 >
                                     <Heart size={12} className={signal.likes?.[user?.uid || ''] ? 'fill-white' : ''} />
                                     {Object.keys(signal.likes || {}).length || 'Like'}
                                 </button>
                                 <button 
                                     onClick={(e) => { e.stopPropagation(); handleReplyToSignal(signal); }}
-                                    className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-2xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-1.5"
                                 >
                                     <MessageCircle size={12} /> Reply
                                 </button>
@@ -617,8 +707,8 @@ export const Inbox: React.FC = () => {
             
             {/* Heart indicator if liked but not expanded */}
             {!isExpanded && signal.likes && Object.keys(signal.likes).length > 0 && (
-                <div className="absolute top-3 right-3 text-red-500 drop-shadow-lg">
-                    <Heart size={8} className="fill-red-500" />
+                <div className="absolute top-4 right-4 text-red-500 drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]">
+                    <Heart size={10} className="fill-red-500" />
                 </div>
             )}
         </div>
@@ -638,28 +728,27 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS SECTION (REDESIGNED) --- */}
+        {/* --- SIGNALS SECTION (UPGRADED) --- */}
         {!showArchived && (
-            <div className="border-b border-neutral-900 flex flex-col gap-3 py-6 bg-neutral-950/40">
+            <div className="border-b border-neutral-900 flex flex-col gap-3 py-6 bg-neutral-950/40 overflow-hidden">
                 <div className="flex items-center justify-between px-6">
                     <h3 className="text-[10px] font-black uppercase text-neutral-500 tracking-[0.2em]">Signals</h3>
                     {!mySignal && (
                         <button 
-                            onClick={(e) => { e.stopPropagation(); !isTimerActive && setShowSignalCreator(true); }}
-                            disabled={isTimerActive}
-                            className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors disabled:opacity-30"
+                            onClick={(e) => { e.stopPropagation(); setShowSignalCreator(true); }}
+                            className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded-lg transition-colors"
                         >
                             <Plus size={14} />
                         </button>
                     )}
                 </div>
-                <div className="overflow-x-auto custom-scrollbar flex items-start gap-4 px-6 pb-2">
+                <div className="overflow-x-auto custom-scrollbar flex items-start gap-4 px-6 pb-2 mask-linear-right">
                     {/* Signal Cards */}
                     {signals.map(s => <SignalCard key={s.id} signal={s} />)}
                     
                     {signals.length === 0 && (
                         <div className="py-4 text-center w-full">
-                            <p className="text-[10px] font-black uppercase text-neutral-700 tracking-widest">No active signals</p>
+                            <p className="text-[10px] font-black uppercase text-neutral-800 tracking-[0.3em]">No active signals</p>
                         </div>
                     )}
                 </div>
@@ -679,7 +768,7 @@ export const Inbox: React.FC = () => {
             
             return (
               <div key={chat.id} className="group/tile relative">
-                  <button onClick={() => handleSelectChat(chat.id)} className={`w-full flex items-center gap-4 p-4 rounded-[24px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10 shadow-lg' : 'hover:bg-white/[0.04] border-transparent'}`}>
+                  <button onClick={() => handleSelectChat(chat.id)} className={`w-full flex items-center gap-4 p-4 rounded-[28px] relative border ${isSelected ? 'bg-white/10 backdrop-blur-xl border-white/10 shadow-lg' : 'hover:bg-white/[0.04] border-transparent'}`}>
                     <div className="relative shrink-0">
                       {photo ? <img src={photo} className="w-14 h-14 rounded-full object-cover border border-white/5" /> : <div className="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-xl font-bold text-neutral-500">{name?.charAt(0)}</div>}
                       {chat.type === 'dm' && <div className={`absolute bottom-0.5 right-0.5 w-3.5 h-3.5 rounded-full border-2 border-neutral-950 ${presence?.online ? 'bg-emerald-500' : 'bg-neutral-600'}`}></div>}
@@ -893,33 +982,225 @@ export const Inbox: React.FC = () => {
       )}
 
       {showSignalCreator && createPortal(
-          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={() => setShowSignalCreator(false)}>
-              <div className="bg-[#1a1a1a]/95 backdrop-blur-[40px] border border-white/10 rounded-[32px] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in" onClick={e => e.stopPropagation()}>
-                  <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-xl font-black text-white flex items-center gap-2"><Edit3 size={20} className="text-indigo-500" /> New Signal</h3>
-                      <button onClick={() => setShowSignalCreator(false)} className="p-2 text-neutral-500 hover:text-white"><X size={20} /></button>
-                  </div>
-                  <textarea 
-                    autoFocus
-                    value={manualSignalText}
-                    onChange={e => setManualSignalText(e.target.value.slice(0, 60))}
-                    placeholder="What's on your mind?"
-                    className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-4 text-white focus:outline-none focus:border-indigo-500 transition-all resize-none mb-2"
-                  />
-                  <div className="flex justify-between items-center mb-6 px-1">
-                      <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">{manualSignalText.length}/60</span>
-                      <span className="text-[10px] font-black uppercase text-indigo-500/60 tracking-widest">Friends only</span>
-                  </div>
-                  <button 
-                    onClick={handlePostManualSignal}
-                    disabled={!manualSignalText.trim()}
-                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-black rounded-2xl shadow-xl shadow-indigo-900/20 active:scale-95 transition-all"
-                  >
-                      Broadcast Signal
-                  </button>
-              </div>
-          </div>, document.body
+          <SignalCreatorModal 
+            onClose={() => { setShowSignalCreator(false); setManualSignalText(''); setSignalMusic(null); }} 
+            onPost={handlePostManualSignal}
+            text={manualSignalText}
+            setText={setManualSignalText}
+            music={signalMusic}
+            setMusic={setSignalMusic}
+          />, 
+          document.body
       )}
     </div>
   );
 };
+
+const SignalCreatorModal: React.FC<{ 
+    onClose: () => void, 
+    onPost: () => void, 
+    text: string, 
+    setText: (t: string) => void,
+    music: MusicMetadata | null,
+    setMusic: (m: MusicMetadata | null) => void
+}> = ({ onClose, onPost, text, setText, music, setMusic }) => {
+    const [showMusicPicker, setShowMusicPicker] = useState(false);
+
+    return (
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={onClose}>
+            <div className="bg-[#121212]/95 backdrop-blur-[40px] border border-white/10 rounded-[40px] p-8 max-w-sm w-full shadow-2xl animate-in zoom-in" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-8">
+                    <h3 className="text-xl font-black text-white flex items-center gap-3"><div className="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center"><Edit3 size={16} className="text-white" /></div> New Signal</h3>
+                    <button onClick={onClose} className="p-2 text-neutral-500 hover:text-white transition-colors"><X size={20} /></button>
+                </div>
+
+                <div className="space-y-6">
+                    <div className="space-y-1">
+                        <textarea 
+                            autoFocus
+                            value={text}
+                            onChange={e => setText(e.target.value.slice(0, 60))}
+                            placeholder="What's on your mind?"
+                            className="w-full h-32 bg-white/5 border border-white/10 rounded-[28px] p-5 text-white focus:outline-none focus:border-indigo-500 transition-all resize-none placeholder:text-neutral-700 font-medium"
+                        />
+                        <div className="flex justify-between items-center px-4">
+                            <span className="text-[10px] font-black uppercase text-neutral-600 tracking-widest">{text.length}/60</span>
+                            <span className="text-[10px] font-black uppercase text-indigo-500/40 tracking-widest">Broadcast</span>
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <h4 className="text-[10px] font-black uppercase text-neutral-500 tracking-[0.2em] ml-4">Mood Music</h4>
+                        <div className={`p-4 rounded-[28px] border transition-all ${music ? 'bg-indigo-600/10 border-indigo-500/20' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}>
+                            {music ? (
+                                <div className="flex items-center gap-3 animate-in slide-in-from-left-2">
+                                    <img src={music.artworkUrl} className="w-10 h-10 rounded-full border border-white/10" alt="Art" />
+                                    <div className="flex-1 min-w-0">
+                                        <span className="block text-xs font-black text-white truncate">{music.trackName}</span>
+                                        <span className="block text-[9px] font-bold text-neutral-500 uppercase tracking-tighter truncate">{music.artistName}</span>
+                                    </div>
+                                    <button onClick={() => setMusic(null)} className="p-2 text-neutral-500 hover:text-red-400 bg-white/5 rounded-xl"><Trash size={14} /></button>
+                                </div>
+                            ) : (
+                                <button 
+                                    onClick={() => setShowMusicPicker(true)}
+                                    className="w-full flex items-center justify-center gap-2 py-1 text-neutral-400 hover:text-indigo-400 transition-all group"
+                                >
+                                    <Music size={16} className="group-hover:scale-110 transition-transform" />
+                                    <span className="text-xs font-black uppercase tracking-widest">Add Song</span>
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    <button 
+                        onClick={onPost}
+                        disabled={!text.trim()}
+                        className="w-full py-4.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 disabled:grayscale text-white font-black uppercase tracking-widest rounded-[28px] shadow-xl shadow-indigo-900/20 active:scale-[0.98] transition-all text-sm"
+                    >
+                        Pulse Now
+                    </button>
+                </div>
+            </div>
+            {showMusicPicker && (
+                <SignalMusicPicker 
+                    onSelect={(m) => { setMusic(m); setShowMusicPicker(false); }} 
+                    onClose={() => setShowMusicPicker(false)} 
+                />
+            )}
+        </div>
+    );
+};
+
+const SignalMusicPicker: React.FC<{ onSelect: (m: MusicMetadata) => void, onClose: () => void }> = ({ onSelect, onClose }) => {
+    const [query, setQuery] = useState('');
+    const [results, setResults] = useState<any[]>([]);
+    const [trending, setTrending] = useState<any[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [previewingUrl, setPreviewingUrl] = useState<string | null>(null);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    useEffect(() => {
+        fetchTrending();
+    }, []);
+
+    const fetchTrending = async () => {
+        setLoading(true);
+        try {
+            // Approximation of English hits using mainstream terms
+            const resp = await fetch(`https://itunes.apple.com/search?term=billboard+hot+100&media=music&entity=song&limit=15`);
+            const data = await resp.json();
+            setTrending(data.results || []);
+        } catch (e) { console.error(e); }
+        setLoading(false);
+    };
+
+    const handleSearch = async () => {
+        if (!query.trim()) return;
+        setLoading(true);
+        try {
+            const resp = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=20`);
+            const data = await resp.json();
+            setResults(data.results || []);
+        } catch (e) { console.error(e); }
+        setLoading(false);
+    };
+
+    const togglePreview = (url: string) => {
+        if (previewingUrl === url) {
+            audioRef.current?.pause();
+            setPreviewingUrl(null);
+        } else {
+            if (audioRef.current) audioRef.current.pause();
+            audioRef.current = new Audio(url);
+            audioRef.current.play();
+            setPreviewingUrl(url);
+            audioRef.current.onended = () => setPreviewingUrl(null);
+        }
+    };
+
+    useEffect(() => {
+        return () => {
+            audioRef.current?.pause();
+            audioRef.current = null;
+        };
+    }, []);
+
+    return (
+        <div className="fixed inset-0 z-[2100] flex items-end justify-center p-0 md:p-4 bg-black/60 backdrop-blur-xl animate-in fade-in" onClick={onClose}>
+            <div className="bg-[#0f0f0f] border-t md:border border-white/10 w-full max-w-lg rounded-t-[40px] md:rounded-[40px] h-[80vh] flex flex-col shadow-2xl animate-in slide-in-from-bottom-20" onClick={e => e.stopPropagation()}>
+                <div className="p-8 border-b border-white/5 flex items-center justify-between shrink-0">
+                    <h3 className="text-xl font-black text-white">Select Vibes</h3>
+                    <button onClick={onClose} className="p-2 text-neutral-500 hover:text-white transition-colors bg-white/5 rounded-full"><X size={20} /></button>
+                </div>
+
+                <div className="px-8 pb-4 shrink-0">
+                    <div className="relative">
+                        <Search size={18} className="absolute left-5 top-1/2 -translate-y-1/2 text-neutral-700" />
+                        <input 
+                            autoFocus
+                            value={query}
+                            onChange={e => setQuery(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleSearch()}
+                            placeholder="Find a song..."
+                            className="w-full bg-white/5 border border-white/10 rounded-3xl pl-14 pr-6 py-4 text-white placeholder:text-neutral-700 focus:outline-none focus:border-indigo-500 transition-all font-medium"
+                        />
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pb-12 space-y-8">
+                    {!query && trending.length > 0 && (
+                        <div className="space-y-4">
+                            <h4 className="px-2 text-[10px] font-black uppercase text-indigo-500/80 tracking-[0.3em]">Trending Now</h4>
+                            {trending.map(track => (
+                                <TrackItem key={track.trackId} track={track} onSelect={onSelect} previewingUrl={previewingUrl} togglePreview={togglePreview} />
+                            ))}
+                        </div>
+                    )}
+
+                    {loading ? (
+                        <div className="flex justify-center py-20"><Loader2 className="animate-spin text-indigo-500" /></div>
+                    ) : results.length > 0 ? (
+                        <div className="space-y-2">
+                            <h4 className="px-2 text-[10px] font-black uppercase text-neutral-500 tracking-[0.3em]">Results</h4>
+                            {results.map(track => (
+                                <TrackItem key={track.trackId} track={track} onSelect={onSelect} previewingUrl={previewingUrl} togglePreview={togglePreview} />
+                            ))}
+                        </div>
+                    ) : query && !loading && (
+                        <div className="py-20 text-center text-neutral-700 text-xs font-black uppercase tracking-widest">No matching tracks</div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const TrackItem: React.FC<{ track: any, onSelect: (m: MusicMetadata) => void, previewingUrl: string | null, togglePreview: (u: string) => void }> = ({ track, onSelect, previewingUrl, togglePreview }) => (
+    <div 
+        className="flex items-center gap-4 p-3 rounded-3xl hover:bg-white/5 cursor-pointer transition-all group"
+        onClick={() => onSelect({
+            trackName: track.trackName,
+            artistName: track.artistName,
+            previewUrl: track.previewUrl,
+            artworkUrl: track.artworkUrl100
+        })}
+    >
+        <div className="relative shrink-0">
+            <img src={track.artworkUrl100} className="w-12 h-12 rounded-2xl object-cover shadow-lg group-hover:scale-105 transition-transform" alt="Art" />
+            <button 
+                onClick={(e) => { e.stopPropagation(); togglePreview(track.previewUrl); }}
+                className={`absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity rounded-2xl ${previewingUrl === track.previewUrl ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+            >
+                {previewingUrl === track.previewUrl ? <Pause size={20} className="text-white fill-white" /> : <Play size={20} className="text-white fill-white" />}
+            </button>
+        </div>
+        <div className="flex-1 min-w-0">
+            <p className="text-sm font-black text-white truncate">{track.trackName}</p>
+            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-tighter truncate mt-0.5">{track.artistName}</p>
+        </div>
+        <div className="p-2 text-indigo-400 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 -translate-x-2 transition-all">
+            <Plus size={18} />
+        </div>
+    </div>
+);
