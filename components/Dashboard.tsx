@@ -96,7 +96,7 @@ export const Dashboard: React.FC = () => {
                   mode: 'Deep Work',
               }
           });
-          navigate('/feed');
+          navigate('/pulse');
       } finally {
           setSharing(false);
       }
@@ -137,7 +137,7 @@ export const Dashboard: React.FC = () => {
               >
                   <div className="flex items-center gap-3">
                       <Zap size={20} className="group-hover:scale-110 transition-transform" />
-                      <span className="text-sm font-bold">Share Today's Work</span>
+                      <span className="text-sm font-bold">Pulse Today's Work</span>
                   </div>
                   <Share2 size={16} />
               </button>

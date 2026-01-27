@@ -9,7 +9,7 @@ import { GroupStudy } from './components/GroupStudy';
 import { GroupSettings } from './components/GroupSettings';
 import { Profile } from './components/Profile';
 import { SettingsPage } from './components/Settings';
-import { Feed } from './components/Feed';
+import { Pulse } from './components/Pulse';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimerProvider } from './contexts/TimerContext';
 import { Login } from './components/Login';
@@ -23,7 +23,6 @@ import { database } from './firebase';
 const AppContent: React.FC = () => {
   const { user, loading } = useAuth();
   
-  // --- Flow State ---
   const [splashSeen, setSplashSeen] = useState(() => localStorage.getItem('focusflow_splash_seen') === 'true');
   const [accessVerified, setAccessVerified] = useState(() => localStorage.getItem('focusflow_access') === 'true');
   const [onboardingComplete, setOnboardingComplete] = useState(() => localStorage.getItem('focusflow_onboarding_completed') === 'true');
@@ -147,7 +146,7 @@ const AppContent: React.FC = () => {
         <Routes>
         <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
-            <Route path="/feed" element={<Feed />} />
+            <Route path="/pulse" element={<Pulse />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />

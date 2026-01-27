@@ -1,18 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ref, onValue, update, get, set, remove } from "firebase/database";
+import { ref, onValue, update, get, set, remove, query, orderByChild, equalTo, limitToLast } from "firebase/database";
 import { updateProfile } from "firebase/auth";
 import { database, auth } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { getZodiacSign } from '../utils/zodiac';
+import { Post, PostCard } from './Pulse';
 import { 
   sendFollowRequest, unfollowUser, removeFollower, followBack 
 } from '../utils/followActions';
 import { 
   Camera, Edit2, Save, X, Settings, 
   Calendar, Sparkles, Flame, User, Trophy, MessageCircle, Loader2, Ban, 
-  Users as UsersIcon, ArrowLeft, ChevronRight, Unlock, UserMinus, UserPlus, Clock, Lock
+  ArrowLeft, Unlock, UserMinus, UserPlus, Clock, Lock, LayoutGrid, Heart
 } from 'lucide-react';
 
 export const Profile: React.FC = () => {
@@ -25,6 +26,9 @@ export const Profile: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'posts' | 'stats'>('posts');
+  const [userPosts, setUserPosts] = useState<Post[]>([]);
+  const [postsLoading, setPostsLoading] = useState(true);
   
   // Follower/Following States
   const [isFollowing, setIsFollowing] = useState(false);
@@ -64,12 +68,10 @@ export const Profile: React.FC = () => {
       setLoading(false);
     });
 
-    // Followers Count
     onValue(ref(database, `followers/${uid}`), (snap) => {
         setFollowersCount(snap.exists() ? Object.keys(snap.val()).length : 0);
     });
 
-    // Following Count
     onValue(ref(database, `following/${uid}`), (snap) => {
         setFollowingCount(snap.exists() ? Object.keys(snap.val()).length : 0);
     });
@@ -84,6 +86,32 @@ export const Profile: React.FC = () => {
 
     return () => unsub();
   }, [uid, user, isMe]);
+
+  // Sync User Posts for Profile
+  useEffect(() => {
+    if (!uid) return;
+    setPostsLoading(true);
+    const postsQuery = query(
+      ref(database, 'posts'), 
+      orderByChild('authorUid'), 
+      equalTo(uid),
+      limitToLast(50)
+    );
+
+    const unsub = onValue(postsQuery, (snap) => {
+      if (snap.exists()) {
+        const list = Object.entries(snap.val())
+          .map(([id, val]: [string, any]) => ({ id, ...val } as Post))
+          .sort((a, b) => b.timestamp - a.timestamp);
+        setUserPosts(list);
+      } else {
+        setUserPosts([]);
+      }
+      setPostsLoading(false);
+    });
+
+    return () => unsub();
+  }, [uid]);
 
   useEffect(() => {
     if (listView === 'none' || !uid) return;
@@ -102,28 +130,15 @@ export const Profile: React.FC = () => {
 
   const handleFollowAction = async () => {
     if (!user || !uid || isMe || isBlockingThem || isBlockedByThem) return;
-    
     if (isFollowing) {
       await unfollowUser(user.uid, uid);
     } else if (hasSentRequest) {
-      // Requested state
+      // requested
     } else if (isFollowedBy) {
       await followBack(user.uid, uid);
     } else {
       await sendFollowRequest(user.uid, user.displayName || 'User', user.photoURL, uid);
     }
-  };
-
-  const handleUnfollowInList = async (targetUid: string) => {
-    if (!user) return;
-    await unfollowUser(user.uid, targetUid);
-    setListUsers(prev => prev.filter(u => u.uid !== targetUid));
-  };
-
-  const handleRemoveFollowerInList = async (targetUid: string) => {
-    if (!user) return;
-    await removeFollower(user.uid, targetUid);
-    setListUsers(prev => prev.filter(u => u.uid !== targetUid));
   };
 
   const handleBlockToggle = async () => {
@@ -200,15 +215,6 @@ export const Profile: React.FC = () => {
                                 {u.photoURL ? <img src={u.photoURL} className="w-12 h-12 rounded-2xl object-cover" /> : <div className="w-12 h-12 rounded-2xl bg-neutral-800 flex items-center justify-center font-bold text-neutral-500">{u.name?.charAt(0)}</div>}
                                 <span className="font-bold text-neutral-200">{u.name}</span>
                             </div>
-                            {isMe && (
-                                <button 
-                                    onClick={() => listView === 'following' ? handleUnfollowInList(u.uid) : handleRemoveFollowerInList(u.uid)}
-                                    className="p-2 text-neutral-500 hover:text-red-500 bg-white/5 hover:bg-red-500/10 rounded-xl transition-all"
-                                    title={listView === 'following' ? 'Unfollow' : 'Remove Follower'}
-                                >
-                                    <UserMinus size={18} />
-                                </button>
-                            )}
                         </div>
                     ))
                 ) : ( <div className="text-center py-20 text-neutral-600 font-medium">No {listView} yet.</div> )}
@@ -221,27 +227,18 @@ export const Profile: React.FC = () => {
   const limitedProfile = !isMe && isBlockingThem;
 
   const displayProfile = restrictedProfile ? {
-    name: "Wisp User",
+    name: "FocusFlow User",
     photoURL: null,
     bio: null,
-    dob: null,
     streak: 0,
     streaks: { current: 0, longest: 0 }
   } : profileData;
 
   const zodiac = (displayProfile?.dob && !restrictedProfile && !limitedProfile) ? getZodiacSign(displayProfile.dob) : null;
 
-  const getFollowButtonLabel = () => {
-    if (isFollowing) return "Following";
-    if (hasSentRequest) return "Requested";
-    if (isFollowedBy) return "Follow back";
-    return "Follow";
-  };
-
   return (
     <div className="flex-1 h-full bg-neutral-950 overflow-y-auto custom-scrollbar relative">
       <div className="absolute top-0 left-1/4 w-64 h-64 bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none"></div>
-      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-[120px] pointer-events-none"></div>
 
       {isMe && (
         <button onClick={() => navigate('/settings')} className="absolute top-8 right-8 z-30 p-3 bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white rounded-2xl border border-white/10 transition-all shadow-xl active:scale-90 backdrop-blur-xl" title="Settings"><Settings size={24} /></button>
@@ -249,10 +246,9 @@ export const Profile: React.FC = () => {
 
       <div className="max-w-2xl mx-auto w-full pt-16 px-6 pb-24 relative z-10">
         <div className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-[32px] p-8 mb-6 shadow-2xl relative overflow-hidden">
-          <div className="absolute -top-24 -right-24 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl"></div>
           <div className="flex flex-col items-center gap-8 relative z-10">
             <div className="relative">
-              <div className="w-36 h-36 rounded-[40px] p-1.5 bg-gradient-to-tr from-indigo-500/20 to-purple-500/20 shadow-xl overflow-hidden group">
+              <div className="w-32 h-32 rounded-[40px] p-1.5 bg-gradient-to-tr from-indigo-500/20 to-purple-500/20 shadow-xl overflow-hidden group">
                 <div className="w-full h-full rounded-[34px] overflow-hidden bg-neutral-900 relative">
                   {displayProfile.photoURL ? ( <img src={displayProfile.photoURL} alt="Profile" className="w-full h-full object-cover" /> ) : (
                     <div className="w-full h-full flex items-center justify-center bg-neutral-800 text-5xl font-bold text-neutral-400">{displayProfile.name?.charAt(0)}</div>
@@ -260,7 +256,7 @@ export const Profile: React.FC = () => {
                   {isUploading && ( <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10 backdrop-blur-sm"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div> )}
                 </div>
               </div>
-              {isMe && ( <> <input type="file" ref={fileInputRef} onChange={handleImageUpload} className="hidden" accept="image/*" /><button onClick={() => fileInputRef.current?.click()} className="absolute -bottom-2 -right-2 p-3 bg-indigo-600 text-white rounded-2xl border-4 border-[#0d0d0d] hover:bg-indigo-500 transition-all shadow-xl active:scale-90" title="Change Photo"><Camera size={20} /></button> </> )}
+              {isMe && ( <> <input type="file" ref={fileInputRef} onChange={handleImageUpload} className="hidden" accept="image/*" /><button onClick={() => fileInputRef.current?.click()} className="absolute -bottom-1 -right-1 p-2.5 bg-indigo-600 text-white rounded-2xl border-4 border-[#0d0d0d] hover:bg-indigo-500 transition-all shadow-xl active:scale-90" title="Change Photo"><Camera size={18} /></button> </> )}
             </div>
 
             <div className="text-center space-y-3 w-full">
@@ -295,7 +291,7 @@ export const Profile: React.FC = () => {
                   {!isMe && (
                       <div className="flex items-center justify-center gap-3 mt-4">
                           {restrictedProfile ? (
-                              <div className="text-xs font-bold text-neutral-600 uppercase tracking-widest py-2 bg-white/5 px-6 rounded-xl border border-white/5">This user is unavailable</div>
+                              <div className="text-xs font-bold text-neutral-600 uppercase tracking-widest py-2 bg-white/5 px-6 rounded-xl border border-white/5">User unavailable</div>
                           ) : limitedProfile ? (
                               <button onClick={handleBlockToggle} className="flex-1 max-w-[200px] inline-flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-2xl font-bold transition-all shadow-lg active:scale-95">
                                 <Unlock size={18} /> Unblock
@@ -312,7 +308,7 @@ export const Profile: React.FC = () => {
                                 }`}
                               >
                                 {hasSentRequest ? <Clock size={16} /> : (isFollowing ? null : <UserPlus size={16} />)}
-                                {getFollowButtonLabel()}
+                                {isFollowing ? "Following" : hasSentRequest ? "Requested" : isFollowedBy ? "Follow back" : "Follow"}
                               </button>
                               {isMutual && (
                                   <button onClick={handleStartChat} className="flex-1 max-w-[140px] inline-flex items-center justify-center gap-2 bg-white text-black px-6 py-3 rounded-2xl font-bold transition-all shadow-lg active:scale-95"><MessageCircle size={18} /> Message</button>
@@ -325,54 +321,75 @@ export const Profile: React.FC = () => {
                 </>
               ) : (
                 <div className="w-full max-w-sm mx-auto space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="space-y-1 text-left"><label className="text-[10px] uppercase font-bold text-neutral-500 ml-3 tracking-widest">Display Name</label><input value={editName} onChange={e => setEditName(e.target.value)} className="w-full bg-neutral-950/50 border border-white/10 rounded-2xl px-5 py-3 text-center font-bold text-white focus:outline-none focus:border-indigo-500 transition-all" /></div>
-                  <div className="space-y-1 text-left"><label className="text-[10px] uppercase font-bold text-neutral-500 ml-3 tracking-widest">About You</label><textarea value={editBio} onChange={e => setEditBio(e.target.value)} className="w-full bg-neutral-950/50 border border-white/10 rounded-2xl px-5 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 min-h-[100px] text-center resize-none transition-all" /></div>
-                  <div className="flex gap-2"><button onClick={handleSave} className="flex-1 bg-white text-black h-12 rounded-2xl font-bold hover:bg-neutral-200 transition-all flex items-center justify-center gap-2"><Save size={18} /> Save Profile</button><button onClick={() => setIsEditing(false)} className="px-5 bg-neutral-800 text-neutral-400 hover:text-white rounded-2xl transition-colors flex items-center justify-center"><X size={20} /></button></div>
+                  <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Display Name" className="w-full bg-neutral-950/50 border border-white/10 rounded-2xl px-5 py-3 text-center font-bold text-white focus:outline-none focus:border-indigo-500 transition-all" />
+                  <textarea value={editBio} onChange={e => setEditBio(e.target.value)} placeholder="Tell us about yourself..." className="w-full bg-neutral-950/50 border border-white/10 rounded-2xl px-5 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 min-h-[100px] text-center resize-none transition-all" />
+                  <div className="flex gap-2"><button onClick={handleSave} className="flex-1 bg-white text-black h-12 rounded-2xl font-bold hover:bg-neutral-200 transition-all flex items-center justify-center gap-2"><Save size={18} /> Save</button><button onClick={() => setIsEditing(false)} className="px-5 bg-neutral-800 text-neutral-400 hover:text-white rounded-2xl transition-colors flex items-center justify-center"><X size={20} /></button></div>
                 </div>
               )}
             </div>
-
-            {(!restrictedProfile && !limitedProfile) && (
-              <div className="w-full grid grid-cols-2 gap-4">
-                <div className="bg-white/5 border border-white/[0.05] rounded-3xl p-5 flex flex-col items-center gap-2 hover:bg-white/[0.08] transition-colors group">
-                  <div className="p-3 bg-orange-500/10 rounded-2xl group-hover:scale-110 transition-transform"><Flame size={24} className="text-orange-500 fill-orange-500 animate-fire-flicker" /></div>
-                  <div className="text-center"><div className="text-2xl font-black text-white leading-tight">{displayProfile.streaks?.current || 0}</div><div className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest">Day Streak</div></div>
-                </div>
-                <div className="bg-white/5 border border-white/[0.05] rounded-3xl p-5 flex flex-col items-center gap-2 hover:bg-white/[0.08] transition-colors group">
-                  <div className="p-3 bg-indigo-500/10 rounded-2xl group-hover:scale-110 transition-transform">{zodiac ? <span className="text-3xl leading-none filter drop-shadow-sm">{zodiac.icon}</span> : <Sparkles size={24} className="text-indigo-400" />}</div>
-                  <div className="text-center"><div className="text-2xl font-black text-white leading-tight">{zodiac ? zodiac.name : '---'}</div><div className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest">Zodiac Sign</div></div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
-        {(!restrictedProfile && !limitedProfile) && (
-          <div className="bg-white/[0.02] backdrop-blur-lg border border-white/[0.06] rounded-[32px] p-8 shadow-xl">
-              <h3 className="text-[11px] font-black text-neutral-500 uppercase tracking-[0.2em] mb-8 flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Records & Stats</h3>
-              <div className="space-y-6">
-                  <div className="flex items-center justify-between group">
-                      <div className="flex items-center gap-4">
-                          <div className="p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 group-hover:text-indigo-400 transition-colors text-neutral-500"><Trophy size={20} /></div>
-                          <div className="flex flex-col"><span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Longest Streak</span><span className="text-white font-semibold">{displayProfile.streaks?.longest || 0} Days</span></div>
-                      </div>
-                  </div>
-                  <div className="h-px bg-white/[0.04]"></div>
-                  <div className="flex items-center justify-between group">
-                      <div className="flex items-center gap-4">
-                          <div className="p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 group-hover:text-indigo-400 transition-colors text-neutral-500"><Calendar size={20} /></div>
-                          <div className="flex flex-col"><span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Date of Birth</span>{isMe && isEditing ? <input type="date" value={editDob} onChange={e => setEditDob(e.target.value)} className="mt-1 bg-neutral-950/50 border border-white/10 text-white text-sm px-4 py-2 rounded-xl focus:outline-none focus:border-indigo-500 transition-all" /> : <span className="text-white font-semibold">{displayProfile.dob ? new Date(displayProfile.dob).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Not shared'}</span>}</div>
-                      </div>
-                  </div>
-                  <div className="h-px bg-white/[0.04]"></div>
-                  <div className="flex items-center justify-between group">
-                      <div className="flex items-center gap-4">
-                          <div className="p-3 bg-neutral-800/50 rounded-2xl group-hover:bg-indigo-500/10 group-hover:text-indigo-400 transition-colors text-neutral-500"><User size={20} /></div>
-                          <div className="flex flex-col"><span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Account Type</span><span className="text-white font-semibold flex items-center gap-2">{profileData.stream || 'General'} Student <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-[10px] rounded-full border border-indigo-500/20 uppercase font-black">Standard</span></span></div>
-                      </div>
-                  </div>
-              </div>
-          </div>
+        {/* Tab System */}
+        <div className="flex items-center justify-center gap-1 bg-white/[0.03] p-1 rounded-2xl mb-8 border border-white/5">
+            <button 
+                onClick={() => setActiveTab('posts')}
+                className={`flex-1 py-3 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${activeTab === 'posts' ? 'bg-white/10 text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-300'}`}
+            >
+                <LayoutGrid size={14} /> Posts
+            </button>
+            <button 
+                onClick={() => setActiveTab('stats')}
+                className={`flex-1 py-3 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${activeTab === 'stats' ? 'bg-white/10 text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-300'}`}
+            >
+                <Flame size={14} /> Stats
+            </button>
+        </div>
+
+        {/* Dynamic Content Sections */}
+        {activeTab === 'posts' ? (
+            <div className="space-y-6">
+                {postsLoading ? (
+                    <div className="flex justify-center py-12"><Loader2 className="animate-spin text-indigo-500" /></div>
+                ) : userPosts.length > 0 ? (
+                    userPosts.map(post => (
+                        <PostCard key={post.id} post={post} onOpenComments={() => navigate(`/pulse`)} />
+                    ))
+                ) : (
+                    <div className="text-center py-20 bg-white/[0.02] rounded-[32px] border border-dashed border-white/10">
+                        <p className="text-neutral-500 font-bold">No pulses shared yet.</p>
+                    </div>
+                )}
+            </div>
+        ) : (
+            <div className="space-y-6 animate-in fade-in duration-300">
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white/5 border border-white/[0.05] rounded-3xl p-5 flex flex-col items-center gap-2 group">
+                        <div className="p-3 bg-orange-500/10 rounded-2xl group-hover:scale-110 transition-transform"><Flame size={24} className="text-orange-500 fill-orange-500 animate-fire-flicker" /></div>
+                        <div className="text-center"><div className="text-2xl font-black text-white leading-tight">{displayProfile.streaks?.current || 0}</div><div className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest">Day Streak</div></div>
+                    </div>
+                    <div className="bg-white/5 border border-white/[0.05] rounded-3xl p-5 flex flex-col items-center gap-2 group">
+                        <div className="p-3 bg-indigo-500/10 rounded-2xl group-hover:scale-110 transition-transform">{zodiac ? <span className="text-3xl leading-none">{zodiac.icon}</span> : <Sparkles size={24} className="text-indigo-400" />}</div>
+                        <div className="text-center"><div className="text-2xl font-black text-white leading-tight">{zodiac ? zodiac.name : '---'}</div><div className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest">Zodiac</div></div>
+                    </div>
+                </div>
+
+                <div className="bg-white/[0.02] border border-white/[0.06] rounded-[32px] p-8 space-y-6">
+                    <div className="flex items-center justify-between group">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-neutral-800/50 rounded-2xl text-neutral-500"><Trophy size={20} /></div>
+                            <div className="flex flex-col"><span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Record Streak</span><span className="text-white font-semibold">{displayProfile.streaks?.longest || 0} Days</span></div>
+                        </div>
+                    </div>
+                    <div className="h-px bg-white/[0.04]"></div>
+                    <div className="flex items-center justify-between group">
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-neutral-800/50 rounded-2xl text-neutral-500"><Calendar size={20} /></div>
+                            <div className="flex flex-col"><span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Join Date</span><span className="text-white font-semibold">Dec 2024</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         )}
       </div>
     </div>
