@@ -98,6 +98,23 @@ export const Inbox: React.FC = () => {
     return selectedChat.type === 'dm' ? [user.uid, activeChatId].sort().join('_') : activeChatId;
   }, [user, activeChatId, selectedChat]);
 
+  // Derived map for Group Seen Bubbles: uid -> last msgId they saw
+  const lastSeenByPerUser = useMemo(() => {
+    const map: Record<string, string> = {};
+    if (!selectedChat || selectedChat.type !== 'group') return map;
+    
+    messages.forEach(m => {
+      if (m.seenBy) {
+        Object.keys(m.seenBy).forEach(uid => {
+          if (uid !== user?.uid) { // Standard: exclude me
+            map[uid] = m.id;
+          }
+        });
+      }
+    });
+    return map;
+  }, [messages, user?.uid, selectedChat]);
+
   // --- TYPING SYNC ---
   useEffect(() => {
     if (!user || !activeChatId || !currentConvoId || !selectedChat) return;
@@ -246,15 +263,38 @@ export const Inbox: React.FC = () => {
   }, [activeChatId, selectedChat]);
 
   useEffect(() => {
-    if (!user || !activeChatId || !currentConvoId) return;
-    const path = selectedChat?.type === 'dm' ? `messages/${currentConvoId}` : `groupMessages/${activeChatId}`;
+    if (!user || !activeChatId || !currentConvoId || !selectedChat) return;
+    const path = selectedChat.type === 'dm' ? `messages/${currentConvoId}` : `groupMessages/${activeChatId}`;
     const unsub = onValue(ref(database, path), (snapshot) => {
       if (snapshot.exists()) {
         const list = Object.entries(snapshot.val()).map(([id, val]: [string, any]) => ({ id, ...val })).sort((a, b) => a.timestamp - b.timestamp);
         setMessages(list);
-        list.forEach(m => {
-            if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${path}/${m.id}`), { seen: true });
-        });
+        
+        // Handle Seen Logic
+        if (selectedChat.type === 'group') {
+            const lastMsg = list[list.length - 1];
+            // Only update seenBy on the LATEST message in groups
+            if (lastMsg && (!lastMsg.seenBy || !lastMsg.seenBy[user.uid])) {
+                update(ref(database, `${path}/${lastMsg.id}/seenBy`), { [user.uid]: Date.now() });
+            }
+            // Fetch missing profiles for anyone who has seen messages to show bubbles
+            list.forEach(m => {
+              if (m.seenBy) {
+                Object.keys(m.seenBy).forEach(uid => {
+                  if (uid !== user.uid && !userProfiles[uid]) {
+                    get(ref(database, `users/${uid}`)).then(uSnap => {
+                      if (uSnap.exists()) setUserProfiles(prev => ({ ...prev, [uid]: uSnap.val() }));
+                    });
+                  }
+                });
+              }
+            });
+        } else {
+            // One-on-one seen logic
+            list.forEach(m => {
+                if (m.senderUid !== user.uid && !m.seen) update(ref(database, `${path}/${m.id}`), { seen: true });
+            });
+        }
         update(ref(database, `userInboxes/${user.uid}/${activeChatId}`), { unreadCount: 0 });
       } else { setMessages([]); }
     });
@@ -437,6 +477,12 @@ export const Inbox: React.FC = () => {
               const senderPfp = userProfiles[msg.senderUid]?.photoURL;
               const reactions = Object.entries(msg.reactions || {});
               const isStatusMsg = lastUserMessageId === msg.id;
+              
+              // Get users who saw this specific message (Groups only)
+              const groupViewers = Object.entries(lastSeenByPerUser)
+                .filter(([uid, mid]) => mid === msg.id)
+                .map(([uid]) => uid);
+
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} group/msg relative mb-2`}>
                    <div className={`flex gap-3 max-w-[85%] ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -454,10 +500,30 @@ export const Inbox: React.FC = () => {
                                 </div>
                             )}
                             <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.text}</p>
-                            {isMe && isStatusMsg && (
+                            
+                            {/* Seen Indicators for DMs */}
+                            {selectedChat.type === 'dm' && isMe && isStatusMsg && (
                                 <div className="absolute -bottom-5 right-0 flex items-center gap-1 opacity-100 transition-opacity">
                                     <span className="text-[9px] font-black uppercase text-neutral-600 tracking-tighter">{msg.seen ? 'Seen' : 'Sent'}</span>
                                     {msg.seen ? <CheckCheck size={11} className="text-indigo-500" /> : <Check size={11} className="text-neutral-700" />}
+                                </div>
+                            )}
+
+                            {/* Seen Bubbles for Groups */}
+                            {selectedChat.type === 'group' && groupViewers.length > 0 && (
+                                <div className={`absolute -bottom-5 ${isMe ? 'right-0' : 'left-0'} flex -space-x-1.5 animate-in fade-in zoom-in duration-300`}>
+                                    {groupViewers.map(uid => {
+                                        const p = userProfiles[uid];
+                                        return (
+                                            <div key={uid} className="w-4 h-4 rounded-full border border-neutral-950 bg-neutral-800 overflow-hidden ring-1 ring-white/10 transition-transform hover:scale-125 hover:z-50" title={p?.name}>
+                                                {p?.photoURL ? (
+                                                    <img src={p.photoURL} className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-[6px] font-black text-neutral-500 uppercase">{p?.name?.charAt(0)}</div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             )}
                         </div>
