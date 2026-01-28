@@ -10,6 +10,7 @@ import { GroupSettings } from './components/GroupSettings';
 import { Profile } from './components/Profile';
 import { SettingsPage } from './components/Settings';
 import { Pulse } from './components/Pulse';
+import { PostDetailView } from './components/PostDetail';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimerProvider } from './contexts/TimerContext';
 import { Login } from './components/Login';
@@ -151,6 +152,7 @@ const AppContent: React.FC = () => {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/profile/:uid" element={<Profile />} />
+            <Route path="/post/:postId" element={<PostDetailView />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/group/:groupId/settings" element={<GroupSettings />} />
             <Route path="/login" element={<Navigate to="/" replace />} />

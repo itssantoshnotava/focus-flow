@@ -1,3 +1,4 @@
+
 export type ExamId = 'boards' | 'jee' | 'bitsat' | 'viteee' | 'eamcet';
 
 export interface Chapter {
@@ -17,10 +18,10 @@ export interface ExamSession {
 }
 
 export interface Exam {
-  id: string; // Changed from ExamId to string to support dynamic/commerce exams
+  id: string; 
   name: string;
-  date: string | null; // ISO string or null if TBD
-  sessions?: ExamSession[]; // For exams with multiple sessions
+  date: string | null; 
+  sessions?: ExamSession[]; 
   subjects: Subject[];
 }
 
@@ -29,7 +30,7 @@ export interface ChapterProgress {
   pyqs: boolean;
 }
 
-export type ProgressMap = Record<string, ChapterProgress>; // Key: "examId-subjectId-chapterId"
+export type ProgressMap = Record<string, ChapterProgress>; 
 
 export enum TimerMode {
   STOPWATCH = 'STOPWATCH',
@@ -39,8 +40,8 @@ export enum TimerMode {
 
 export interface StudySession {
   id: string;
-  date: string; // ISO string
-  duration: number; // seconds
+  date: string; 
+  duration: number; 
   mode: string;
   roomCode?: string;
   completed?: boolean;
@@ -56,12 +57,71 @@ export interface UserProfile {
     dob?: string;
     zodiacSign?: string;
     stream?: StreamType;
-    selectedExams?: string[]; // IDs of selected competitive exams
-    selectedSubjects?: string[]; // IDs of selected commerce subjects
-    elective?: 'ip' | 'pe'; // Elective subject selection
+    selectedExams?: string[]; 
+    selectedSubjects?: string[]; 
+    elective?: 'ip' | 'pe'; 
     onboardingCompleted?: boolean;
     accessGranted?: boolean;
-    eamcetPrompted?: boolean; // Tracking for one-time EAMCET prompt
-    electiveSelected?: boolean; // Tracking for one-time elective prompt
-    preparingForComp?: boolean; // For PCM users: whether they prepare for entrance exams
+    eamcetPrompted?: boolean; 
+    electiveSelected?: boolean; 
+    preparingForComp?: boolean; 
+    totalStudySeconds?: number;
+    streak?: number;
+    streaks?: { current: number, longest: number };
+}
+
+export interface MomentOverlay {
+  id: string;
+  text: string;
+  color: string;
+  x: number;
+  y: number;
+  size: number;
+}
+
+export interface Moment {
+  id: string;
+  authorUid: string;
+  authorName: string;
+  authorPhoto?: string;
+  url: string;
+  type: 'image' | 'video';
+  timestamp: number;
+  expiresAt: number;
+  overlays?: MomentOverlay[];
+}
+
+// Global Post interface for Pulse and Feed
+export interface Post {
+  id: string;
+  authorUid: string;
+  authorName: string;
+  authorPhoto?: string;
+  type: 'text' | 'image' | 'session' | 'video';
+  content: string;
+  images?: string[];
+  media?: { url: string; type: 'image' | 'video' }[];
+  music?: {
+    trackName: string;
+    artistName: string;
+    previewUrl: string;
+    artworkUrl: string;
+  };
+  timestamp: number;
+  sessionData?: {
+    duration: number;
+    mode: string;
+    roomCode?: string;
+  };
+}
+
+// Global Comment interface
+export interface Comment {
+  id: string;
+  authorUid: string;
+  authorName: string;
+  authorPhoto?: string;
+  text: string;
+  timestamp: number;
+  parentId?: string | null;
 }

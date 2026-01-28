@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ref, onValue, update, get, set, remove, query, orderByChild, equalTo, limitToLast } from "firebase/database";
 import { updateProfile } from "firebase/auth";
@@ -6,14 +7,14 @@ import { database, auth } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { uploadImageToCloudinary } from '../utils/cloudinary';
 import { getZodiacSign } from '../utils/zodiac';
-import { Post, PostCard } from './Pulse';
+import { Post } from '../types';
 import { 
   sendFollowRequest, unfollowUser, removeFollower, followBack 
 } from '../utils/followActions';
 import { 
   Camera, Edit2, Save, X, Settings, 
   Calendar, Sparkles, Flame, User, Trophy, MessageCircle, Loader2, Ban, 
-  ArrowLeft, Unlock, UserMinus, UserPlus, Clock, Lock, LayoutGrid, Heart
+  ArrowLeft, Unlock, UserMinus, UserPlus, Clock, Lock, LayoutGrid, Heart, Play
 } from 'lucide-react';
 
 export const Profile: React.FC = () => {
@@ -272,7 +273,11 @@ export const Profile: React.FC = () => {
                   </div>
 
                   {!restrictedProfile && (
-                    <div className="flex items-center justify-center gap-8 mb-4">
+                    <div className="flex items-center justify-center gap-6 mb-4">
+                        <div className="flex flex-col items-center">
+                            <span className="text-xl font-black text-white">{userPosts.length}</span>
+                            <span className="text-[10px] uppercase font-black text-neutral-500 tracking-widest">Posts</span>
+                        </div>
                         <button onClick={() => setListView('followers')} className="flex flex-col items-center group">
                             <span className="text-xl font-black text-white group-hover:text-indigo-400 transition-colors">{followersCount}</span>
                             <span className="text-[10px] uppercase font-black text-neutral-500 tracking-widest">Followers</span>
@@ -331,7 +336,7 @@ export const Profile: React.FC = () => {
         </div>
 
         {/* Tab System */}
-        <div className="flex items-center justify-center gap-1 bg-white/[0.03] p-1 rounded-2xl mb-8 border border-white/5">
+        <div className="flex items-center justify-center gap-1 bg-white/[0.03] p-1 rounded-2xl mb-4 border border-white/5">
             <button 
                 onClick={() => setActiveTab('posts')}
                 className={`flex-1 py-3 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${activeTab === 'posts' ? 'bg-white/10 text-white shadow-lg' : 'text-neutral-500 hover:text-neutral-300'}`}
@@ -348,15 +353,34 @@ export const Profile: React.FC = () => {
 
         {/* Dynamic Content Sections */}
         {activeTab === 'posts' ? (
-            <div className="space-y-6">
+            <div className="grid grid-cols-3 gap-1 md:gap-2">
                 {postsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="animate-spin text-indigo-500" /></div>
+                    <div className="col-span-3 flex justify-center py-12"><Loader2 className="animate-spin text-indigo-500" /></div>
                 ) : userPosts.length > 0 ? (
                     userPosts.map(post => (
-                        <PostCard key={post.id} post={post} onOpenComments={() => navigate(`/pulse`)} />
+                        <div 
+                            key={post.id} 
+                            onClick={() => navigate(`/post/${post.id}`)}
+                            className="relative aspect-square bg-neutral-900 overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
+                        >
+                            {post.media && post.media[0]?.type === 'video' ? (
+                                <>
+                                    <video src={post.media[0].url} className="w-full h-full object-cover" />
+                                    <div className="absolute top-2 right-2 text-white shadow-sm"><Play size={12} fill="white" /></div>
+                                </>
+                            ) : post.media ? (
+                                <img src={post.media[0].url} className="w-full h-full object-cover" alt="Post thumbnail" />
+                            ) : post.images ? (
+                                <img src={post.images[0]} className="w-full h-full object-cover" alt="Post thumbnail" />
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center p-2 bg-neutral-800 text-neutral-400 text-[10px] font-medium text-center">
+                                    {post.content.slice(0, 40)}...
+                                </div>
+                            )}
+                        </div>
                     ))
                 ) : (
-                    <div className="text-center py-20 bg-white/[0.02] rounded-[32px] border border-dashed border-white/10">
+                    <div className="col-span-3 text-center py-20 bg-white/[0.02] rounded-[32px] border border-dashed border-white/10">
                         <p className="text-neutral-500 font-bold">No pulses shared yet.</p>
                     </div>
                 )}
