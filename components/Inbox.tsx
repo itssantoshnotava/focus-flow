@@ -8,7 +8,7 @@ import {
     Send, MessageCircle, ArrowLeft, Users, Plus, X, Check, CheckCheck, Reply,
     SmilePlus, Paperclip, MoreVertical, Smile, AlertCircle, Archive, Trash, 
     UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings, Search, Heart, Edit3,
-    Clock, Zap, Coffee, Timer, Music, Play, Pause, ChevronRight
+    Clock, Zap, Coffee, Timer, Music, Play, Pause, ChevronRight, Share2
 } from 'lucide-react';
 import { useTimer } from '../contexts/TimerContext';
 
@@ -43,7 +43,7 @@ interface MusicMetadata {
 
 interface Signal {
   id: string;
-  text?: string; // Made optional
+  text?: string;
   type: 'auto' | 'manual';
   statusType?: 'pomodoro' | 'break' | 'focus';
   userUid: string;
@@ -119,7 +119,7 @@ export const Inbox: React.FC = () => {
   const [showSignalCreator, setShowSignalCreator] = useState(false);
   const [manualSignalText, setManualSignalText] = useState('');
   const [signalMusic, setSignalMusic] = useState<MusicMetadata | null>(null);
-  const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null);
+  const [activeSignalModal, setActiveSignalModal] = useState<Signal | null>(null);
   
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
@@ -138,24 +138,6 @@ export const Inbox: React.FC = () => {
   const mySignal = useMemo(() => {
     return signals.find(s => s.userUid === user?.uid);
   }, [signals, user?.uid]);
-
-  // Handle outside clicks to stop Signal music
-  useEffect(() => {
-    const handleOutsideClick = (e: MouseEvent) => {
-      // If we're clicking outside the signals area, stop any active signal audio
-      const signalsArea = document.getElementById('signals-container');
-      if (signalsArea && !signalsArea.contains(e.target as Node)) {
-        if (signalAudioInstance) {
-          signalAudioInstance.pause();
-          if (signalActiveSetPlaying) signalActiveSetPlaying(false);
-          signalAudioInstance = null;
-          signalActiveSetPlaying = null;
-        }
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, []);
 
   // --- SIGNALS SYNC ---
   useEffect(() => {
@@ -204,13 +186,14 @@ export const Inbox: React.FC = () => {
     setManualSignalText('');
     setSignalMusic(null);
     setShowSignalCreator(false);
+    setActiveSignalModal(null);
   };
 
   const handleDeleteSignal = async (targetUid: string) => {
     if (!user || targetUid !== user.uid) return;
     if (window.confirm("Delete your current signal?")) {
         await remove(ref(database, `signals/${user.uid}`));
-        setExpandedSignalId(null);
+        setActiveSignalModal(null);
     }
   };
 
@@ -240,18 +223,68 @@ export const Inbox: React.FC = () => {
     
     setActiveChatId(targetUid);
     setInputText(contextText);
-    setExpandedSignalId(null);
+    setActiveSignalModal(null);
     setTimeout(() => messageInputRef.current?.focus(), 100);
   };
 
   const SignalCard: React.FC<{ signal: Signal }> = ({ signal }) => {
+    const { user } = useAuth();
     const isMe = signal.userUid === user?.uid;
-    const isExpanded = expandedSignalId === signal.id;
+    const hasLikes = signal.likes && Object.keys(signal.likes).length > 0;
+    const iLiked = user && signal.likes?.[user.uid];
+
+    const handleDoubleClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      handleLikeSignal(signal.id, signal.userUid);
+    };
+
+    const getStatusIcon = () => {
+        if (signal.statusType === 'pomodoro') return <Zap size={10} className="text-orange-400" />;
+        if (signal.statusType === 'break') return <Coffee size={10} className="text-emerald-400" />;
+        if (signal.music) return <Music size={10} className="text-indigo-400" />;
+        return <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/50"></div>;
+    };
+
+    return (
+        <div 
+            onClick={() => setActiveSignalModal(signal)}
+            onDoubleClick={handleDoubleClick}
+            className={`shrink-0 flex items-center gap-2.5 px-3 py-2 transition-all duration-300 rounded-full relative border border-white/[0.08] backdrop-blur-[30px] shadow-lg group/card cursor-pointer bg-white/[0.03] hover:bg-white/[0.08] active:scale-[0.98] select-none
+                ${iLiked ? 'border-red-500/20' : ''}
+            `}
+        >
+            <div className="relative shrink-0">
+                <div className={`w-7 h-7 rounded-full p-[1.5px] bg-gradient-to-tr ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/10 to-transparent'}`}>
+                    {signal.photoURL ? (
+                        <img src={signal.photoURL} className="w-full h-full rounded-full object-cover" alt={signal.userName} />
+                    ) : (
+                        <div className="w-full h-full rounded-full bg-neutral-900 flex items-center justify-center text-[7px] font-black text-neutral-500 uppercase">{signal.userName.charAt(0)}</div>
+                    )}
+                </div>
+                {hasLikes && (
+                  <div className="absolute -top-1 -right-1 text-red-500 animate-in zoom-in duration-300">
+                    <Heart size={8} className="fill-current" />
+                  </div>
+                )}
+            </div>
+
+            <div className="flex items-center gap-2 min-w-0 pr-1">
+                <span className={`text-[11px] font-bold tracking-tight truncate ${isMe ? 'text-indigo-400' : 'text-white/90'}`}>
+                    {isMe ? 'Me' : signal.userName.split(' ')[0]}
+                </span>
+                {getStatusIcon()}
+            </div>
+        </div>
+    );
+  };
+
+  const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void }> = ({ signal, onClose }) => {
+    const isMe = signal.userUid === user?.uid;
     const [isPlaying, setIsPlaying] = useState(false);
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
-    const togglePlayback = (e: React.MouseEvent) => {
-        e.stopPropagation();
+    const togglePlayback = (e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
         if (!signal.music?.previewUrl) return;
 
         if (isPlaying) {
@@ -260,12 +293,10 @@ export const Inbox: React.FC = () => {
             signalAudioInstance = null;
             signalActiveSetPlaying = null;
         } else {
-            // Stop any currently playing signal music
             if (signalAudioInstance) {
                 signalAudioInstance.pause();
                 if (signalActiveSetPlaying) signalActiveSetPlaying(false);
             }
-
             const audio = new Audio(signal.music.previewUrl);
             audio.onended = () => {
                 setIsPlaying(false);
@@ -280,129 +311,103 @@ export const Inbox: React.FC = () => {
         }
     };
 
-    const handleCardClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        // Tap anywhere to play/pause if music exists, or just expand
-        if (signal.music) {
-            togglePlayback(e);
-        } else {
-            setExpandedSignalId(isExpanded ? null : signal.id);
-        }
-    };
-
-    const handleLongPress = (e: React.MouseEvent) => {
-        e.preventDefault();
-        setExpandedSignalId(isExpanded ? null : signal.id);
-    };
-
-    const handleCardDoubleClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        handleLikeSignal(signal.id, signal.userUid);
-    };
-
-    const getStatusIcon = () => {
-        if (signal.statusType === 'pomodoro') return <Zap size={10} className="text-orange-400" />;
-        if (signal.statusType === 'break') return <Coffee size={10} className="text-emerald-400" />;
-        if (signal.music) return isPlaying ? (
-            <div className="flex items-end gap-0.5 h-3">
-                <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-2"></div>
-                <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-3 [animation-delay:0.1s]"></div>
-            </div>
-        ) : <Music size={10} className="text-white/40" />;
-        return <div className="w-1.5 h-1.5 rounded-full bg-indigo-500/50"></div>;
-    };
+    useEffect(() => {
+        return () => {
+            if (signalAudioInstance) {
+                signalAudioInstance.pause();
+                if (signalActiveSetPlaying) signalActiveSetPlaying(false);
+                signalAudioInstance = null;
+                signalActiveSetPlaying = null;
+            }
+        };
+    }, []);
 
     return (
-        <div 
-            onClick={handleCardClick}
-            onContextMenu={handleLongPress}
-            onDoubleClick={handleCardDoubleClick}
-            className={`shrink-0 flex items-center gap-3 px-3 py-2.5 transition-all duration-500 rounded-full relative border border-white/[0.08] backdrop-blur-[40px] shadow-xl group/card cursor-pointer
-                ${isExpanded ? 'bg-white/10 ring-1 ring-indigo-500/30' : 'bg-white/[0.03] hover:bg-white/[0.08]'}
-                ${isPlaying ? 'shadow-[0_0_20px_rgba(99,102,241,0.2)] ring-1 ring-indigo-500/40 border-indigo-500/20' : ''}
-            `}
-        >
-            {/* Liquid Glow Overlay */}
-            {isPlaying && <div className="absolute inset-0 bg-indigo-600/5 animate-pulse rounded-full pointer-events-none"></div>}
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-6 bg-black/70 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
+            <div className="bg-[#141414]/90 border border-white/10 rounded-[40px] p-8 max-w-xs w-full shadow-[0_32px_64px_rgba(0,0,0,0.5)] animate-in zoom-in duration-300 relative overflow-hidden" onClick={e => e.stopPropagation()}>
+                {/* Liquid Background Pulse */}
+                {isPlaying && <div className="absolute inset-0 bg-indigo-600/5 animate-pulse rounded-[40px] pointer-events-none"></div>}
 
-            <div className="relative shrink-0">
-                <div className={`w-8 h-8 rounded-full p-[1.5px] bg-gradient-to-tr ${isMe ? 'from-indigo-400 to-indigo-600 shadow-[0_0_10px_rgba(99,102,241,0.3)]' : 'from-white/10 to-transparent'}`}>
-                    {signal.photoURL ? (
-                        <img src={signal.photoURL} className="w-full h-full rounded-full object-cover" alt={signal.userName} />
-                    ) : (
-                        <div className="w-full h-full rounded-full bg-neutral-900 flex items-center justify-center text-[8px] font-black text-neutral-500 uppercase">{signal.userName.charAt(0)}</div>
-                    )}
-                </div>
-            </div>
-
-            <div className="flex flex-col min-w-0 pr-1">
-                <div className="flex items-center gap-2">
-                    <span className={`text-[12px] font-black tracking-tight truncate ${isMe ? 'text-indigo-400' : 'text-white'}`}>
-                        {isMe ? 'Me' : signal.userName.split(' ')[0]}
-                    </span>
-                    {getStatusIcon()}
-                </div>
-                
-                {signal.music ? (
-                    <div className="flex items-center gap-1.5 min-w-0">
-                        {isPlaying ? (
-                             <div className="flex flex-col min-w-0">
-                                <span className="text-[9px] font-black text-indigo-200 truncate leading-none mb-0.5">{signal.music.trackName}</span>
-                                <span className="text-[7px] font-bold text-neutral-500 uppercase truncate">{signal.music.artistName}</span>
-                             </div>
-                        ) : (
-                             <span className="text-[10px] font-medium text-white/50 truncate">
-                                {signal.text || 'Listening...'}
-                             </span>
-                        )}
-                    </div>
-                ) : (
-                    <p className="text-[10px] font-medium text-white/70 truncate max-w-[120px]">
-                        {signal.text}
-                    </p>
-                )}
-            </div>
-
-            {/* Quick Actions (Reply/Like) inside expanded or as separate icons?
-                Let's use a Modal/Popover for detailed interaction as previously, but more minimal */}
-            {isExpanded && createPortal(
-                <div className="fixed inset-0 z-[3000] flex items-center justify-center p-6 bg-black/60 backdrop-blur-md animate-in fade-in" onClick={() => setExpandedSignalId(null)}>
-                    <div className="bg-[#121212] border border-white/10 rounded-[32px] p-6 max-w-xs w-full shadow-2xl animate-in zoom-in" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-4 mb-6">
-                            {signal.photoURL ? <img src={signal.photoURL} className="w-12 h-12 rounded-2xl object-cover" /> : <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center font-black">{signal.userName.charAt(0)}</div>}
-                            <div className="flex flex-col">
-                                <span className="text-lg font-black text-white">{signal.userName}</span>
-                                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Studying Pulse</span>
-                            </div>
-                        </div>
-
-                        {signal.text && <p className="text-neutral-200 font-medium mb-6 text-sm">"{signal.text}"</p>}
-                        
-                        {signal.music && (
-                            <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-2xl p-3 flex items-center gap-3 mb-6">
-                                <img src={signal.music.artworkUrl} className="w-10 h-10 rounded-xl" />
-                                <div className="flex-1 min-w-0">
-                                    <span className="block text-xs font-black text-white truncate">{signal.music.trackName}</span>
-                                    <span className="block text-[9px] font-bold text-neutral-500 uppercase truncate">{signal.music.artistName}</span>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="flex gap-2">
-                            {isMe ? (
-                                <button onClick={() => handleDeleteSignal(signal.userUid)} className="flex-1 py-3.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Delete Signal</button>
+                <div className="flex flex-col items-center text-center">
+                    <div className="relative mb-6">
+                        <div className="w-20 h-20 rounded-[30px] p-[2px] bg-gradient-to-tr from-indigo-500/40 to-purple-500/40 shadow-2xl">
+                            {signal.photoURL ? (
+                                <img src={signal.photoURL} className="w-full h-full rounded-[28px] object-cover" />
                             ) : (
-                                <>
-                                    <button onClick={() => handleLikeSignal(signal.id, signal.userUid)} className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white' : 'bg-white/5 text-neutral-400 hover:text-white'}`}>
-                                        {signal.likes?.[user?.uid || ''] ? 'Liked' : 'Like'}
-                                    </button>
-                                    <button onClick={() => handleReplyToSignal(signal)} className="flex-1 py-3.5 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest">Reply</button>
-                                </>
+                                <div className="w-full h-full rounded-[28px] bg-neutral-900 flex items-center justify-center font-black text-2xl text-indigo-500">{signal.userName.charAt(0)}</div>
                             )}
                         </div>
                     </div>
-                </div>, document.body
-            )}
+
+                    <h2 className="text-xl font-black text-white mb-1 tracking-tight">{signal.userName}</h2>
+                    <p className="text-[10px] font-black text-indigo-400/70 uppercase tracking-[0.2em] mb-6">Study Signal</p>
+
+                    {signal.text && (
+                        <p className="text-neutral-200 font-medium mb-8 text-[15px] leading-relaxed italic">"{signal.text}"</p>
+                    )}
+
+                    {signal.music && (
+                        <div 
+                            onClick={togglePlayback}
+                            className={`w-full p-4 rounded-[24px] border transition-all duration-300 cursor-pointer group flex items-center gap-4 mb-8 ${isPlaying ? 'bg-indigo-600/10 border-indigo-500/30' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                        >
+                            <div className="relative shrink-0 w-12 h-12">
+                                <img src={signal.music.artworkUrl} className="w-full h-full rounded-xl shadow-lg group-hover:scale-105 transition-transform" />
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl">
+                                    {isPlaying ? <Pause size={16} fill="white" className="text-white" /> : <Play size={16} fill="white" className="text-white" />}
+                                </div>
+                            </div>
+                            <div className="flex-1 min-w-0 text-left">
+                                <span className="block text-xs font-black text-white truncate mb-0.5">{signal.music.trackName}</span>
+                                <span className="block text-[9px] font-bold text-neutral-500 uppercase truncate">{signal.music.artistName}</span>
+                            </div>
+                            {isPlaying && (
+                                <div className="flex items-end gap-0.5 h-3 pr-1">
+                                    <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-2"></div>
+                                    <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-3 [animation-delay:0.1s]"></div>
+                                    <div className="w-0.5 bg-indigo-400 rounded-full animate-waveform h-1 [animation-delay:0.2s]"></div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="flex flex-col w-full gap-2">
+                        {!isMe && (
+                            <button 
+                                onClick={() => handleReplyToSignal(signal)}
+                                className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[24px] text-xs font-black uppercase tracking-widest shadow-xl shadow-indigo-900/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+                            >
+                                <MessageCircle size={16} /> Reply
+                            </button>
+                        )}
+                        <div className="flex gap-2">
+                            <button 
+                                onClick={() => handleLikeSignal(signal.id, signal.userUid)}
+                                className={`flex-1 py-4 rounded-[24px] text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white shadow-lg shadow-red-900/20' : 'bg-white/5 text-neutral-400 hover:text-white border border-white/5'}`}
+                            >
+                                <Heart size={14} className={signal.likes?.[user?.uid || ''] ? 'fill-current' : ''} />
+                                {Object.keys(signal.likes || {}).length || 'Like'}
+                            </button>
+                            {isMe && (
+                                <button 
+                                    onClick={() => { setShowSignalCreator(true); setActiveSignalModal(null); }}
+                                    className="flex-1 py-4 bg-white/[0.03] hover:bg-white/[0.08] text-neutral-400 border border-white/5 rounded-[24px] text-[10px] font-black uppercase tracking-widest"
+                                >
+                                    Replace
+                                </button>
+                            )}
+                        </div>
+                        {isMe && (
+                            <button 
+                                onClick={() => handleDeleteSignal(signal.userUid)}
+                                className="w-full py-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-[24px] text-[10px] font-black uppercase tracking-widest mt-2 border border-red-500/20"
+                            >
+                                Delete Signal
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
         </div>
     );
   };
@@ -702,7 +707,7 @@ export const Inbox: React.FC = () => {
   if (loading && !chats.length) return <div className="flex h-full items-center justify-center bg-neutral-950"><Loader2 className="animate-spin text-indigo-500" /></div>;
 
   return (
-    <div className="flex h-full bg-neutral-950 overflow-hidden font-sans" onClick={() => setExpandedSignalId(null)}>
+    <div className="flex h-full bg-neutral-950 overflow-hidden font-sans">
       <div className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-col border-r border-neutral-900 bg-neutral-950 shrink-0`}>
         <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/50 backdrop-blur-xl sticky top-0 z-20">
           <h1 className="text-2xl font-black text-white tracking-tight">{showArchived ? 'Archive' : 'Messages'}</h1>
@@ -712,9 +717,9 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS SECTION (RE-DESIGNED STATUS-STYLE) --- */}
+        {/* --- SIGNALS SECTION (RE-DESIGNED COMPACT ROW) --- */}
         {!showArchived && (
-            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-3 py-6 bg-neutral-950/40 overflow-hidden shrink-0">
+            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-3 py-6 bg-neutral-950/40 shrink-0 overflow-hidden">
                 <div className="flex items-center justify-between px-6">
                     <h3 className="text-[10px] font-black uppercase text-neutral-500 tracking-[0.2em]">Signals</h3>
                     {!mySignal && (
@@ -726,13 +731,13 @@ export const Inbox: React.FC = () => {
                         </button>
                     )}
                 </div>
-                <div className="overflow-x-auto custom-scrollbar flex items-center gap-3 px-6 pb-2 no-scrollbar">
+                <div className="overflow-x-auto no-scrollbar flex items-center gap-2 px-6 pb-1">
                     {/* Signal Cards */}
                     {signals.map(s => <SignalCard key={s.id} signal={s} />)}
                     
                     {signals.length === 0 && (
                         <div className="py-2 text-center w-full">
-                            <p className="text-[9px] font-black uppercase text-neutral-800 tracking-[0.3em]">Quiet vibes</p>
+                            <p className="text-[9px] font-black uppercase text-neutral-800 tracking-[0.3em]">No vibes yet</p>
                         </div>
                     )}
                 </div>
@@ -975,6 +980,13 @@ export const Inbox: React.FC = () => {
             setMusic={setSignalMusic}
           />, 
           document.body
+      )}
+
+      {activeSignalModal && (
+          <SignalDetailsModal 
+              signal={activeSignalModal} 
+              onClose={() => setActiveSignalModal(null)} 
+          />
       )}
     </div>
   );
