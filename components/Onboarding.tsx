@@ -15,7 +15,7 @@ interface OnboardingProps {
 
 export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   const { user } = useAuth();
-  const [step, setStep] = useState<1 | 2 | 3>(1); // 1: Profile, 2: Stream, 3: Exams/Subjects
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1); 
   const [loading, setLoading] = useState(false);
 
   // --- Step 1: Profile State ---
@@ -35,6 +35,10 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   // For Commerce
   const [selectedSubjects, setSelectedSubjects] = useState<Set<string>>(new Set());
 
+  // --- Step 4/5: New Prompts ---
+  const [preparingForEamcet, setPreparingForEamcet] = useState<boolean | null>(null);
+  const [elective, setElective] = useState<'ip' | 'pe' | null>(null);
+
   // --- Handlers ---
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -52,6 +56,24 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   };
 
   const handleNextStep = () => {
+    if (step === 2 && stream === 'IIT') {
+        // IIT users skip the "Preparing for Comp" question as it's implied
+        setPreparingForComp(true);
+        setStep(4); // Skip to EAMCET question
+        return;
+    }
+    if (step === 2 && stream === 'Commerce') {
+        setStep(3); // Go to Subject select
+        return;
+    }
+    if (step === 3 && stream === 'PCM' && preparingForComp === false) {
+        setStep(5); // Skip EAMCET, go to Elective
+        return;
+    }
+    if (step === 3 && stream === 'Commerce') {
+        setStep(5); // Commerce has no EAMCET question
+        return;
+    }
     setStep((prev) => (prev + 1) as any);
   };
 
@@ -64,6 +86,14 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
        zodiac = getZodiacSign(dob).name;
     }
 
+    const finalExams = new Set(selectedExams);
+    if (preparingForEamcet) finalExams.add('eamcet');
+    if (stream === 'IIT') {
+        finalExams.add('jee');
+        finalExams.add('bitsat');
+        finalExams.add('viteee');
+    }
+
     const profileUpdates: Partial<UserProfile> = {
         name,
         photoURL,
@@ -71,24 +101,22 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
         dob,
         zodiacSign: zodiac || undefined,
         stream: stream || undefined,
+        preparingForComp: preparingForComp || undefined,
         onboardingCompleted: true,
-        // Arrays need to be converted to list or kept as array (Firebase handles arrays ok, but objects are safer usually. Here we stick to simple arrays for this specific structure)
-        selectedExams: Array.from(selectedExams),
-        selectedSubjects: Array.from(selectedSubjects)
+        // Fix: Explicitly cast Array.from result to string[] to resolve TypeScript errors
+        selectedExams: Array.from(finalExams) as string[],
+        selectedSubjects: Array.from(selectedSubjects) as string[],
+        elective: elective || 'ip',
+        electiveSelected: true,
+        eamcetPrompted: stream === 'IIT' || (stream === 'PCM' && preparingForComp) ? true : false
     };
 
     try {
-        // Update Auth Profile
         if (name !== user.displayName || photoURL !== user.photoURL) {
             await updateProfile(user, { displayName: name, photoURL });
         }
-        
-        // Update DB
         await update(ref(database, `users/${user.uid}`), profileUpdates);
-        
-        // Mark local storage as well
         localStorage.setItem('focusflow_onboarding_completed', 'true');
-        
         onComplete();
     } catch (e) {
         console.error("Onboarding failed", e);
@@ -192,30 +220,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
     </div>
   );
 
-  const renderDetailsStep = () => {
-      // Logic for PCM/IIT/Commerce specific questions
-      
-      // IIT: Auto-selects exams, just confirm
-      if (stream === 'IIT') {
-          // Pre-select logic happens on save, just show visual confirmation
-          return (
-              <div className="space-y-6 animate-in slide-in-from-right duration-500 text-center">
-                   <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                       <GraduationCap size={32} className="text-emerald-500" />
-                   </div>
-                   <h2 className="text-2xl font-bold text-white">All Set!</h2>
-                   <p className="text-neutral-400">We have set up your dashboard for <br/><span className="text-white font-bold">JEE Mains, BITSAT, and VITEEE</span>.</p>
-                   <button 
-                        onClick={handleFinish}
-                        className="w-full bg-white text-black hover:bg-neutral-200 py-3 rounded-xl font-bold flex items-center justify-center gap-2"
-                    >
-                        Enter App <ArrowRight size={18} />
-                    </button>
-              </div>
-          );
-      }
-
-      // PCM: Ask about competitive exams
+  const renderExamsOrSubjectsStep = () => {
       if (stream === 'PCM') {
           if (preparingForComp === null) {
               return (
@@ -225,21 +230,12 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                         <p className="text-neutral-500 text-sm mt-1">Are you preparing for entrance exams?</p>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                        <button onClick={() => setPreparingForComp(true)} className="p-4 bg-neutral-900 border border-neutral-800 hover:border-indigo-500 rounded-xl font-bold text-white">Yes</button>
-                        <button onClick={() => setPreparingForComp(false)} className="p-4 bg-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-xl font-bold text-neutral-400">No, just Boards</button>
+                        <button onClick={() => {setPreparingForComp(true); handleNextStep();}} className="p-4 bg-neutral-900 border border-neutral-800 hover:border-indigo-500 rounded-xl font-bold text-white">Yes</button>
+                        <button onClick={() => {setPreparingForComp(false); handleNextStep();}} className="p-4 bg-neutral-900 border border-neutral-800 hover:border-neutral-600 rounded-xl font-bold text-neutral-400">No, just Boards</button>
                     </div>
                 </div>
               );
-          } else if (preparingForComp === false) {
-               return (
-                  <div className="space-y-6 animate-in slide-in-from-right duration-500 text-center">
-                       <h2 className="text-2xl font-bold text-white">Board Focus</h2>
-                       <p className="text-neutral-400">Your dashboard will focus on <br/><span className="text-white font-bold">Class 12 CBSE Boards</span> syllabus.</p>
-                       <button onClick={handleFinish} className="w-full bg-white text-black hover:bg-neutral-200 py-3 rounded-xl font-bold flex items-center justify-center gap-2">Enter App <ArrowRight size={18} /></button>
-                  </div>
-               );
-          } else {
-               // Show Exam Select
+          } else if (preparingForComp) {
                const examOptions = [
                    { id: 'jee', name: 'JEE Mains' },
                    { id: 'bitsat', name: 'BITSAT' },
@@ -266,13 +262,12 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                                );
                            })}
                        </div>
-                       <button onClick={handleFinish} className="w-full bg-white text-black hover:bg-neutral-200 py-3 rounded-xl font-bold">Finish Setup</button>
+                       <button onClick={handleNextStep} className="w-full bg-white text-black hover:bg-neutral-200 py-3 rounded-xl font-bold flex items-center justify-center gap-2">Continue <ArrowRight size={18} /></button>
                    </div>
                );
           }
       }
 
-      // Commerce: Subject Select
       if (stream === 'Commerce') {
           return (
              <div className="space-y-6 animate-in slide-in-from-right duration-500">
@@ -295,26 +290,69 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                          );
                      })}
                  </div>
-                 <button onClick={handleFinish} disabled={selectedSubjects.size === 0} className="w-full bg-white text-black hover:bg-neutral-200 disabled:opacity-50 py-3 rounded-xl font-bold">Finish Setup</button>
+                 <button onClick={handleNextStep} disabled={selectedSubjects.size === 0} className="w-full bg-white text-black hover:bg-neutral-200 disabled:opacity-50 py-3 rounded-xl font-bold flex items-center justify-center gap-2">Continue <ArrowRight size={18} /></button>
              </div>
           );
       }
       return null;
   };
 
+  const renderEamcetStep = () => (
+    <div className="space-y-6 animate-in slide-in-from-right duration-500 text-center">
+        <div className="w-16 h-16 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <GraduationCap size={32} className="text-indigo-400" />
+        </div>
+        <h2 className="text-2xl font-bold text-white">EAMCET Prep?</h2>
+        <p className="text-neutral-400">Are you also preparing for EAMCET (May 12)?</p>
+        <div className="grid grid-cols-2 gap-4">
+            <button onClick={() => {setPreparingForEamcet(true); handleNextStep();}} className="p-4 bg-indigo-600 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95">Yes</button>
+            <button onClick={() => {setPreparingForEamcet(false); handleNextStep();}} className="p-4 bg-neutral-900 border border-neutral-800 text-neutral-400 rounded-xl font-bold active:scale-95">No</button>
+        </div>
+    </div>
+  );
+
+  const renderElectiveStep = () => (
+    <div className="space-y-6 animate-in slide-in-from-right duration-500 text-center">
+        <div className="w-16 h-16 bg-purple-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+            <BookOpen size={32} className="text-purple-400" />
+        </div>
+        <h2 className="text-2xl font-bold text-white">Select Elective</h2>
+        <p className="text-neutral-400">Choose your optional Class 12 subject.</p>
+        <div className="grid grid-cols-2 gap-3">
+            <button onClick={() => setElective('ip')} className={`flex flex-col items-center gap-1 py-4 rounded-2xl border transition-all ${elective === 'ip' ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+                <span className="text-lg font-black">IP</span>
+                <span className="text-[8px] uppercase font-bold tracking-widest opacity-60">Informatics</span>
+            </button>
+            <button onClick={() => setElective('pe')} className={`flex flex-col items-center gap-1 py-4 rounded-2xl border transition-all ${elective === 'pe' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+                <span className="text-lg font-black">PE</span>
+                <span className="text-[8px] uppercase font-bold tracking-widest opacity-60">Physical Ed</span>
+            </button>
+        </div>
+        <button 
+            onClick={handleFinish} 
+            disabled={!elective}
+            className="w-full bg-white text-black hover:bg-neutral-200 disabled:opacity-50 py-3 rounded-xl font-bold mt-4"
+        >
+            Enter App
+        </button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-6">
        <div className="w-full max-w-md">
            {/* Steps Indicator */}
            <div className="flex justify-between mb-8 px-4">
-               {[1, 2, 3].map(i => (
+               {[1, 2, 3, 4, 5].map(i => (
                    <div key={i} className={`h-1 flex-1 mx-1 rounded-full transition-colors ${i <= step ? 'bg-indigo-600' : 'bg-neutral-800'}`}></div>
                ))}
            </div>
 
            {step === 1 && renderProfileStep()}
            {step === 2 && renderStreamStep()}
-           {step === 3 && renderDetailsStep()}
+           {step === 3 && renderExamsOrSubjectsStep()}
+           {step === 4 && renderEamcetStep()}
+           {step === 5 && renderElectiveStep()}
        </div>
     </div>
   );

@@ -1,4 +1,4 @@
-export type ExamId = 'boards' | 'jee' | 'bitsat' | 'viteee';
+export type ExamId = 'boards' | 'jee' | 'bitsat' | 'viteee' | 'eamcet';
 
 export interface Chapter {
   id: string;
@@ -58,6 +58,10 @@ export interface UserProfile {
     stream?: StreamType;
     selectedExams?: string[]; // IDs of selected competitive exams
     selectedSubjects?: string[]; // IDs of selected commerce subjects
+    elective?: 'ip' | 'pe'; // Elective subject selection
     onboardingCompleted?: boolean;
     accessGranted?: boolean;
+    eamcetPrompted?: boolean; // Tracking for one-time EAMCET prompt
+    electiveSelected?: boolean; // Tracking for one-time elective prompt
+    preparingForComp?: boolean; // For PCM users: whether they prepare for entrance exams
 }

@@ -16,11 +16,15 @@ export const MATH_CHAPTERS = generateChapters([
 ]);
 
 export const ENGLISH_CHAPTERS = generateChapters([
-  "Reading Comprehension", "Creative Writing Skills", "Literature: Flaming", "Literature: Vistas"
+  "Reading Comprehension", "Creative Writing Skills", "Literature: Flamingo", "Literature: Vistas"
 ]);
 
 export const IP_CHAPTERS = generateChapters([
   "Data Handling using Pandas", "Database Query using SQL", "Introduction to Computer Networks", "Societal Impacts"
+]);
+
+export const PE_CHAPTERS = generateChapters([
+  "Management of Sporting Events", "Children & Women in Sports", "Yoga as Preventive measure", "Physical Education & Sports for CWSN", "Sports & Nutrition", "Test & Measurement in Sports", "Physiology & Injuries in Sports", "Biomechanics & Sports", "Psychology & Sports", "Training in Sports"
 ]);
 
 export const APTITUDE_CHAPTERS = generateChapters([
@@ -109,6 +113,16 @@ export const EXAMS: Exam[] = [
       { id: 'apt', name: 'Aptitude', chapters: APTITUDE_CHAPTERS },
       { id: 'eng', name: 'English', chapters: ENGLISH_CHAPTERS },
     ]
+  },
+  {
+    id: 'eamcet',
+    name: 'EAMCET',
+    date: '2026-05-12',
+    subjects: [
+      { id: 'phy', name: 'Physics', chapters: PHYSICS_CHAPTERS },
+      { id: 'chem', name: 'Chemistry', chapters: CHEMISTRY_CHAPTERS },
+      { id: 'math', name: 'Mathematics', chapters: MATH_CHAPTERS },
+    ]
   }
 ];
 
@@ -122,6 +136,7 @@ export const getSubjectById = (id: string): Subject => {
         case 'math': return { id, name: 'Mathematics', chapters: MATH_CHAPTERS };
         case 'app_math': return { id, name: 'Applied Math', chapters: APPLIED_MATH_CHAPTERS };
         case 'ip': return { id, name: 'IP / CS', chapters: IP_CHAPTERS };
+        case 'pe': return { id, name: 'Physical Education', chapters: PE_CHAPTERS };
         default: return { id, name: 'Unknown', chapters: [] };
     }
 };

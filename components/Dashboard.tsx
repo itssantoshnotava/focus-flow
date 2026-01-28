@@ -3,12 +3,12 @@ import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsLeaderboard } from './FriendsLeaderboard';
-import { EXAMS, getSubjectById } from '../constants';
+import { EXAMS, getSubjectById, PE_CHAPTERS, IP_CHAPTERS } from '../constants';
 import { ProgressMap, Exam, UserProfile, StudySession } from '../types';
-import { Trophy, Flame, CalendarClock, Clock, Share2, Zap } from 'lucide-react';
+import { Trophy, Flame, CalendarClock, Clock, Share2, Zap, HelpCircle, BookOpen, GraduationCap, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimer } from '../contexts/TimerContext';
-import { ref, get, push, set } from 'firebase/database';
+import { ref, get, push, set, update } from 'firebase/database';
 import { database } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 
@@ -22,8 +22,12 @@ export const Dashboard: React.FC = () => {
     return saved ? JSON.parse(saved) : {};
   });
 
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [sharing, setSharing] = useState(false);
+
+  // New State for one-time prompts
+  const [showEamcetModal, setShowEamcetModal] = useState(false);
+  const [showElectiveModal, setShowElectiveModal] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('focusflow_progress', JSON.stringify(progress));
@@ -32,7 +36,18 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
       if (user) {
           get(ref(database, `users/${user.uid}`)).then(snap => {
-              if (snap.exists()) setUserProfile(snap.val());
+              if (snap.exists()) {
+                  const data = snap.val() as UserProfile;
+                  setUserProfile(data);
+
+                  // Trigger Modals for existing users
+                  const shouldPromptEamcet = (data.stream === 'IIT' || (data.stream === 'PCM' && data.preparingForComp)) && !data.eamcetPrompted;
+                  if (shouldPromptEamcet) {
+                      setShowEamcetModal(true);
+                  } else if (!data.electiveSelected) {
+                      setShowElectiveModal(true);
+                  }
+              }
           });
       }
   }, [user, sessions]);
@@ -68,6 +83,8 @@ export const Dashboard: React.FC = () => {
         if (isPomodoroMode && s.completed) pomodoros++;
     });
 
+    const streakData = (userProfile as any)?.streaks || { current: 0, longest: 0 };
+
     return {
         rawTotalSeconds: totalSeconds,
         todaySeconds,
@@ -75,7 +92,7 @@ export const Dashboard: React.FC = () => {
         todayHours: (todaySeconds / 3600).toFixed(1),
         weekHours: (weekSeconds / 3600).toFixed(1),
         pomodoros,
-        streak: userProfile?.streaks?.current || 0
+        streak: streakData.current || 0
     };
   }, [sessions, userProfile]);
 
@@ -104,23 +121,76 @@ export const Dashboard: React.FC = () => {
 
   const filteredExams = useMemo(() => {
       if (!userProfile) return EXAMS;
-      const { stream, selectedExams, selectedSubjects } = userProfile;
+      const { stream, selectedExams, selectedSubjects, elective } = userProfile;
       const allExams = [...EXAMS];
+      
+      let examsToReturn: Exam[] = [];
+
       if (stream === 'Commerce') {
-          return [{
+          const commerceBoard: Exam = {
               id: 'boards-commerce',
               name: 'Class 12 Boards (Commerce)',
               date: '2026-02-20',
-              subjects: (selectedSubjects || []).map(sid => getSubjectById(sid))
-          }];
+              subjects: [
+                ...(selectedSubjects || []).map(sid => getSubjectById(sid)),
+                elective ? getSubjectById(elective) : getSubjectById('ip')
+              ]
+          };
+          examsToReturn = [commerceBoard];
+      } else {
+          const baseBoard = allExams.find(e => e.id === 'boards');
+          const customizedBoard = baseBoard ? {
+              ...baseBoard,
+              subjects: baseBoard.subjects.map(sub => {
+                  if (sub.id === 'ip' && elective === 'pe') {
+                      return getSubjectById('pe');
+                  }
+                  return sub;
+              })
+          } : null;
+
+          if (stream === 'IIT') {
+              const compExams = allExams.filter(e => ['jee', 'bitsat', 'viteee', 'eamcet'].includes(e.id) && (selectedExams || []).includes(e.id));
+              const jee = allExams.find(e => e.id === 'jee'); // JEE is usually mandatory in this view
+              examsToReturn = [customizedBoard, jee, ...compExams].filter((e): e is Exam => e !== null);
+              // Deduplicate
+              examsToReturn = Array.from(new Set(examsToReturn.map(e => e.id))).map(id => examsToReturn.find(e => e.id === id)!);
+          } else if (stream === 'PCM') {
+              const allowedIds = new Set(['boards', ...(selectedExams || [])]);
+              examsToReturn = [
+                  customizedBoard,
+                  ...allExams.filter(e => e.id !== 'boards' && allowedIds.has(e.id))
+              ].filter((e): e is Exam => e !== null);
+          } else {
+              examsToReturn = allExams;
+          }
       }
-      if (stream === 'IIT') return allExams.filter(e => ['boards', 'jee', 'bitsat', 'viteee'].includes(e.id));
-      if (stream === 'PCM') {
-          const allowedIds = new Set(['boards', ...(selectedExams || [])]);
-          return allExams.filter(e => allowedIds.has(e.id));
-      }
-      return allExams;
+      return examsToReturn;
   }, [userProfile]);
+
+  // Handlers for Modals
+  const handleEamcetChoice = async (choice: boolean) => {
+      if (!user) return;
+      const updates: any = { eamcetPrompted: true };
+      if (choice) {
+          const currentExams = userProfile?.selectedExams || [];
+          if (!currentExams.includes('eamcet')) {
+              updates.selectedExams = [...currentExams, 'eamcet'];
+          }
+      }
+      await update(ref(database, `users/${user.uid}`), updates);
+      setShowEamcetModal(false);
+      if (!userProfile?.electiveSelected) setShowElectiveModal(true);
+  };
+
+  const handleElectiveChoice = async (elective: 'ip' | 'pe') => {
+      if (!user) return;
+      await update(ref(database, `users/${user.uid}`), {
+          elective,
+          electiveSelected: true
+      });
+      setShowElectiveModal(false);
+  };
 
   return (
     <div className="flex-1 overflow-y-auto custom-scrollbar h-full bg-neutral-950 pb-20 md:pb-0">
@@ -177,6 +247,46 @@ export const Dashboard: React.FC = () => {
 
           </div>
         </div>
+
+        {/* EAMCET One-time Prompt */}
+        {showEamcetModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+                <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[32px] max-w-sm w-full text-center shadow-2xl animate-in zoom-in">
+                    <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                        <GraduationCap size={32} className="text-indigo-400" />
+                    </div>
+                    <h2 className="text-2xl font-black text-white mb-2">EAMCET Prep?</h2>
+                    <p className="text-neutral-500 text-sm mb-8 leading-relaxed">We noticed you're preparing for entrance exams. Are you preparing for EAMCET?</p>
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => handleEamcetChoice(true)} className="py-4 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-indigo-900/40 active:scale-95">Yes</button>
+                        <button onClick={() => handleEamcetChoice(false)} className="py-4 bg-neutral-800 text-neutral-400 hover:text-white font-bold rounded-2xl transition-all active:scale-95">No</button>
+                    </div>
+                </div>
+            </div>
+        )}
+
+        {/* Elective One-time Prompt */}
+        {showElectiveModal && !showEamcetModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+                <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[32px] max-w-sm w-full text-center shadow-2xl animate-in zoom-in">
+                    <div className="w-16 h-16 bg-purple-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                        <BookOpen size={32} className="text-purple-400" />
+                    </div>
+                    <h2 className="text-2xl font-black text-white mb-2">Select Elective</h2>
+                    <p className="text-neutral-500 text-sm mb-8 leading-relaxed">Choose your optional Class 12 subject to update your syllabus tracker.</p>
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => handleElectiveChoice('ip')} className="flex flex-col items-center gap-1 py-4 bg-white/5 border border-white/10 hover:bg-indigo-500 hover:border-indigo-400 text-neutral-300 hover:text-white font-black rounded-2xl transition-all group">
+                            <span className="text-lg">IP</span>
+                            <span className="text-[8px] uppercase opacity-50 font-bold tracking-widest">Informatics</span>
+                        </button>
+                        <button onClick={() => handleElectiveChoice('pe')} className="flex flex-col items-center gap-1 py-4 bg-white/5 border border-white/10 hover:bg-emerald-600 hover:border-emerald-500 text-neutral-300 hover:text-white font-black rounded-2xl transition-all group">
+                            <span className="text-lg">PE</span>
+                            <span className="text-[8px] uppercase opacity-50 font-bold tracking-widest">Physical Ed</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
     </div>
   );
 };
