@@ -121,7 +121,7 @@ export const Dashboard: React.FC = () => {
 
   const filteredExams = useMemo(() => {
       if (!userProfile) return EXAMS;
-      const { stream, selectedExams, selectedSubjects, elective } = userProfile;
+      const { stream, selectedExams, selectedSubjects, elective, preparingForComp } = userProfile;
       const allExams = [...EXAMS];
       
       let examsToReturn: Exam[] = [];
@@ -149,23 +149,34 @@ export const Dashboard: React.FC = () => {
               })
           } : null;
 
-          if (stream === 'IIT') {
-              const compExams = allExams.filter(e => ['jee', 'bitsat', 'viteee', 'eamcet'].includes(e.id) && (selectedExams || []).includes(e.id));
-              const jee = allExams.find(e => e.id === 'jee'); // JEE is usually mandatory in this view
-              examsToReturn = [customizedBoard, jee, ...compExams].filter((e): e is Exam => e !== null);
-              // Deduplicate
-              examsToReturn = Array.from(new Set(examsToReturn.map(e => e.id))).map(id => examsToReturn.find(e => e.id === id)!);
-          } else if (stream === 'PCM') {
-              const allowedIds = new Set(['boards', ...(selectedExams || [])]);
+          // Default competitive exams that should always stay for Science students preparing for entrance
+          const defaultCompIds = ['jee', 'bitsat', 'viteee'];
+          const userSelectedIds = selectedExams || [];
+
+          if (stream === 'IIT' || (stream === 'PCM' && preparingForComp)) {
+              // Combine defaults with user selections (like eamcet)
+              const idsToShow = new Set([...defaultCompIds, ...userSelectedIds]);
+              
               examsToReturn = [
                   customizedBoard,
-                  ...allExams.filter(e => e.id !== 'boards' && allowedIds.has(e.id))
+                  ...allExams.filter(e => e.id !== 'boards' && idsToShow.has(e.id))
               ].filter((e): e is Exam => e !== null);
+          } else if (stream === 'PCM') {
+              // Only Boards for non-competitive PCM users
+              examsToReturn = [customizedBoard].filter((e): e is Exam => e !== null);
           } else {
+              // Fallback for any other state
               examsToReturn = allExams;
           }
       }
-      return examsToReturn;
+      
+      // Ensure results are unique by ID
+      const seen = new Set();
+      return examsToReturn.filter(exam => {
+          const duplicate = seen.has(exam.id);
+          seen.add(exam.id);
+          return !duplicate;
+      });
   }, [userProfile]);
 
   // Handlers for Modals
