@@ -103,11 +103,21 @@ export const Timer: React.FC = () => {
                   {/* Tree Visualization Placeholder */}
                   <div className="w-full h-full flex items-center justify-center relative">
                       {/* Placeholder for Stage-based Tree Scaling & Fade */}
-                      <div className={`transition-all duration-1000 ease-in-out flex flex-col items-center
-                        ${growthState.stage === 1 ? 'scale-50 opacity-60' : ''}
-                        ${growthState.stage === 2 ? 'scale-75 opacity-90' : ''}
-                        ${growthState.stage === 3 ? 'scale-110 opacity-100' : ''}
-                      `}>
+                     <div className="w-full h-full flex items-center justify-center transition-all duration-700">
+  <img
+    src={`/trees/${selectedTreeId}.png`}
+    alt={selectedTree?.name}
+    className={`
+      w-[75%] h-[75%]
+      object-contain
+      transition-all duration-700
+      ${growthState.stage === 1 ? 'opacity-70 scale-90' : ''}
+      ${growthState.stage === 2 ? 'opacity-90 scale-100' : ''}
+      ${growthState.stage === 3 ? 'opacity-100 scale-110' : ''}
+    `}
+  />
+</div>
+
    <img
   src={TREE_IMAGES[selectedTreeId]}
   alt={selectedTree?.name}
@@ -125,7 +135,7 @@ export const Timer: React.FC = () => {
 </div>
 
 
-                          <div className="mt-2 text-[10px] font-black text-indigo-400 uppercase tracking-widest opacity-40">{growthState.label}</div>
+                        
                       </div>
                   </div>
 
