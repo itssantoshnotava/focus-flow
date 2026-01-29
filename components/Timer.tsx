@@ -18,6 +18,17 @@ const TREE_OPTIONS: { id: TreeId; name: string; desc: string; locked?: boolean }
   { id: 'winter', name: 'Snow Pine', desc: 'Seasonal special', locked: true },
 ];
 
+const TREE_IMAGES: Record<TreeId, string> = {
+  sprout: '/trees/tree.png',
+  bush: '/trees/bush.png',
+  bamboo: '/trees/bamboo.png',
+  oak: '/trees/monk.png',
+  willow: '/trees/willow.png',
+  cherry: '/trees/cherry.png',
+  autumn: '/trees/autumn-maple.png',
+  winter: '/trees/snow-pine.png',
+};
+
 export const Timer: React.FC = () => {
   const { 
       mode, setMode, phase, isActive, toggleTimer, resetTimer, 
@@ -49,7 +60,7 @@ export const Timer: React.FC = () => {
 
   // Focus Forest Growth Logic
   const growthState = useMemo(() => {
-    if (!isActive) return { stage: 1, label: 'Sprout' };
+    if (!isActive) return { stage: 1 };
     
     let duration = 0;
     if (mode === TimerMode.STOPWATCH) duration = seconds;
@@ -57,9 +68,9 @@ export const Timer: React.FC = () => {
     
     const minutes = duration / 60;
     
-    if (minutes < 10) return { stage: 1, label: 'Sprout' };
-    if (minutes < 15) return { stage: 2, label: 'Growing...' };
-    return { stage: 3, label: 'Fully Grown' };
+    if (minutes < 10) return { stage: 1 };
+    if (minutes < 15) return { stage: 2 };
+    return { stage: 3 };
   }, [isActive, seconds, initialTime, mode]);
 
   return (
@@ -88,17 +99,17 @@ export const Timer: React.FC = () => {
           {/* TREE DISPLAY (LEFT ON LARGE) */}
           <div className="lg:col-span-4 flex flex-col items-center gap-6">
               <div className="relative w-48 h-48 md:w-56 md:h-56 bg-white/[0.02] border border-white/5 rounded-full flex items-center justify-center group">
-                  {/* Tree Visualization Placeholder */}
-                  <div className="w-full h-full flex items-center justify-center relative">
-                      {/* Placeholder for Stage-based Tree Scaling & Fade */}
-                      <div className={`transition-all duration-1000 ease-in-out flex flex-col items-center
-                        ${growthState.stage === 1 ? 'scale-50 opacity-60' : ''}
-                        ${growthState.stage === 2 ? 'scale-75 opacity-90' : ''}
-                        ${growthState.stage === 3 ? 'scale-110 opacity-100' : ''}
-                      `}>
-                          <Leaf size={growthState.stage * 24 + 40} className="text-indigo-400/20" />
-                          <div className="mt-2 text-[10px] font-black text-indigo-400 uppercase tracking-widest opacity-40">{growthState.label}</div>
-                      </div>
+                  {/* Tree Visualization with PNG Image */}
+                  <div className="w-full h-full flex items-center justify-center relative p-6">
+                      <img 
+                        src={TREE_IMAGES[selectedTreeId]} 
+                        alt={selectedTree?.name}
+                        className={`transition-all duration-1000 ease-in-out object-contain w-full h-full
+                          ${growthState.stage === 1 ? 'scale-50 opacity-60' : ''}
+                          ${growthState.stage === 2 ? 'scale-75 opacity-90' : ''}
+                          ${growthState.stage === 3 ? 'scale-110 opacity-100' : ''}
+                        `}
+                      />
                   </div>
 
                   {!isActive && (
@@ -219,11 +230,20 @@ export const Timer: React.FC = () => {
                         ? 'bg-indigo-600 border-indigo-500 text-white shadow-xl' 
                         : 'bg-white/5 border-white/5 hover:bg-white/10 text-neutral-400'
                       }
-                      ${tree.locked ? 'opacity-40 grayscale cursor-not-allowed' : ''}
+                      ${tree.locked ? 'opacity-40 cursor-not-allowed' : ''}
                     `}
                   >
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center relative z-10 transition-colors ${selectedTreeId === tree.id ? 'bg-white/20' : 'bg-black/20'}`}>
-                      {tree.locked ? <Lock size={18} /> : <Leaf size={24} />}
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center relative z-10 transition-colors overflow-hidden ${selectedTreeId === tree.id ? 'bg-white/20' : 'bg-black/20'}`}>
+                      <img 
+                        src={TREE_IMAGES[tree.id]} 
+                        alt={tree.name}
+                        className={`w-10 h-10 object-contain ${tree.locked ? 'blur-sm grayscale' : ''}`}
+                      />
+                      {tree.locked && (
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <Lock size={18} className="text-white" />
+                        </div>
+                      )}
                     </div>
                     <div className="flex flex-col relative z-10">
                       <span className="text-sm font-black tracking-tight leading-tight">{tree.name}</span>
