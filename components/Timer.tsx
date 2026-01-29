@@ -18,6 +18,18 @@ const TREE_OPTIONS: { id: TreeId; name: string; desc: string; locked?: boolean }
   { id: 'winter', name: 'Snow Pine', desc: 'Seasonal special', locked: true },
 ];
 
+const TREE_IMAGES: Record<TreeId, string> = {
+  sprout: '/trees/tree.png',                 // sprout image
+  bush: '/trees/bush.png',
+  bamboo: '/trees/bamboo.png',
+  oak: '/trees/monk.png',                    // oak renamed to monk.png
+  willow: '/trees/willow.png',
+  cherry: '/trees/cherry.png',
+  autumn: '/trees/autumn maple.png',         // autumn gap maple.png (space is OK)
+  winter: '/trees/snow pie.png',             // snow pie.png
+};
+
+
 export const Timer: React.FC = () => {
   const { 
       mode, setMode, phase, isActive, toggleTimer, resetTimer, 
@@ -96,7 +108,18 @@ export const Timer: React.FC = () => {
                         ${growthState.stage === 2 ? 'scale-75 opacity-90' : ''}
                         ${growthState.stage === 3 ? 'scale-110 opacity-100' : ''}
                       `}>
-                          <Leaf size={growthState.stage * 24 + 40} className="text-indigo-400/20" />
+                        <img
+  src={TREE_IMAGES[selectedTreeId]}
+  alt="Tree"
+  draggable={false}
+  className={`
+    transition-all duration-1000 ease-in-out
+    ${growthState.stage === 1 ? 'scale-[0.5] opacity-60' : ''}
+    ${growthState.stage === 2 ? 'scale-[0.75] opacity-85' : ''}
+    ${growthState.stage === 3 ? 'scale-[1] opacity-100 drop-shadow-[0_0_30px_rgba(99,102,241,0.35)]' : ''}
+  `}
+/>
+
                           <div className="mt-2 text-[10px] font-black text-indigo-400 uppercase tracking-widest opacity-40">{growthState.label}</div>
                       </div>
                   </div>
