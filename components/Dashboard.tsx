@@ -3,9 +3,9 @@ import { Timer } from './Timer';
 import { ExamCountdown } from './ExamCountdown';
 import { SyllabusTracker } from './SyllabusTracker';
 import { FriendsLeaderboard } from './FriendsLeaderboard';
-import { EXAMS, getSubjectById, PE_CHAPTERS, IP_CHAPTERS } from '../constants';
-import { ProgressMap, Exam, UserProfile, StudySession } from '../types';
-import { Trophy, Flame, CalendarClock, Clock, Share2, Zap, HelpCircle, BookOpen, GraduationCap, X } from 'lucide-react';
+import { EXAMS, getSubjectById } from '../constants';
+import { ProgressMap, Exam, UserProfile } from '../types';
+import { Trophy, Flame, CalendarClock, Clock, Share2, Zap, GraduationCap, BookOpen } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTimer } from '../contexts/TimerContext';
 import { ref, get, push, set, update } from 'firebase/database';
@@ -25,7 +25,6 @@ export const Dashboard: React.FC = () => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [sharing, setSharing] = useState(false);
 
-  // New State for one-time prompts
   const [showEamcetModal, setShowEamcetModal] = useState(false);
   const [showElectiveModal, setShowElectiveModal] = useState(false);
 
@@ -40,7 +39,6 @@ export const Dashboard: React.FC = () => {
                   const data = snap.val() as UserProfile;
                   setUserProfile(data);
 
-                  // Trigger Modals for existing users
                   const shouldPromptEamcet = (data.stream === 'IIT' || (data.stream === 'PCM' && data.preparingForComp)) && !data.eamcetPrompted;
                   if (shouldPromptEamcet) {
                       setShowEamcetModal(true);
@@ -149,28 +147,22 @@ export const Dashboard: React.FC = () => {
               })
           } : null;
 
-          // Default competitive exams that should always stay for Science students preparing for entrance
           const defaultCompIds = ['jee', 'bitsat', 'viteee'];
           const userSelectedIds = selectedExams || [];
 
           if (stream === 'IIT' || (stream === 'PCM' && preparingForComp)) {
-              // Combine defaults with user selections (like eamcet)
               const idsToShow = new Set([...defaultCompIds, ...userSelectedIds]);
-              
               examsToReturn = [
                   customizedBoard,
                   ...allExams.filter(e => e.id !== 'boards' && idsToShow.has(e.id))
               ].filter((e): e is Exam => e !== null);
           } else if (stream === 'PCM') {
-              // Only Boards for non-competitive PCM users
               examsToReturn = [customizedBoard].filter((e): e is Exam => e !== null);
           } else {
-              // Fallback for any other state
               examsToReturn = allExams;
           }
       }
       
-      // Ensure results are unique by ID
       const seen = new Set();
       return examsToReturn.filter(exam => {
           const duplicate = seen.has(exam.id);
@@ -179,7 +171,6 @@ export const Dashboard: React.FC = () => {
       });
   }, [userProfile]);
 
-  // Handlers for Modals
   const handleEamcetChoice = async (choice: boolean) => {
       if (!user) return;
       const updates: any = { eamcetPrompted: true };
@@ -204,62 +195,61 @@ export const Dashboard: React.FC = () => {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto custom-scrollbar h-full bg-neutral-950 pb-20 md:pb-0">
-        <div className="max-w-7xl w-full mx-auto px-4 py-8 flex flex-col gap-6">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div className="flex-1 overflow-y-auto custom-scrollbar h-full bg-neutral-950 pb-24 md:pb-8">
+        <div className="max-w-6xl w-full mx-auto px-4 py-8 flex flex-col gap-12">
+          
+          {/* PRIMARY: STUDY TIMER HERO */}
+          <section className="w-full flex justify-center">
+             <Timer />
+          </section>
+
+          {/* SECONDARY SECTIONS */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
             
-            <div className="lg:col-span-4 xl:col-span-3 flex flex-col gap-4">
-              <Timer />
+            {/* LEFT: Stats & Leaderboard */}
+            <div className="lg:col-span-4 flex flex-col gap-6 order-2 lg:order-1">
+                <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-[28px] flex flex-col items-start gap-1 group hover:border-orange-500/30 transition-colors shadow-lg">
+                        <span className="text-neutral-500 text-[10px] uppercase font-black tracking-widest flex items-center gap-1.5"><Flame size={12} className="text-orange-500 animate-fire-flicker" /> Streak</span>
+                        <span className="text-2xl font-mono text-white leading-tight">{stats.streak} <span className="text-[10px] text-neutral-600 font-sans font-black">Days</span></span>
+                    </div>
+                    <div className="bg-neutral-900 border border-neutral-800 p-5 rounded-[28px] flex flex-col items-start gap-1 shadow-lg">
+                        <span className="text-neutral-500 text-[10px] uppercase font-black tracking-widest flex items-center gap-1.5"><Trophy size={12} className="text-yellow-500" /> Pomos</span>
+                        <span className="text-2xl font-mono text-white leading-tight">{stats.pomodoros}</span>
+                    </div>
+                </div>
 
-              <button 
-                onClick={handleShareSession}
-                disabled={sharing || stats.todaySeconds < 60}
-                className="w-full bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 p-4 rounded-xl border border-indigo-500/20 flex items-center justify-between group transition-all disabled:opacity-30"
-              >
-                  <div className="flex items-center gap-3">
-                      <Zap size={20} className="group-hover:scale-110 transition-transform" />
-                      <span className="text-sm font-bold">Pulse Today's Work</span>
-                  </div>
-                  <Share2 size={16} />
-              </button>
+                <FriendsLeaderboard />
 
-              <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1 group hover:border-orange-500/30 transition-colors">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Flame size={12} className="text-orange-500 animate-fire-flicker" /> Streak</span>
-                      <span className="text-2xl font-mono text-white">{stats.streak} <span className="text-xs text-neutral-600 font-sans">days</span></span>
-                  </div>
-                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Trophy size={12} className="text-yellow-500" /> Pomos</span>
-                      <span className="text-2xl font-mono text-white">{stats.pomodoros}</span>
-                  </div>
-                   <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><CalendarClock size={12} className="text-blue-500" /> Week</span>
-                      <span className="text-2xl font-mono text-white">{stats.weekHours} <span className="text-xs text-neutral-600 font-sans">h</span></span>
-                  </div>
-                  <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-xl flex flex-col items-start gap-1">
-                      <span className="text-neutral-500 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1.5"><Clock size={12} className="text-emerald-500" /> Total</span>
-                      <span className="text-2xl font-mono text-white">{stats.totalHours} <span className="text-xs text-neutral-600 font-sans">h</span></span>
-                  </div>
-              </div>
-
-              <FriendsLeaderboard />
+                <button 
+                  onClick={handleShareSession}
+                  disabled={sharing || stats.todaySeconds < 60}
+                  className="w-full bg-indigo-600/5 hover:bg-indigo-600/10 text-indigo-400 p-5 rounded-[28px] border border-indigo-500/20 flex items-center justify-between group transition-all disabled:opacity-30 shadow-inner"
+                >
+                    <div className="flex items-center gap-3">
+                        <Zap size={20} className="group-hover:scale-110 transition-transform" />
+                        <span className="text-xs font-black uppercase tracking-widest">Broadcast Vibes</span>
+                    </div>
+                    <Share2 size={16} />
+                </button>
             </div>
 
-            <div className="lg:col-span-8 xl:col-span-9 flex flex-col gap-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
-                 {filteredExams.map(exam => (
-                   <ExamCountdown key={exam.id} name={exam.name} date={exam.date} sessions={exam.sessions} />
-                 ))}
-              </div>
-              <div className="flex-1 min-h-[300px]">
-                <SyllabusTracker exams={filteredExams} progress={progress} onToggleProgress={handleToggleProgress} />
-              </div>
+            {/* RIGHT: Syllabus & Countdowns */}
+            <div className="lg:col-span-8 flex flex-col gap-6 order-1 lg:order-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {filteredExams.map(exam => (
+                    <ExamCountdown key={exam.id} name={exam.name} date={exam.date} sessions={exam.sessions} />
+                  ))}
+                </div>
+                <div className="min-h-[400px]">
+                  <SyllabusTracker exams={filteredExams} progress={progress} onToggleProgress={handleToggleProgress} />
+                </div>
             </div>
 
           </div>
         </div>
 
-        {/* EAMCET One-time Prompt */}
+        {/* Modals remain unchanged */}
         {showEamcetModal && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
                 <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[32px] max-w-sm w-full text-center shadow-2xl animate-in zoom-in">
@@ -276,7 +266,6 @@ export const Dashboard: React.FC = () => {
             </div>
         )}
 
-        {/* Elective One-time Prompt */}
         {showElectiveModal && !showEamcetModal && (
             <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
                 <div className="bg-neutral-900 border border-neutral-800 p-8 rounded-[32px] max-w-sm w-full text-center shadow-2xl animate-in zoom-in">
