@@ -232,6 +232,7 @@ export const Timer: React.FC = () => {
               )}
           </div>
       </div>
+    </div>
 
       {/* Tree Picker Modal */}
       {showTreePicker && (
