@@ -116,7 +116,7 @@ export const Timer: React.FC = () => {
     ${growthState.stage === 1 ? 'scale-75 opacity-70' : ''}
     ${growthState.stage === 2 ? 'scale-90 opacity-90' : ''}
     ${growthState.stage === 3 ? 'scale-110 opacity-100' : ''}
-    w-32 h-32 object-contain
+    w-32 h-32 object-contain scale-125
   `}
 />
 
