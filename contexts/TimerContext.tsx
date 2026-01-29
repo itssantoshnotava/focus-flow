@@ -1,6 +1,5 @@
-
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { TimerMode, StudySession, TreeId, EarnedTree } from '../types';
+import { TimerMode, StudySession } from '../types';
 import { useAuth } from './AuthContext';
 import { ref, update, get, push, set, remove } from "firebase/database";
 import { database } from "../firebase";
@@ -26,10 +25,6 @@ interface TimerContextType {
   setCustomMinutes: (m: number) => void;
   setSeconds: (s: number) => void;
   setInitialTime: (t: number) => void;
-  // --- Forest Additions ---
-  selectedTreeId: TreeId;
-  setSelectedTreeId: (id: TreeId) => void;
-  earnedTrees: EarnedTree[];
 }
 
 const TimerContext = createContext<TimerContextType | null>(null);
@@ -86,16 +81,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return saved ? JSON.parse(saved) : [];
   });
 
-  // --- FOREST STATE ---
-  const [selectedTreeId, setSelectedTreeId] = useState<TreeId>(() => {
-    return (localStorage.getItem('focusflow_selected_tree') as TreeId) || 'sprout';
-  });
-
-  const [earnedTrees, setEarnedTrees] = useState<EarnedTree[]>(() => {
-    const saved = localStorage.getItem('focusflow_earned_trees');
-    return saved ? JSON.parse(saved) : [];
-  });
-
   const intervalRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(Date.now());
 
@@ -143,7 +128,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       });
     }
-  }, [isActive, mode, phase, user, seconds]); 
+  }, [isActive, mode, phase, user, seconds]); // Added seconds to dependency to keep targetTimestamp relatively accurate
 
   const calculateStreak = useCallback((sessionList: StudySession[]) => {
     const STREAK_THRESHOLD = 30 * 60; 
@@ -200,13 +185,11 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem('focusflow_timer_active', String(isActive));
     localStorage.setItem('focusflow_timer_seconds', String(seconds));
     localStorage.setItem('focusflow_timer_initial', String(initialTime));
-    localStorage.setItem('focusflow_selected_tree', selectedTreeId);
-    localStorage.setItem('focusflow_earned_trees', JSON.stringify(earnedTrees));
     
     const today = new Date().toISOString().split('T')[0];
     localStorage.setItem('focusflow_study_data', JSON.stringify({ date: today, seconds: dailyTotal }));
     localStorage.setItem('focusflow_sessions', JSON.stringify(sessions));
-  }, [mode, phase, pomodoroCount, isActive, seconds, initialTime, dailyTotal, sessions, selectedTreeId, earnedTrees]);
+  }, [mode, phase, pomodoroCount, isActive, seconds, initialTime, dailyTotal, sessions]);
 
   useEffect(() => {
       if (user) {
@@ -219,13 +202,8 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               streak: current,
               streaks: { current, longest }
           }).catch(err => console.error("Failed to sync stats", err));
-
-          // Sync earned trees to DB
-          update(ref(database, `forest/${user.uid}`), {
-            trees: earnedTrees
-          }).catch(err => console.error("Failed to sync forest", err));
       }
-  }, [sessions, user, calculateStreak, earnedTrees]);
+  }, [sessions, user, calculateStreak]);
 
   const postStudyUpdate = useCallback(async (duration: number, timerMode: string) => {
     if (!user || duration < 600) return;
@@ -258,39 +236,6 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch (e) { console.error("Auto-post failed", e); }
   }, [user]);
 
-  const recordTreeGrowth = useCallback((duration: number) => {
-    const stages = Math.floor(duration / (25 * 60));
-    if (stages >= 1) {
-      const newTree: EarnedTree = {
-        id: crypto.randomUUID(),
-        treeId: selectedTreeId,
-        timestamp: Date.now(),
-        stages: Math.min(stages, 4), // Max stage 4
-        duration
-      };
-      setEarnedTrees(prev => [...prev, newTree]);
-
-      // Daily Bonus Logic
-      const today = new Date().toISOString().split('T')[0];
-      const todayTotalFocus = dailyTotal + duration;
-      const alreadyEarnedBonus = earnedTrees.some(t => {
-          const d = new Date(t.timestamp).toISOString().split('T')[0];
-          return d === today && t.treeId === 'sprout' && t.duration === 1; // Mark bonus uniquely
-      });
-
-      if (todayTotalFocus >= 120 * 60 && !alreadyEarnedBonus) {
-          const bonusTree: EarnedTree = {
-              id: crypto.randomUUID(),
-              treeId: 'sprout',
-              timestamp: Date.now(),
-              stages: 4,
-              duration: 1 // Flag as bonus
-          };
-          setEarnedTrees(prev => [...prev, bonusTree]);
-      }
-    }
-  }, [selectedTreeId, dailyTotal, earnedTrees]);
-
   const saveSession = useCallback((forceDuration?: number) => {
       let duration = forceDuration !== undefined ? forceDuration : 0;
       let completed = false;
@@ -313,10 +258,9 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               completed: completed
           };
           setSessions(prev => [...prev, newSession]);
-          recordTreeGrowth(duration);
           postStudyUpdate(duration, mode);
       }
-  }, [mode, phase, seconds, initialTime, postStudyUpdate, recordTreeGrowth]);
+  }, [mode, phase, seconds, initialTime, postStudyUpdate]);
 
   const handlePhaseTransition = useCallback(() => {
     if (mode !== TimerMode.POMODORO) return;
@@ -404,8 +348,7 @@ export const TimerProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <TimerContext.Provider value={{
       mode, setMode, phase, isActive, toggleTimer, resetTimer,
       seconds, initialTime, dailyTotal, sessions, pomodoroCount,
-      customMinutes, setCustomMinutes, setSeconds, setInitialTime,
-      selectedTreeId, setSelectedTreeId, earnedTrees
+      customMinutes, setCustomMinutes, setSeconds, setInitialTime
     }}>
       {children}
     </TimerContext.Provider>

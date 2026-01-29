@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ref, onValue, update, onDisconnect } from "firebase/database";
 import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  LayoutDashboard, Home, MessageCircle, Search, Bell, Globe, User, Compass, Leaf
+  LayoutDashboard, Home, MessageCircle, Search, Bell, Globe, User, Compass 
 } from 'lucide-react';
 
 export const Layout: React.FC = () => {
@@ -201,7 +200,6 @@ export const Layout: React.FC = () => {
            <NavItem icon={Search} path="/search" label="Search" />
            <NavItem icon={Bell} path="/notifications" label="Notifications" />
            <NavItem icon={Globe} path="/group" label="Group Study" />
-           <NavItem icon={Leaf} path="/forest" label="Forest" />
         </div>
 
         <div className="mt-auto flex flex-col gap-4 items-center mb-2">
@@ -232,7 +230,7 @@ export const Layout: React.FC = () => {
          <NavItem icon={Compass} path="/pulse" label="Pulse" />
          <NavItem icon={MessageCircle} path="/inbox" label="Inbox" badge={inboxUnread} />
          <NavItem icon={Search} path="/search" label="Search" />
-         <NavItem icon={Leaf} path="/forest" label="Forest" />
+         <NavItem icon={Bell} path="/notifications" label="Notifications" />
          <NavItem icon={Globe} path="/group" label="Group" />
          <button 
              onClick={() => navigate(`/profile/${user?.uid}`)}
