@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
@@ -11,6 +12,7 @@ import { Profile } from './components/Profile';
 import { SettingsPage } from './components/Settings';
 import { Pulse } from './components/Pulse';
 import { PostDetailView } from './components/PostDetail';
+import { MyForest } from './components/MyForest';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { TimerProvider } from './contexts/TimerContext';
 import { Login } from './components/Login';
@@ -153,6 +155,7 @@ const AppContent: React.FC = () => {
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/profile/:uid" element={<Profile />} />
             <Route path="/post/:postId" element={<PostDetailView />} />
+            <Route path="/forest" element={<MyForest />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/group/:groupId/settings" element={<GroupSettings />} />
             <Route path="/login" element={<Navigate to="/" replace />} />

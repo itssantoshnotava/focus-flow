@@ -125,3 +125,23 @@ export interface Comment {
   timestamp: number;
   parentId?: string | null;
 }
+
+// --- FOCUS FOREST TYPES ---
+export type TreeId = 'sprout' | 'bush' | 'bamboo' | 'oak' | 'willow' | 'cherry' | 'autumn' | 'winter' | 'festival';
+
+export interface TreeTemplate {
+  id: TreeId;
+  name: string;
+  description: string;
+  isSeasonal: boolean;
+  isLocked: boolean;
+  growthDifficulty: 'easy' | 'medium' | 'hard';
+}
+
+export interface EarnedTree {
+  id: string;
+  treeId: TreeId;
+  timestamp: number;
+  stages: number; // 1-4
+  duration: number; // seconds
+}
