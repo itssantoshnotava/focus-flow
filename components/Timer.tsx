@@ -108,17 +108,22 @@ export const Timer: React.FC = () => {
                         ${growthState.stage === 2 ? 'scale-75 opacity-90' : ''}
                         ${growthState.stage === 3 ? 'scale-110 opacity-100' : ''}
                       `}>
-                        <img
+   <img
   src={TREE_IMAGES[selectedTreeId]}
-  alt="Tree"
-  draggable={false}
+  alt={selectedTree?.name}
   className={`
     transition-all duration-1000 ease-in-out
-    ${growthState.stage === 1 ? 'scale-[0.5] opacity-60' : ''}
-    ${growthState.stage === 2 ? 'scale-[0.75] opacity-85' : ''}
-    ${growthState.stage === 3 ? 'scale-[1] opacity-100 drop-shadow-[0_0_30px_rgba(99,102,241,0.35)]' : ''}
+    ${growthState.stage === 1 ? 'scale-75 opacity-70' : ''}
+    ${growthState.stage === 2 ? 'scale-90 opacity-90' : ''}
+    ${growthState.stage === 3 ? 'scale-110 opacity-100' : ''}
+    w-32 h-32 object-contain
   `}
 />
+
+<div className="mt-2 text-[10px] font-black text-indigo-400 uppercase tracking-widest opacity-60">
+  {selectedTree?.name}
+</div>
+
 
                           <div className="mt-2 text-[10px] font-black text-indigo-400 uppercase tracking-widest opacity-40">{growthState.label}</div>
                       </div>
@@ -246,7 +251,7 @@ export const Timer: React.FC = () => {
                     `}
                   >
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center relative z-10 transition-colors ${selectedTreeId === tree.id ? 'bg-white/20' : 'bg-black/20'}`}>
-                      {tree.locked ? <Lock size={18} /> : <Leaf size={24} />}
+                      {tree.locked ? (   <Lock size={18} /> ) : (   <img     src={TREE_IMAGES[tree.id]}     alt={tree.name}     className="w-10 h-10 object-contain"   /> )}
                     </div>
                     <div className="flex flex-col relative z-10">
                       <span className="text-sm font-black tracking-tight leading-tight">{tree.name}</span>
