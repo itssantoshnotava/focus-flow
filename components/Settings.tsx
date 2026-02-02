@@ -290,7 +290,7 @@ export const SettingsPage: React.FC = () => {
                 </button>
             </div>
         </div>
-        <div className="mt-16 text-center"><p className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.3em]">FocusFlow v1.0.6</p></div>
+        <div className="mt-16 text-center"><p className="text-[10px] font-black text-neutral-600 uppercase tracking-[0.3em]">Circles v1.0.6</p></div>
       </div>
     </div>
   );

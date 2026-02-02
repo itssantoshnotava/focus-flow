@@ -28,7 +28,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         </div>
 
         {/* Title & Tagline */}
-        <h1 className="text-4xl font-bold text-white tracking-tight mb-3">FocusFlow</h1>
+        <h1 className="text-4xl font-bold text-white tracking-tight mb-3">Circles</h1>
         <p className="text-neutral-400 text-lg mb-12 max-w-xs">
           Your personal command center for academic excellence.
         </p>

@@ -13,7 +13,7 @@ export const Login: React.FC = () => {
                 <LayoutDashboard size={32} className="text-white" />
             </div>
             <div className="text-center space-y-2">
-                <h1 className="text-3xl font-bold text-white tracking-tight">FocusFlow</h1>
+                <h1 className="text-3xl font-bold text-white tracking-tight">Circles</h1>
                 <p className="text-neutral-500">Minimalist exam preparation dashboard</p>
             </div>
         </div>
