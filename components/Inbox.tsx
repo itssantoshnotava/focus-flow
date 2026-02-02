@@ -219,21 +219,23 @@ export const Inbox: React.FC = () => {
         <div 
             onClick={() => setActiveSignalModal(signal)}
             onDoubleClick={handleDoubleClick}
-            className={`shrink-0 flex flex-col items-center gap-2 transition-all duration-300 relative group/card cursor-pointer select-none pt-4
+            className={`shrink-0 flex flex-col items-center gap-1 transition-all duration-300 relative group/card cursor-pointer select-none
                 ${iLiked ? 'scale-105' : ''}
             `}
         >
-            {/* Thought Bubble / Preview */}
-            <div className="absolute top-[-8px] z-10 max-w-[80px]">
-                <div className="bg-white/[0.08] backdrop-blur-xl border border-white/10 rounded-full px-2 py-1 shadow-lg flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
-                    {signal.music ? <Music size={8} className="text-indigo-400 shrink-0" /> : <div className="w-1 h-1 rounded-full bg-indigo-500 shrink-0"></div>}
-                    <span className="text-[7px] font-black text-white/90 truncate uppercase tracking-tighter">
+            {/* Improved Thought Bubble / Preview */}
+            <div className="absolute top-[-26px] z-10 w-max max-w-[100px] flex flex-col items-center">
+                <div className="bg-white/[0.08] backdrop-blur-3xl border border-white/10 rounded-2xl px-2 py-1 shadow-2xl flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    {signal.music ? <Music size={10} className="text-indigo-400 shrink-0" /> : <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>}
+                    <span className="text-[8px] font-black text-white truncate max-w-[60px] uppercase tracking-tighter">
                         {signal.music ? signal.music.trackName : (signal.text || '...')}
                     </span>
                 </div>
+                {/* Tiny bubble tail */}
+                <div className="w-1 h-1 bg-white/10 rounded-full mt-0.5 ml-2"></div>
             </div>
 
-            <div className="relative mt-2">
+            <div className="relative mt-5">
                 {/* User Avatar Circle */}
                 <div className={`w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr transition-all duration-500 shadow-xl overflow-hidden
                     ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-transparent'}
@@ -578,11 +580,11 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS SECTION (Instagram Stories Style) --- */}
+        {/* --- SIGNALS SECTION (Optimized for Visibility) --- */}
         {!showArchived && (
-            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-2 py-5 bg-[#0a0a0a] shrink-0 overflow-hidden">
-                <div className="flex items-center justify-between px-6 mb-1">
-                    <h3 className="text-[11px] font-black uppercase text-neutral-600 tracking-[0.4em]">Signals</h3>
+            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-1 py-8 bg-[#0a0a0a] shrink-0 overflow-y-visible">
+                <div className="flex items-center justify-between px-6 mb-2">
+                    <h3 className="text-[10px] font-black uppercase text-neutral-600 tracking-[0.4em]">Signals</h3>
                     {!mySignal && (
                         <button 
                             onClick={(e) => { e.stopPropagation(); setShowSignalCreator(true); }}
@@ -592,7 +594,7 @@ export const Inbox: React.FC = () => {
                         </button>
                     )}
                 </div>
-                <div className="overflow-x-auto no-scrollbar flex items-center gap-5 px-6 pb-1">
+                <div className="overflow-x-auto no-scrollbar flex items-center gap-6 px-6 pb-2 pt-2">
                     {/* Signal Cards */}
                     {signals.map(s => <SignalCard key={s.id} signal={s} />)}
                     
@@ -902,7 +904,7 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
     // Auto-play on mount as requested
     useEffect(() => {
         if (signal.music?.previewUrl) {
-            const timer = setTimeout(() => togglePlayback(), 500);
+            const timer = setTimeout(() => togglePlayback(), 400);
             return () => clearTimeout(timer);
         }
     }, [signal.music]);
@@ -921,8 +923,8 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
     const progressPercent = (currentTime / duration) * 100;
 
     return (
-        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
-            <div className="bg-[#0f0f0f]/80 glass-premium rounded-[48px] p-8 max-w-[440px] w-full shadow-2xl animate-in zoom-in duration-300 relative overflow-hidden flex flex-col items-center" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
+            <div className="bg-[#0f0f0f]/85 glass-premium rounded-[48px] p-8 max-w-[420px] w-full shadow-2xl animate-in zoom-in duration-300 relative overflow-hidden flex flex-col items-center" onClick={e => e.stopPropagation()}>
                 
                 {/* Header Actions */}
                 <div className="absolute top-8 left-8 right-8 flex justify-between items-center z-20">
@@ -947,17 +949,19 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                 </div>
 
                 {/* Main Content Area */}
-                <div className="flex flex-col items-center text-center mt-10 w-full">
+                <div className="flex flex-col items-center text-center mt-12 w-full">
                     {/* Disc Visual */}
                     <div className="relative mb-10">
-                        <div className={`relative w-48 h-48 md:w-56 md:h-56 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-1 bg-black overflow-hidden border border-white/5
+                        <div className={`relative w-44 h-44 md:w-52 md:h-52 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.6)] p-1 bg-black overflow-hidden border border-white/10
                             ${isPlaying ? 'animate-[spin_6s_linear_infinite]' : ''}
                         `}>
+                            {/* Vinyl Grooves Texture */}
                             <div className="absolute inset-0 z-10 pointer-events-none" style={{ 
                                 background: 'repeating-radial-gradient(circle, #1a1a1a 0px, #1a1a1a 1px, #111 2px, #111 3px)',
                                 opacity: 0.5 
                             }}></div>
                             
+                            {/* Center Label (Album Artwork) */}
                             <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-neutral-900 border-[10px] border-[#0a0a0a]">
                                 <div className="w-[45%] h-[45%] rounded-full overflow-hidden relative border border-[#1a1a1a]">
                                     {highResArtwork ? (
@@ -966,7 +970,7 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                                         <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-3xl font-black text-white">{signal.userName.charAt(0)}</div>
                                     )}
                                     <div className="absolute inset-0 flex items-center justify-center">
-                                        <div className="w-3 h-3 bg-neutral-950 rounded-full border border-white/10 shadow-lg"></div>
+                                        <div className="w-2.5 h-2.5 bg-neutral-950 rounded-full border border-white/10 shadow-lg"></div>
                                     </div>
                                 </div>
                             </div>
@@ -974,39 +978,37 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                     </div>
 
                     {/* Metadata */}
-                    <div className="space-y-1 mb-8 w-full px-2">
+                    <div className="space-y-1 mb-6 w-full px-4">
                         <h2 className="text-xl font-black text-white tracking-tight truncate leading-tight">
                             {signal.music ? signal.music.trackName : (signal.text || 'Thinking...')}
                         </h2>
-                        <p className="text-[11px] font-black text-indigo-400 uppercase tracking-[0.3em] truncate opacity-80">
+                        <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.3em] truncate opacity-80">
                             {signal.music ? signal.music.artistName : 'Currently Feeling'}
                         </p>
                     </div>
 
                     {/* Text Overlay if present */}
                     {signal.text && signal.music && (
-                        <div className="mb-8 px-6 py-4 bg-white/5 rounded-[28px] border border-white/5 w-full">
+                        <div className="mb-6 px-6 py-4 bg-white/5 rounded-[24px] border border-white/5 w-full">
                             <p className="text-neutral-300 font-medium italic text-sm leading-relaxed">"{signal.text}"</p>
                         </div>
                     )}
 
-                    {/* Music Player Bar */}
+                    {/* Minimal Progress Bar (Controls removed as requested) */}
                     {signal.music && (
-                        <div className="w-full space-y-6 mb-10 px-4">
+                        <div className="w-full px-6 mb-10">
                             <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                                 <div className="h-full bg-indigo-500 transition-all duration-300 ease-linear shadow-[0_0_8px_rgba(99,102,241,0.6)]" style={{ width: `${progressPercent}%` }}></div>
                             </div>
-                            <button 
-                                onClick={togglePlayback}
-                                className="w-16 h-16 bg-white text-black hover:bg-neutral-200 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-all"
-                            >
-                                {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" className="ml-1" />}
-                            </button>
+                            <div className="flex justify-between mt-2 text-[8px] font-black text-neutral-600 uppercase tracking-widest">
+                                <span>Preview</span>
+                                <span>30s</span>
+                            </div>
                         </div>
                     )}
 
                     {/* Footer Actions */}
-                    <div className="flex w-full gap-3">
+                    <div className="flex w-full gap-3 mt-auto">
                         {!isMe && (
                             <button 
                                 onClick={async () => {
@@ -1028,9 +1030,9 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                                     navigate(`/inbox?chatId=${targetUid}`);
                                     onClose();
                                 }}
-                                className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[24px] text-[11px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/20"
+                                className="flex-[2] py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[24px] text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-900/20"
                             >
-                                <MessageCircle size={16} /> Reply Vibe
+                                <MessageCircle size={16} /> Reply
                             </button>
                         )}
                         {!isMe && (
@@ -1046,11 +1048,11 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                                 className={`flex-1 py-4 rounded-[24px] transition-all active:scale-95 flex items-center justify-center gap-2 border ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 border-red-400 text-white shadow-lg shadow-red-900/20' : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'}`}
                             >
                                 <Heart size={16} className={signal.likes?.[user?.uid || ''] ? 'fill-current' : ''} />
-                                <span className="text-[11px] font-black">{Object.keys(signal.likes || {}).length || ''}</span>
+                                <span className="text-[10px] font-black">{Object.keys(signal.likes || {}).length || ''}</span>
                             </button>
                         )}
                         {isMe && !signal.music && (
-                            <button onClick={() => { onEditStatus?.(); }} className="w-full py-4 bg-white/5 hover:bg-white/10 text-white rounded-[24px] text-[11px] font-black uppercase tracking-widest transition-all">Change status</button>
+                            <button onClick={() => { onEditStatus?.(); }} className="w-full py-4 bg-white/5 hover:bg-white/10 text-white rounded-[24px] text-[10px] font-black uppercase tracking-widest transition-all">Change status</button>
                         )}
                     </div>
                 </div>
