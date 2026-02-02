@@ -5,34 +5,16 @@ import { database } from "../firebase";
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
-    Send, MessageCircle, ArrowLeft, Users, Plus, X, Check, CheckCheck, Reply,
+    Send, MessageCircle, ArrowLeft, Plus, X, Check, CheckCheck, Reply,
     SmilePlus, Paperclip, MoreVertical, Smile, AlertCircle, Archive, Trash, 
-    UserCircle2, ShieldCheck, ArchiveRestore, Loader2, Settings, Search, Heart, Edit3,
-    Clock, Zap, Coffee, Timer, Music, Play, Pause, ChevronRight, Share2, Headphones
+    Loader2, Search, Heart, Edit3, Zap, Coffee, Music, Play, Pause, Headphones,
+    ArchiveRestore
 } from 'lucide-react';
 import { useTimer } from '../contexts/TimerContext';
 
 // Dedicated Signal-only audio instance to ensure isolation from Posts/Feed
 let signalAudioInstance: HTMLAudioElement | null = null;
 let signalActiveSetPlaying: ((val: boolean) => void) | null = null;
-
-interface ChatItem {
-  id: string; 
-  type: 'dm' | 'group';
-  name: string;
-  photoURL?: string;
-  lastMessage?: {
-    text: string;
-    timestamp: number;
-    senderUid: string;
-    senderName?: string;
-    seen?: boolean;
-    system?: boolean;
-  };
-  lastMessageAt: number;
-  unreadCount?: number;
-  members?: Record<string, any>;
-}
 
 interface MusicMetadata {
   trackName: string;
@@ -55,6 +37,24 @@ interface Signal {
   likes?: Record<string, boolean>;
   isActive?: boolean;
   music?: MusicMetadata;
+}
+
+interface ChatItem {
+  id: string; 
+  type: 'dm' | 'group';
+  name: string;
+  photoURL?: string;
+  lastMessage?: {
+    text: string;
+    timestamp: number;
+    senderUid: string;
+    senderName?: string;
+    seen?: boolean;
+    system?: boolean;
+  };
+  lastMessageAt: number;
+  unreadCount?: number;
+  members?: Record<string, any>;
 }
 
 const REACTION_EMOJIS = ['❤️', '😂', '👍', '🔥', '😭', '😮', '🎉', '👀'];
@@ -156,6 +156,7 @@ export const Inbox: React.FC = () => {
                     return (isFriend || isMe) && !isExpired;
                 })
                 .sort((a, b) => {
+                    // Sorting logic: Me first, then by recency
                     if (a.userUid === user.uid) return -1;
                     if (b.userUid === user.uid) return 1;
                     return b.timestamp - a.timestamp;
@@ -197,7 +198,7 @@ export const Inbox: React.FC = () => {
   };
 
   const handleLikeSignal = async (signalId: string, targetUid: string) => {
-    if (!user || targetUid === user.uid) return; // Prevent liking own signal
+    if (!user || targetUid === user.uid) return; // Prevent self-like
     const likeRef = ref(database, `signals/${targetUid}/likes/${user.uid}`);
     const snap = await get(likeRef);
     if (snap.exists()) await remove(likeRef);
@@ -208,7 +209,7 @@ export const Inbox: React.FC = () => {
     if (!user) return;
     const targetUid = signal.userUid;
     const convoId = [user.uid, targetUid].sort().join('_');
-    const contextText = signal.text ? `Replying to your signal: "${signal.text}"\n\n` : `Replying to your status vibe... \n\n`;
+    const contextText = signal.text ? `Replying to your signal: "${signal.text}"\n\n` : `Replying to your vibe... \n\n`;
     
     const inboxRef = ref(database, `userInboxes/${user.uid}/${targetUid}`);
     const snap = await get(inboxRef);
@@ -241,45 +242,75 @@ export const Inbox: React.FC = () => {
         <div 
             onClick={() => setActiveSignalModal(signal)}
             onDoubleClick={handleDoubleClick}
-            className={`shrink-0 flex items-center gap-3 p-2.5 transition-all duration-300 rounded-2xl relative border border-white/[0.08] backdrop-blur-[40px] shadow-2xl group/card cursor-pointer bg-white/[0.04] hover:bg-white/[0.1] active:scale-[0.98] select-none min-w-[140px] max-w-[200px]
-                ${iLiked ? 'border-red-500/20' : ''}
+            className={`shrink-0 flex flex-col items-center gap-2 p-1.5 transition-all duration-300 rounded-[28px] relative group/card cursor-pointer select-none
+                ${iLiked ? 'scale-105' : ''}
             `}
         >
-            <div className="relative shrink-0">
-                <div className={`w-9 h-9 rounded-xl p-[2px] bg-gradient-to-tr ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-transparent'}`}>
-                    {signal.photoURL ? (
-                        <img src={signal.photoURL} className="w-full h-full rounded-[10px] object-cover" alt={signal.userName} />
-                    ) : (
-                        <div className="w-full h-full rounded-[10px] bg-neutral-900 flex items-center justify-center text-[10px] font-black text-neutral-500 uppercase">{signal.userName.charAt(0)}</div>
-                    )}
+            <div className="relative">
+                {/* User Avatar Circle */}
+                <div className={`w-16 h-16 rounded-full p-[2px] bg-gradient-to-tr transition-all duration-500 shadow-xl overflow-hidden
+                    ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-white/5'}
+                    ${signal.music ? 'ring-2 ring-indigo-500/20 ring-offset-2 ring-offset-neutral-950' : ''}
+                `}>
+                    <div className="w-full h-full rounded-full bg-neutral-950 p-[2px]">
+                        <div className="w-full h-full rounded-full overflow-hidden relative group-hover/card:scale-110 transition-transform">
+                            {signal.music ? (
+                                <div className="w-full h-full relative">
+                                    <img src={signal.music.artworkUrl} className="w-full h-full object-cover" alt="Album" />
+                                    {/* Vinyl Grooves Overlay */}
+                                    <div className="absolute inset-0 bg-black/20" style={{ background: 'radial-gradient(circle, transparent 30%, rgba(0,0,0,0.4) 31%, transparent 32%, rgba(0,0,0,0.4) 60%, transparent 61%, rgba(0,0,0,0.6) 90%)' }}></div>
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <div className="w-2 h-2 bg-neutral-900 rounded-full border border-white/20"></div>
+                                    </div>
+                                </div>
+                            ) : (
+                                signal.photoURL ? (
+                                    <img src={signal.photoURL} className="w-full h-full object-cover" alt={signal.userName} />
+                                ) : (
+                                    <div className="w-full h-full bg-neutral-900 flex items-center justify-center text-lg font-black text-neutral-500 uppercase">{signal.userName.charAt(0)}</div>
+                                )
+                            )}
+                        </div>
+                    </div>
                 </div>
+
+                {/* Status Icon Badge */}
+                <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10">
+                    {signal.music ? <Music size={10} className="text-indigo-400" /> : 
+                     signal.statusType === 'pomodoro' ? <Zap size={10} className="text-orange-400" /> :
+                     signal.statusType === 'break' ? <Coffee size={10} className="text-emerald-400" /> :
+                     <Edit3 size={10} className="text-neutral-500" />}
+                </div>
+
+                {/* Like Indicator */}
                 {hasLikes && (
-                  <div className="absolute -top-1.5 -right-1.5 bg-neutral-900 border border-white/10 rounded-full p-0.5 text-red-500 animate-in zoom-in duration-300">
+                  <div className="absolute -top-1 -left-1 bg-red-500 rounded-full p-1 text-white shadow-lg animate-in zoom-in duration-300">
                     <Heart size={8} className="fill-current" />
                   </div>
                 )}
             </div>
 
-            <div className="flex flex-col min-w-0 pr-1 overflow-hidden">
-                <span className={`text-[11px] font-black tracking-tight truncate mb-0.5 ${isMe ? 'text-indigo-400' : 'text-white'}`}>
-                    {isMe ? 'Me' : signal.userName.split(' ')[0]}
-                </span>
-                <div className="flex items-center gap-1.5">
-                    {signal.statusType === 'pomodoro' && <Zap size={10} className="text-orange-400 shrink-0" />}
-                    {signal.statusType === 'break' && <Coffee size={10} className="text-emerald-400 shrink-0" />}
-                    {signal.music && <Headphones size={10} className="text-indigo-400 shrink-0" />}
-                    <span className="text-[10px] font-bold text-neutral-500 truncate italic">
-                        {signal.music ? signal.music.trackName : (signal.text || 'Thinking...')}
-                    </span>
-                </div>
-            </div>
+            <span className={`text-[10px] font-black uppercase tracking-widest truncate max-w-[64px] text-center
+                ${isMe ? 'text-indigo-400' : 'text-neutral-500 group-hover/card:text-white transition-colors'}
+            `}>
+                {isMe ? 'Me' : signal.userName.split(' ')[0]}
+            </span>
         </div>
     );
   };
 
   const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void }> = ({ signal, onClose }) => {
+    const { user } = useAuth();
     const isMe = signal.userUid === user?.uid;
     const [isPlaying, setIsPlaying] = useState(false);
+    const [currentTime, setCurrentTime] = useState(0);
+    const [duration, setDuration] = useState(30); // Default iTunes preview length
+    
+    // Upgrade artwork quality
+    const highResArtwork = useMemo(() => {
+        if (!signal.music?.artworkUrl) return null;
+        return signal.music.artworkUrl.replace('100x100bb', '600x600bb');
+    }, [signal.music]);
 
     const togglePlayback = (e?: React.MouseEvent) => {
         if (e) e.stopPropagation();
@@ -291,6 +322,7 @@ export const Inbox: React.FC = () => {
             signalAudioInstance = null;
             signalActiveSetPlaying = null;
         } else {
+            // Stop global signal audio if playing
             if (signalAudioInstance) {
                 signalAudioInstance.pause();
                 if (signalActiveSetPlaying) signalActiveSetPlaying(false);
@@ -300,6 +332,13 @@ export const Inbox: React.FC = () => {
                 setIsPlaying(false);
                 signalAudioInstance = null;
                 signalActiveSetPlaying = null;
+                setCurrentTime(0);
+            };
+            audio.ontimeupdate = () => {
+                setCurrentTime(audio.currentTime);
+            };
+            audio.onloadedmetadata = () => {
+                setDuration(audio.duration);
             };
             audio.play().then(() => {
                 setIsPlaying(true);
@@ -308,14 +347,6 @@ export const Inbox: React.FC = () => {
             }).catch(console.error);
         }
     };
-
-    // Auto-play music on open
-    useEffect(() => {
-        if (signal.music?.previewUrl) {
-            const timer = setTimeout(() => togglePlayback(), 300);
-            return () => clearTimeout(timer);
-        }
-    }, [signal.music]);
 
     useEffect(() => {
         return () => {
@@ -328,89 +359,136 @@ export const Inbox: React.FC = () => {
         };
     }, []);
 
+    const progressPercent = (currentTime / duration) * 100;
+
     return (
-        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
-            <div className="bg-[#0d0d0d] border border-white/10 rounded-[48px] p-10 max-w-sm w-full shadow-2xl animate-in zoom-in duration-300 relative overflow-hidden" onClick={e => e.stopPropagation()}>
-                {isPlaying && (
-                    <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-indigo-600/10 rounded-full blur-[80px] animate-pulse"></div>
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300" onClick={onClose}>
+            <div className="bg-[#0a0a0a]/60 glass-premium rounded-[64px] p-8 md:p-12 max-w-lg w-full shadow-[0_40px_100px_rgba(0,0,0,0.8)] animate-in zoom-in duration-300 relative overflow-hidden flex flex-col items-center text-center" onClick={e => e.stopPropagation()}>
+                
+                {/* High-res Art Backdrop Blur */}
+                {highResArtwork && (
+                    <div className="absolute inset-0 -z-10 opacity-20 blur-[80px] scale-150 transition-all duration-1000">
+                        <img src={highResArtwork} className="w-full h-full object-cover" />
                     </div>
                 )}
 
-                <div className="flex flex-col items-center text-center relative z-10">
-                    <div className="relative mb-8">
-                        <div className={`w-24 h-24 rounded-[36px] p-1 bg-gradient-to-tr shadow-2xl transition-all duration-700 ${isPlaying ? 'from-indigo-500 scale-110' : 'from-white/10'}`}>
-                            {signal.photoURL ? (
-                                <img src={signal.photoURL} className="w-full h-full rounded-[32px] object-cover" />
-                            ) : (
-                                <div className="w-full h-full rounded-[32px] bg-neutral-900 flex items-center justify-center font-black text-3xl text-indigo-500">{signal.userName.charAt(0)}</div>
-                            )}
+                {/* Vinyl Player Assembly */}
+                <div className="relative mb-12 group/vinyl">
+                    {/* The Arm/Needle */}
+                    <div 
+                        className={`absolute top-0 right-[-20px] w-32 h-4 transition-all duration-1000 ease-in-out origin-right z-30 pointer-events-none
+                            ${isPlaying ? 'rotate-[-5deg]' : 'rotate-[-30deg]'}
+                        `}
+                    >
+                        <div className="w-full h-1.5 bg-neutral-400 rounded-full shadow-lg relative">
+                            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-neutral-600 rounded-sm border border-neutral-300"></div>
                         </div>
                     </div>
 
-                    <h2 className="text-2xl font-black text-white mb-1 tracking-tight">{signal.userName}</h2>
-                    <p className="text-[11px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-8">Currently Feeling</p>
-
-                    {signal.text && (
-                        <p className="text-neutral-200 font-bold mb-8 text-[18px] leading-relaxed italic">"{signal.text}"</p>
-                    )}
-
-                    {signal.music && (
-                        <div 
-                            onClick={togglePlayback}
-                            className={`w-full p-5 rounded-[32px] border transition-all duration-500 cursor-pointer group flex items-center gap-5 mb-8 ${isPlaying ? 'bg-indigo-600 border-indigo-400/50 shadow-xl' : 'bg-white/5 border-white/5'}`}
-                        >
-                            <div className="relative shrink-0 w-14 h-14">
-                                <img src={signal.music.artworkUrl} className="w-full h-full rounded-2xl shadow-lg group-hover:scale-105 transition-transform" />
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-2xl backdrop-blur-[2px]">
-                                    {isPlaying ? <Pause size={20} fill="white" className="text-white" /> : <Play size={20} fill="white" className="text-white" />}
+                    {/* The Disc */}
+                    <div className={`relative w-64 h-64 md:w-80 md:h-80 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.8)] p-2 bg-[#121212] overflow-hidden
+                        ${isPlaying ? 'animate-[spin_4s_linear_infinite]' : ''}
+                    `}>
+                        {/* Vinyl Grooves Texture */}
+                        <div className="absolute inset-0 z-10 pointer-events-none" style={{ 
+                            background: 'repeating-radial-gradient(circle, #1a1a1a 0px, #1a1a1a 1px, #111 2px, #111 3px)',
+                            opacity: 0.6 
+                        }}></div>
+                        
+                        {/* Center Label (Artwork) */}
+                        <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-neutral-900 border-[12px] border-[#0a0a0a]">
+                            <div className="w-[45%] h-[45%] rounded-full overflow-hidden relative border-2 border-[#1a1a1a] shadow-inner">
+                                {highResArtwork ? (
+                                    <img src={highResArtwork} className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-4xl font-black text-white">{signal.userName.charAt(0)}</div>
+                                )}
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <div className="w-4 h-4 bg-neutral-950 rounded-full border border-white/10 shadow-lg"></div>
                                 </div>
                             </div>
-                            <div className="flex-1 min-w-0 text-left">
-                                <span className={`block text-sm font-black truncate mb-0.5 ${isPlaying ? 'text-white' : 'text-white/90'}`}>{signal.music.trackName}</span>
-                                <span className={`block text-[10px] font-bold uppercase truncate ${isPlaying ? 'text-white/60' : 'text-neutral-500'}`}>{signal.music.artistName}</span>
-                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Song Meta */}
+                <div className="space-y-2 mb-10 w-full max-w-xs">
+                    <h2 className="text-2xl font-black text-white tracking-tight truncate">
+                        {signal.music ? signal.music.trackName : signal.userName}
+                    </h2>
+                    <p className="text-[12px] font-black text-indigo-400 uppercase tracking-[0.4em] truncate">
+                        {signal.music ? signal.music.artistName : 'Status Pulse'}
+                    </p>
+                    
+                    {signal.text && (
+                        <div className="mt-6 px-4 py-3 bg-white/5 rounded-[24px] border border-white/5">
+                            <p className="text-neutral-400 font-medium italic text-sm">"{signal.text}"</p>
                         </div>
                     )}
+                </div>
 
-                    <div className="flex flex-col w-full gap-3">
+                {/* Music Controls */}
+                {signal.music && (
+                    <div className="w-full space-y-8 mb-10">
+                        {/* Progress Bar */}
+                        <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden relative">
+                            <div 
+                                className="h-full bg-indigo-500 transition-all duration-300 ease-linear shadow-[0_0_10px_rgba(99,102,241,0.8)]" 
+                                style={{ width: `${progressPercent}%` }}
+                            ></div>
+                        </div>
+
+                        <div className="flex items-center justify-center">
+                            <button 
+                                onClick={togglePlayback}
+                                className="w-20 h-20 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/40 active:scale-95 transition-all"
+                            >
+                                {isPlaying ? <Pause size={32} fill="white" /> : <Play size={32} fill="white" className="ml-1" />}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Footer Actions */}
+                <div className="flex flex-col w-full gap-4">
+                    <div className="flex gap-4">
                         {!isMe && (
                             <button 
                                 onClick={() => handleReplyToSignal(signal)}
-                                className="w-full py-4.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[28px] text-xs font-black uppercase tracking-widest shadow-xl shadow-indigo-900/40 active:scale-95 transition-all flex items-center justify-center gap-3"
+                                className="flex-1 py-4.5 bg-white text-black hover:bg-neutral-200 rounded-[28px] text-[11px] font-black uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
                             >
-                                <MessageCircle size={18} /> Reply Vibe
+                                <MessageCircle size={16} /> Send DM
                             </button>
                         )}
-                        <div className="flex gap-3">
-                            {!isMe && (
-                                <button 
-                                    onClick={() => handleLikeSignal(signal.id, signal.userUid)}
-                                    className={`flex-1 py-4.5 rounded-[28px] text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 text-white shadow-lg shadow-red-900/20' : 'bg-white/5 text-neutral-400 hover:text-white border border-white/5'}`}
-                                >
-                                    <Heart size={16} className={signal.likes?.[user?.uid || ''] ? 'fill-current' : ''} />
-                                    {Object.keys(signal.likes || {}).length || 'Like'}
-                                </button>
-                            )}
-                            {isMe && (
-                                <button 
-                                    onClick={() => { setShowSignalCreator(true); setActiveSignalModal(null); }}
-                                    className="w-full py-4.5 bg-white/[0.03] hover:bg-white/[0.08] text-neutral-400 border border-white/5 rounded-[28px] text-[10px] font-black uppercase tracking-widest"
-                                >
-                                    Change Status
-                                </button>
-                            )}
-                        </div>
+                        {!isMe && (
+                            <button 
+                                onClick={() => handleLikeSignal(signal.id, signal.userUid)}
+                                className={`px-8 py-4.5 rounded-[28px] transition-all active:scale-95 flex items-center justify-center gap-2 border ${signal.likes?.[user?.uid || ''] ? 'bg-red-500 border-red-400 text-white shadow-lg' : 'bg-white/5 border-white/10 text-neutral-400 hover:text-white'}`}
+                            >
+                                <Heart size={18} className={signal.likes?.[user?.uid || ''] ? 'fill-current' : ''} />
+                                <span className="text-[11px] font-black uppercase tracking-widest">
+                                    {Object.keys(signal.likes || {}).length || ''}
+                                </span>
+                            </button>
+                        )}
                         {isMe && (
                             <button 
                                 onClick={() => handleDeleteSignal(signal.userUid)}
-                                className="w-full py-4.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-[28px] text-[10px] font-black uppercase tracking-widest mt-2 border border-red-500/20"
+                                className="flex-1 py-4.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-[28px] text-[11px] font-black uppercase tracking-widest border border-red-500/20 transition-all active:scale-95"
                             >
                                 Remove Signal
                             </button>
                         )}
                     </div>
                 </div>
+
+                {/* Close Button */}
+                <button 
+                    onClick={onClose}
+                    className="absolute top-8 right-8 p-3 text-neutral-500 hover:text-white transition-colors"
+                >
+                    <X size={24} />
+                </button>
             </div>
         </div>
     );
@@ -720,27 +798,27 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS SECTION (REDESIGNED) --- */}
+        {/* --- SIGNALS SECTION (REDESIGNED: TURNTABLE/CAPSULE ROW) --- */}
         {!showArchived && (
-            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-4 py-8 bg-[#0a0a0a] shrink-0 overflow-hidden">
-                <div className="flex items-center justify-between px-6">
-                    <h3 className="text-[11px] font-black uppercase text-indigo-400/60 tracking-[0.3em]">Signals</h3>
+            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-2 py-6 bg-[#0a0a0a] shrink-0 overflow-hidden">
+                <div className="flex items-center justify-between px-6 mb-2">
+                    <h3 className="text-[11px] font-black uppercase text-neutral-600 tracking-[0.4em]">Signals</h3>
                     {!mySignal && (
                         <button 
                             onClick={(e) => { e.stopPropagation(); setShowSignalCreator(true); }}
-                            className="p-1.5 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 rounded-xl transition-all"
+                            className="p-1.5 bg-white/5 hover:bg-white/10 text-neutral-400 rounded-lg transition-all"
                         >
-                            <Plus size={16} />
+                            <Plus size={14} />
                         </button>
                     )}
                 </div>
-                <div className="overflow-x-auto no-scrollbar flex items-center gap-4 px-6 pb-2">
+                <div className="overflow-x-auto no-scrollbar flex items-center gap-6 px-6 pb-2">
                     {/* Signal Cards */}
                     {signals.map(s => <SignalCard key={s.id} signal={s} />)}
                     
                     {signals.length === 0 && (
-                        <div className="py-4 text-center w-full bg-white/[0.02] border border-dashed border-white/5 rounded-3xl">
-                            <p className="text-[10px] font-black uppercase text-neutral-800 tracking-[0.3em]">No activity signals</p>
+                        <div className="py-6 text-center w-full bg-white/[0.02] border border-dashed border-white/5 rounded-[32px]">
+                            <p className="text-[10px] font-black uppercase text-neutral-800 tracking-[0.3em]">Quiet around here</p>
                         </div>
                     )}
                 </div>
