@@ -215,12 +215,12 @@ export const Inbox: React.FC = () => {
       handleLikeSignal(signal.id, signal.userUid);
     };
 
-    const getPreviewText = () => {
-        if (signal.music) {
-            return `${signal.music.trackName} - ${signal.music.artistName}`;
-        }
-        return signal.text || '...';
-    };
+    const preview = useMemo(() => {
+      const musicInfo = signal.music ? `${signal.music.trackName} - ${signal.music.artistName}` : '';
+      const textInfo = signal.text || '';
+      if (musicInfo && textInfo) return `${musicInfo} • ${textInfo}`;
+      return musicInfo || textInfo || '...';
+    }, [signal]);
 
     return (
         <div 
@@ -230,25 +230,27 @@ export const Inbox: React.FC = () => {
                 ${iLiked ? 'scale-105' : ''}
             `}
         >
-            {/* Redesigned Thought Bubble for correct Instagram Notes vibe */}
-            <div className="absolute top-[-38px] z-10 w-max max-w-[120px] flex flex-col items-center pointer-events-none">
-                <div className="bg-neutral-800/90 backdrop-blur-3xl border border-white/10 rounded-[18px] px-3 py-1.5 shadow-[0_8px_20px_rgba(0,0,0,0.5)] flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    {signal.music ? <Music size={12} className="text-indigo-400 shrink-0" /> : <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>}
-                    <span className="text-[9px] font-black text-white truncate max-w-[80px] uppercase tracking-tighter leading-tight">
-                        {getPreviewText()}
+            {/* Instagram Notes Style Preview Bubble */}
+            <div className="absolute top-[-52px] z-20 w-max max-w-[140px] flex flex-col items-center pointer-events-none drop-shadow-xl">
+                <div className="bg-neutral-800/95 backdrop-blur-3xl border border-white/10 rounded-[20px] px-3.5 py-2.5 shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300 relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none"></div>
+                    {signal.music ? <Music size={14} className="text-indigo-400 shrink-0" /> : <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.5)]"></div>}
+                    <span className="text-[10px] font-extrabold text-white truncate max-w-[100px] uppercase tracking-tighter leading-tight relative z-10">
+                        {preview}
                     </span>
                 </div>
-                {/* Bubble tail - Small Pill */}
-                <div className="w-2.5 h-1 bg-neutral-800/80 rounded-full mt-1 border border-white/5"></div>
+                {/* Bubble tail - Small Pill Shape */}
+                <div className="w-3 h-1.5 bg-neutral-800/90 rounded-full mt-1 border border-white/10 shadow-sm relative z-10"></div>
+                <div className="w-1.5 h-1 bg-neutral-800/80 rounded-full mt-0.5 border border-white/5 opacity-60"></div>
             </div>
 
-            <div className="relative mt-10">
+            <div className="relative mt-12">
                 {/* User Avatar Circle */}
                 <div className={`w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr transition-all duration-500 shadow-xl overflow-hidden
                     ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-transparent'}
                 `}>
                     <div className="w-full h-full rounded-full bg-neutral-950 p-[2.5px]">
-                        <div className="w-full h-full rounded-full overflow-hidden relative group-hover/card:scale-110 transition-transform">
+                        <div className="w-full h-full rounded-full overflow-hidden relative group-hover/card:scale-110 transition-transform duration-500">
                             {signal.photoURL ? (
                                 <img src={signal.photoURL} className="w-full h-full object-cover" alt={signal.userName} />
                             ) : (
@@ -259,7 +261,7 @@ export const Inbox: React.FC = () => {
                 </div>
 
                 {/* Status Indicator Badge */}
-                <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all ${isMe ? 'bg-indigo-600' : ''}`}>
+                <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all ${isMe ? 'bg-indigo-600 shadow-[0_0_12px_rgba(79,70,229,0.4)]' : ''}`}>
                     {signal.music ? <Music size={10} className={isMe ? "text-white" : "text-indigo-400"} /> : 
                      signal.statusType === 'pomodoro' ? <Zap size={10} className="text-orange-400" /> :
                      signal.statusType === 'break' ? <Coffee size={10} className="text-emerald-400" /> :
@@ -274,7 +276,7 @@ export const Inbox: React.FC = () => {
                 )}
             </div>
 
-            <span className={`text-[9px] font-black uppercase tracking-tight truncate max-w-[56px] text-center
+            <span className={`text-[9px] font-black uppercase tracking-tight truncate max-w-[56px] text-center mt-0.5
                 ${isMe ? 'text-indigo-400' : 'text-neutral-500 group-hover/card:text-neutral-300 transition-colors'}
             `}>
                 {isMe ? 'Me' : signal.userName.split(' ')[0]}
@@ -579,7 +581,7 @@ export const Inbox: React.FC = () => {
   return (
     <div className="flex h-full bg-neutral-950 overflow-hidden font-sans">
       <div className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-col border-r border-neutral-900 bg-neutral-950 shrink-0`}>
-        <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/50 backdrop-blur-xl sticky top-0 z-20">
+        <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/50 backdrop-blur-xl sticky top-0 z-50">
           <h1 className="text-2xl font-black text-white tracking-tight">{showArchived ? 'Archive' : 'Circles'}</h1>
           <div className="flex gap-2">
             <button onClick={(e) => { e.stopPropagation(); setShowArchived(!showArchived); }} className={`p-2 rounded-xl transition-colors ${showArchived ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}><Archive size={20} /></button>
@@ -587,9 +589,9 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS SECTION (Corrected for No Clipping) --- */}
+        {/* --- SIGNALS SECTION (Instagram Stories Style with High Padding for Previews) --- */}
         {!showArchived && (
-            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-1 pt-12 pb-5 bg-[#0a0a0a] shrink-0 overflow-y-visible">
+            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-1 pt-16 pb-6 bg-[#0a0a0a] shrink-0 overflow-visible relative z-10">
                 <div className="flex items-center justify-between px-6 mb-2">
                     <h3 className="text-[10px] font-black uppercase text-neutral-600 tracking-[0.4em]">Signals</h3>
                     {!mySignal && (
@@ -601,7 +603,7 @@ export const Inbox: React.FC = () => {
                         </button>
                     )}
                 </div>
-                <div className="overflow-x-auto no-scrollbar flex items-center gap-6 px-6 pb-2 pt-2">
+                <div className="overflow-x-auto no-scrollbar flex items-center gap-7 px-6 pb-2 pt-2">
                     {/* Signal Cards */}
                     {signals.map(s => <SignalCard key={s.id} signal={s} />)}
                     
@@ -614,7 +616,7 @@ export const Inbox: React.FC = () => {
             </div>
         )}
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1 relative z-0">
           {filteredChats.map(chat => {
             const isSelected = activeChatId === chat.id;
             const profile = userProfiles[chat.id];
@@ -828,9 +830,9 @@ export const Inbox: React.FC = () => {
               <div className="bg-neutral-900 border border-white/10 rounded-[32px] p-8 max-w-xs w-full text-center shadow-2xl animate-in zoom-in duration-200">
                   <div className="w-16 h-16 bg-red-500/10 rounded-[24px] flex items-center justify-center mx-auto mb-6"><AlertCircle size={32} className="text-red-500" /></div>
                   <h3 className="text-xl font-black text-white mb-2">Unsend message?</h3>
-                  <div className="flex flex-col gap-2 mt-4">
-                      <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl active:scale-95">Unsend</button>
-                      <button onClick={() => setUnsendConfirmId(null)} className="w-full py-4 bg-neutral-800 text-neutral-400 rounded-2xl transition-all">Cancel</button>
+                  <div className="flex flex-col gap-2 mt-8">
+                      <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-95">Unsend</button>
+                      <button onClick={() => setUnsendConfirmId(null)} className="w-full py-3.5 bg-neutral-800 text-neutral-400 hover:text-white rounded-2xl transition-all">Cancel</button>
                   </div>
               </div>
           </div>, document.body
@@ -930,7 +932,7 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
     const progressPercent = (currentTime / duration) * 100;
 
     return (
-        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/75 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose}>
             <div className="bg-[#0f0f0f]/85 glass-premium rounded-[48px] p-8 max-w-[420px] w-full shadow-2xl animate-in zoom-in duration-300 relative overflow-hidden flex flex-col items-center" onClick={e => e.stopPropagation()}>
                 
                 {/* Header Actions */}
@@ -1014,7 +1016,7 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                         </div>
                     )}
 
-                    {/* Footer Actions */}
+                    {/* Footer Actions (Reply & Like) */}
                     <div className="flex w-full gap-3 mt-auto">
                         {!isMe && (
                             <button 
@@ -1058,7 +1060,7 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                                 <span className="text-[10px] font-black">{Object.keys(signal.likes || {}).length || ''}</span>
                             </button>
                         )}
-                        {isMe && !signal.music && (
+                        {isMe && (
                             <button onClick={() => { onEditStatus?.(); }} className="w-full py-4 bg-white/5 hover:bg-white/10 text-white rounded-[24px] text-[10px] font-black uppercase tracking-widest transition-all">Change status</button>
                         )}
                     </div>
