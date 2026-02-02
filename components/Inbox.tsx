@@ -188,14 +188,6 @@ export const Inbox: React.FC = () => {
     setActiveSignalModal(null);
   };
 
-  const handleDeleteSignal = async (targetUid: string) => {
-    if (!user || targetUid !== user.uid) return;
-    if (window.confirm("Delete your current signal?")) {
-        await remove(ref(database, `signals/${user.uid}`));
-        setActiveSignalModal(null);
-    }
-  };
-
   const handleLikeSignal = async (signalId: string, targetUid: string) => {
     if (!user || targetUid === user.uid) return;
     const likeRef = ref(database, `signals/${targetUid}/likes/${user.uid}`);
@@ -216,40 +208,39 @@ export const Inbox: React.FC = () => {
     };
 
     const preview = useMemo(() => {
-      const musicInfo = signal.music ? `${signal.music.trackName} - ${signal.music.artistName}` : '';
-      const textInfo = signal.text || '';
-      if (musicInfo && textInfo) return `${musicInfo} • ${textInfo}`;
-      return musicInfo || textInfo || '...';
+      if (signal.music) {
+          return `${signal.music.trackName} - ${signal.music.artistName}`;
+      }
+      return signal.text || '...';
     }, [signal]);
 
     return (
         <div 
             onClick={() => setActiveSignalModal(signal)}
             onDoubleClick={handleDoubleClick}
-            className={`shrink-0 flex flex-col items-center gap-1 transition-all duration-300 relative group/card cursor-pointer select-none
+            className={`shrink-0 flex flex-col items-center transition-all duration-300 relative group/card cursor-pointer select-none pb-4
                 ${iLiked ? 'scale-105' : ''}
             `}
         >
-            {/* Instagram Notes Style Preview Bubble */}
-            <div className="absolute top-[-52px] z-20 w-max max-w-[140px] flex flex-col items-center pointer-events-none drop-shadow-xl">
-                <div className="bg-neutral-800/95 backdrop-blur-3xl border border-white/10 rounded-[20px] px-3.5 py-2.5 shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300 relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none"></div>
-                    {signal.music ? <Music size={14} className="text-indigo-400 shrink-0" /> : <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.5)]"></div>}
-                    <span className="text-[10px] font-extrabold text-white truncate max-w-[100px] uppercase tracking-tighter leading-tight relative z-10">
+            {/* Thought Bubble - Elevated and centered */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-8px)] z-20 w-max max-w-[120px] flex flex-col items-center pointer-events-none drop-shadow-xl">
+                <div className="bg-neutral-850/95 backdrop-blur-3xl border border-white/10 rounded-[20px] px-3.5 py-2.5 shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300 relative">
+                    {signal.music ? <Music size={12} className="text-indigo-400 shrink-0" /> : <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>}
+                    <span className="text-[10px] font-bold text-white/90 truncate max-w-[90px] leading-tight text-center">
                         {preview}
                     </span>
                 </div>
-                {/* Bubble tail - Small Pill Shape */}
-                <div className="w-3 h-1.5 bg-neutral-800/90 rounded-full mt-1 border border-white/10 shadow-sm relative z-10"></div>
-                <div className="w-1.5 h-1 bg-neutral-800/80 rounded-full mt-0.5 border border-white/5 opacity-60"></div>
+                {/* Bubble tail nodes */}
+                <div className="w-2.5 h-2.5 bg-neutral-850 border border-white/5 rounded-full -mt-1 ml-4 shadow-md"></div>
+                <div className="w-1.5 h-1.5 bg-neutral-850 border border-white/5 rounded-full mt-0.5 ml-6 opacity-60"></div>
             </div>
 
-            <div className="relative mt-12">
-                {/* User Avatar Circle */}
-                <div className={`w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr transition-all duration-500 shadow-xl overflow-hidden
-                    ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-transparent'}
+            <div className="relative">
+                {/* Profile Avatar with Circle border */}
+                <div className={`w-[60px] h-[60px] rounded-full p-[2.5px] bg-gradient-to-tr transition-all duration-500 shadow-xl overflow-hidden
+                    ${isMe ? 'from-indigo-500 to-indigo-700' : 'from-neutral-700 to-neutral-800'}
                 `}>
-                    <div className="w-full h-full rounded-full bg-neutral-950 p-[2.5px]">
+                    <div className="w-full h-full rounded-full bg-neutral-950 p-[2px]">
                         <div className="w-full h-full rounded-full overflow-hidden relative group-hover/card:scale-110 transition-transform duration-500">
                             {signal.photoURL ? (
                                 <img src={signal.photoURL} className="w-full h-full object-cover" alt={signal.userName} />
@@ -260,15 +251,15 @@ export const Inbox: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Status Indicator Badge */}
-                <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all ${isMe ? 'bg-indigo-600 shadow-[0_0_12px_rgba(79,70,229,0.4)]' : ''}`}>
+                {/* Mini Status Badge */}
+                <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all ${isMe ? 'bg-indigo-600' : ''}`}>
                     {signal.music ? <Music size={10} className={isMe ? "text-white" : "text-indigo-400"} /> : 
                      signal.statusType === 'pomodoro' ? <Zap size={10} className="text-orange-400" /> :
                      signal.statusType === 'break' ? <Coffee size={10} className="text-emerald-400" /> :
                      <Edit3 size={10} className="text-neutral-500" />}
                 </div>
 
-                {/* Like Indicator */}
+                {/* Like Heart */}
                 {hasLikes && (
                   <div className="absolute -top-1 -left-1 bg-red-500 rounded-full p-1 text-white shadow-lg animate-in zoom-in duration-300">
                     <Heart size={8} className="fill-current" />
@@ -276,8 +267,8 @@ export const Inbox: React.FC = () => {
                 )}
             </div>
 
-            <span className={`text-[9px] font-black uppercase tracking-tight truncate max-w-[56px] text-center mt-0.5
-                ${isMe ? 'text-indigo-400' : 'text-neutral-500 group-hover/card:text-neutral-300 transition-colors'}
+            <span className={`text-[9px] font-bold uppercase tracking-tight truncate max-w-[56px] text-center mt-2
+                ${isMe ? 'text-indigo-400' : 'text-neutral-500 group-hover:text-neutral-300 transition-colors'}
             `}>
                 {isMe ? 'Me' : signal.userName.split(' ')[0]}
             </span>
@@ -581,7 +572,7 @@ export const Inbox: React.FC = () => {
   return (
     <div className="flex h-full bg-neutral-950 overflow-hidden font-sans">
       <div className={`${activeChatId ? 'hidden md:flex' : 'flex'} w-full md:w-80 flex-col border-r border-neutral-900 bg-neutral-950 shrink-0`}>
-        <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/50 backdrop-blur-xl sticky top-0 z-50">
+        <div className="p-6 border-b border-neutral-900 flex justify-between items-center bg-neutral-950/80 backdrop-blur-xl sticky top-0 z-50">
           <h1 className="text-2xl font-black text-white tracking-tight">{showArchived ? 'Archive' : 'Circles'}</h1>
           <div className="flex gap-2">
             <button onClick={(e) => { e.stopPropagation(); setShowArchived(!showArchived); }} className={`p-2 rounded-xl transition-colors ${showArchived ? 'bg-indigo-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:text-white'}`}><Archive size={20} /></button>
@@ -589,9 +580,9 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS SECTION (Instagram Stories Style with High Padding for Previews) --- */}
+        {/* --- SIGNALS SECTION (Instagram Notes Re-imagined for Zero Clipping) --- */}
         {!showArchived && (
-            <div id="signals-container" className="border-b border-neutral-900 flex flex-col gap-1 pt-16 pb-6 bg-[#0a0a0a] shrink-0 overflow-visible relative z-10">
+            <div id="signals-container" className="border-b border-neutral-900 bg-neutral-950 shrink-0 relative flex flex-col pt-3 pb-2 z-40 overflow-visible">
                 <div className="flex items-center justify-between px-6 mb-2">
                     <h3 className="text-[10px] font-black uppercase text-neutral-600 tracking-[0.4em]">Signals</h3>
                     {!mySignal && (
@@ -603,12 +594,12 @@ export const Inbox: React.FC = () => {
                         </button>
                     )}
                 </div>
-                <div className="overflow-x-auto no-scrollbar flex items-center gap-7 px-6 pb-2 pt-2">
-                    {/* Signal Cards */}
+                {/* Horizontal row with enough top padding for floating bubbles and y-overflow visible */}
+                <div className="overflow-x-auto no-scrollbar flex items-end gap-6 px-6 pt-24 pb-4 overflow-y-visible min-h-[160px]">
                     {signals.map(s => <SignalCard key={s.id} signal={s} />)}
                     
                     {signals.length === 0 && (
-                        <div className="py-4 text-center w-full bg-white/[0.02] border border-dashed border-white/5 rounded-3xl">
+                        <div className="py-6 text-center w-full bg-white/[0.02] border border-dashed border-white/5 rounded-[32px] self-center">
                             <p className="text-[9px] font-black uppercase text-neutral-800 tracking-[0.3em]">No vibes yet</p>
                         </div>
                     )}
