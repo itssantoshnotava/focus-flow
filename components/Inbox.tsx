@@ -199,76 +199,46 @@ export const Inbox: React.FC = () => {
   const SignalCard: React.FC<{ signal: Signal }> = ({ signal }) => {
     const { user } = useAuth();
     const isMe = signal.userUid === user?.uid;
-    const hasLikes = signal.likes && Object.keys(signal.likes).length > 0;
     const iLiked = user && signal.likes?.[user.uid];
-
-    const handleDoubleClick = (e: React.MouseEvent) => {
-      e.stopPropagation();
-      handleLikeSignal(signal.id, signal.userUid);
-    };
-
-    const preview = useMemo(() => {
-      if (signal.music) {
-          return `${signal.music.trackName} - ${signal.music.artistName}`;
-      }
-      return signal.text || '...';
-    }, [signal]);
 
     return (
         <div 
             onClick={() => setActiveSignalModal(signal)}
-            onDoubleClick={handleDoubleClick}
-            className={`shrink-0 flex flex-col items-center transition-all duration-300 relative group/card cursor-pointer select-none pb-4
-                ${iLiked ? 'scale-105' : ''}
+            className={`shrink-0 flex flex-col items-center gap-1.5 transition-all duration-300 relative cursor-pointer select-none
+                ${iLiked ? 'scale-105' : 'active:scale-95'}
             `}
         >
-            {/* Thought Bubble - Elevated and centered */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-[calc(100%-8px)] z-20 w-max max-w-[120px] flex flex-col items-center pointer-events-none drop-shadow-xl">
-                <div className="bg-neutral-850/95 backdrop-blur-3xl border border-white/10 rounded-[20px] px-3.5 py-2.5 shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-300 relative">
-                    {signal.music ? <Music size={12} className="text-indigo-400 shrink-0" /> : <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>}
-                    <span className="text-[10px] font-bold text-white/90 truncate max-w-[90px] leading-tight text-center">
-                        {preview}
-                    </span>
-                </div>
-                {/* Bubble tail nodes */}
-                <div className="w-2.5 h-2.5 bg-neutral-850 border border-white/5 rounded-full -mt-1 ml-4 shadow-md"></div>
-                <div className="w-1.5 h-1.5 bg-neutral-850 border border-white/5 rounded-full mt-0.5 ml-6 opacity-60"></div>
-            </div>
-
             <div className="relative">
-                {/* Profile Avatar with Circle border */}
-                <div className={`w-[60px] h-[60px] rounded-full p-[2.5px] bg-gradient-to-tr transition-all duration-500 shadow-xl overflow-hidden
-                    ${isMe ? 'from-indigo-500 to-indigo-700' : 'from-neutral-700 to-neutral-800'}
+                {/* Compact Circular Profile Avatar */}
+                <div className={`w-[52px] h-[52px] rounded-full p-[2px] bg-gradient-to-tr transition-all duration-500 shadow-sm overflow-hidden
+                    ${isMe ? 'from-indigo-500 to-indigo-700' : 'from-neutral-800 to-neutral-900'}
                 `}>
-                    <div className="w-full h-full rounded-full bg-neutral-950 p-[2px]">
-                        <div className="w-full h-full rounded-full overflow-hidden relative group-hover/card:scale-110 transition-transform duration-500">
+                    <div className="w-full h-full rounded-full bg-neutral-950 p-[1.5px]">
+                        <div className="w-full h-full rounded-full overflow-hidden relative">
                             {signal.photoURL ? (
                                 <img src={signal.photoURL} className="w-full h-full object-cover" alt={signal.userName} />
                             ) : (
-                                <div className="w-full h-full bg-neutral-900 flex items-center justify-center text-sm font-black text-neutral-500 uppercase">{signal.userName.charAt(0)}</div>
+                                <div className="w-full h-full bg-neutral-900 flex items-center justify-center text-xs font-black text-neutral-600 uppercase">{signal.userName.charAt(0)}</div>
                             )}
                         </div>
                     </div>
                 </div>
 
-                {/* Mini Status Badge */}
-                <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all ${isMe ? 'bg-indigo-600' : ''}`}>
-                    {signal.music ? <Music size={10} className={isMe ? "text-white" : "text-indigo-400"} /> : 
-                     signal.statusType === 'pomodoro' ? <Zap size={10} className="text-orange-400" /> :
-                     signal.statusType === 'break' ? <Coffee size={10} className="text-emerald-400" /> :
-                     <Edit3 size={10} className="text-neutral-500" />}
-                </div>
-
-                {/* Like Heart */}
-                {hasLikes && (
-                  <div className="absolute -top-1 -left-1 bg-red-500 rounded-full p-1 text-white shadow-lg animate-in zoom-in duration-300">
-                    <Heart size={8} className="fill-current" />
-                  </div>
+                {/* Tiny Status Badge Overlay - ONLY MUSIC OR ICON */}
+                {signal.music && (
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all bg-indigo-600 text-white">
+                        <Music size={10} />
+                    </div>
+                )}
+                {signal.statusType === 'pomodoro' && !signal.music && (
+                    <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all bg-neutral-800 text-orange-400">
+                        <Zap size={10} />
+                    </div>
                 )}
             </div>
 
-            <span className={`text-[9px] font-bold uppercase tracking-tight truncate max-w-[56px] text-center mt-2
-                ${isMe ? 'text-indigo-400' : 'text-neutral-500 group-hover:text-neutral-300 transition-colors'}
+            <span className={`text-[9px] font-bold uppercase tracking-tight truncate max-w-[52px] text-center
+                ${isMe ? 'text-indigo-400' : 'text-neutral-500'}
             `}>
                 {isMe ? 'Me' : signal.userName.split(' ')[0]}
             </span>
@@ -580,27 +550,27 @@ export const Inbox: React.FC = () => {
           </div>
         </div>
 
-        {/* --- SIGNALS SECTION (Instagram Notes Re-imagined for Zero Clipping) --- */}
+        {/* --- COMPACT SIGNALS STRIP (Instagram Notes Style) --- */}
         {!showArchived && (
-            <div id="signals-container" className="border-b border-neutral-900 bg-neutral-950 shrink-0 relative flex flex-col pt-3 pb-2 z-40 overflow-visible">
+            <div id="signals-container" className="border-b border-neutral-900 bg-neutral-950 shrink-0 flex flex-col py-3 h-[110px] overflow-hidden">
                 <div className="flex items-center justify-between px-6 mb-2">
-                    <h3 className="text-[10px] font-black uppercase text-neutral-600 tracking-[0.4em]">Signals</h3>
+                    <h3 className="text-[9px] font-black uppercase text-neutral-700 tracking-[0.3em]">Signals</h3>
                     {!mySignal && (
                         <button 
                             onClick={(e) => { e.stopPropagation(); setShowSignalCreator(true); }}
-                            className="p-1 text-neutral-500 hover:text-white transition-colors"
+                            className="p-1 text-neutral-600 hover:text-white transition-colors"
                         >
-                            <Plus size={14} />
+                            <Plus size={12} />
                         </button>
                     )}
                 </div>
-                {/* Horizontal row with enough top padding for floating bubbles and y-overflow visible */}
-                <div className="overflow-x-auto no-scrollbar flex items-end gap-6 px-6 pt-24 pb-4 overflow-y-visible min-h-[160px]">
+                {/* Horizontal Scroll row with minimal height and no previews */}
+                <div className="overflow-x-auto no-scrollbar flex items-center gap-5 px-6 flex-1">
                     {signals.map(s => <SignalCard key={s.id} signal={s} />)}
                     
                     {signals.length === 0 && (
-                        <div className="py-6 text-center w-full bg-white/[0.02] border border-dashed border-white/5 rounded-[32px] self-center">
-                            <p className="text-[9px] font-black uppercase text-neutral-800 tracking-[0.3em]">No vibes yet</p>
+                        <div className="h-full flex items-center justify-center w-full">
+                            <p className="text-[8px] font-black uppercase text-neutral-800 tracking-[0.2em]">No vibes yet</p>
                         </div>
                     )}
                 </div>
@@ -821,9 +791,9 @@ export const Inbox: React.FC = () => {
               <div className="bg-neutral-900 border border-white/10 rounded-[32px] p-8 max-w-xs w-full text-center shadow-2xl animate-in zoom-in duration-200">
                   <div className="w-16 h-16 bg-red-500/10 rounded-[24px] flex items-center justify-center mx-auto mb-6"><AlertCircle size={32} className="text-red-500" /></div>
                   <h3 className="text-xl font-black text-white mb-2">Unsend message?</h3>
-                  <div className="flex flex-col gap-2 mt-8">
-                      <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-3.5 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl transition-all shadow-lg shadow-red-900/20 active:scale-95">Unsend</button>
-                      <button onClick={() => setUnsendConfirmId(null)} className="w-full py-3.5 bg-neutral-800 text-neutral-400 hover:text-white rounded-2xl transition-all">Cancel</button>
+                  <div className="flex flex-col gap-2 mt-4">
+                      <button onClick={() => handleUnsend(unsendConfirmId)} className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-2xl active:scale-95">Unsend</button>
+                      <button onClick={() => setUnsendConfirmId(null)} className="w-full py-4 bg-neutral-800 text-neutral-400 rounded-2xl transition-all">Cancel</button>
                   </div>
               </div>
           </div>, document.body
@@ -1015,7 +985,6 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                                     if (!user) return;
                                     const targetUid = signal.userUid;
                                     const convoId = [user.uid, targetUid].sort().join('_');
-                                    const contextText = signal.text ? `Replying to your signal: "${signal.text}"\n\n` : `Replying to your vibe... \n\n`;
                                     
                                     const inboxRef = ref(database, `userInboxes/${user.uid}/${targetUid}`);
                                     const snap = await get(inboxRef);
