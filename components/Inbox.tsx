@@ -156,7 +156,6 @@ export const Inbox: React.FC = () => {
                     return (isFriend || isMe) && !isExpired;
                 })
                 .sort((a, b) => {
-                    // Sorting logic: Me first, then by recency
                     if (a.userUid === user.uid) return -1;
                     if (b.userUid === user.uid) return 1;
                     return b.timestamp - a.timestamp;
@@ -198,33 +197,11 @@ export const Inbox: React.FC = () => {
   };
 
   const handleLikeSignal = async (signalId: string, targetUid: string) => {
-    if (!user || targetUid === user.uid) return; // Prevent self-like
+    if (!user || targetUid === user.uid) return;
     const likeRef = ref(database, `signals/${targetUid}/likes/${user.uid}`);
     const snap = await get(likeRef);
     if (snap.exists()) await remove(likeRef);
     else await set(likeRef, true);
-  };
-
-  const handleReplyToSignal = async (signal: Signal) => {
-    if (!user) return;
-    const targetUid = signal.userUid;
-    const convoId = [user.uid, targetUid].sort().join('_');
-    const contextText = signal.text ? `Replying to your signal: "${signal.text}"\n\n` : `Replying to your vibe... \n\n`;
-    
-    const inboxRef = ref(database, `userInboxes/${user.uid}/${targetUid}`);
-    const snap = await get(inboxRef);
-    
-    if (!snap.exists()) {
-        await update(ref(database, `conversations/${convoId}`), { type: 'dm', members: { [user.uid]: true, [targetUid]: true }, createdAt: Date.now() });
-        await set(inboxRef, { type: 'dm', name: signal.userName, photoURL: signal.photoURL || null, lastMessage: null, lastMessageAt: Date.now(), unreadCount: 0 });
-        const theirInboxRef = ref(database, `userInboxes/${targetUid}/${user.uid}`);
-        await set(theirInboxRef, { type: 'dm', name: user.displayName, photoURL: user.photoURL || null, lastMessage: null, lastMessageAt: Date.now(), unreadCount: 0 });
-    }
-    
-    setActiveChatId(targetUid);
-    setInputText(contextText);
-    setActiveSignalModal(null);
-    setTimeout(() => messageInputRef.current?.focus(), 100);
   };
 
   const SignalCard: React.FC<{ signal: Signal }> = ({ signal }) => {
@@ -242,16 +219,26 @@ export const Inbox: React.FC = () => {
         <div 
             onClick={() => setActiveSignalModal(signal)}
             onDoubleClick={handleDoubleClick}
-            className={`shrink-0 flex flex-col items-center gap-2 p-1 transition-all duration-300 relative group/card cursor-pointer select-none
+            className={`shrink-0 flex flex-col items-center gap-2 transition-all duration-300 relative group/card cursor-pointer select-none pt-4
                 ${iLiked ? 'scale-105' : ''}
             `}
         >
-            <div className="relative">
-                {/* User Avatar Circle (ALWAYS Profile Photo) */}
-                <div className={`w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr transition-all duration-500 shadow-lg overflow-hidden
-                    ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/10 to-transparent'}
+            {/* Thought Bubble / Preview */}
+            <div className="absolute top-[-8px] z-10 max-w-[80px]">
+                <div className="bg-white/[0.08] backdrop-blur-xl border border-white/10 rounded-full px-2 py-1 shadow-lg flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-1">
+                    {signal.music ? <Music size={8} className="text-indigo-400 shrink-0" /> : <div className="w-1 h-1 rounded-full bg-indigo-500 shrink-0"></div>}
+                    <span className="text-[7px] font-black text-white/90 truncate uppercase tracking-tighter">
+                        {signal.music ? signal.music.trackName : (signal.text || '...')}
+                    </span>
+                </div>
+            </div>
+
+            <div className="relative mt-2">
+                {/* User Avatar Circle */}
+                <div className={`w-14 h-14 rounded-full p-[2px] bg-gradient-to-tr transition-all duration-500 shadow-xl overflow-hidden
+                    ${isMe ? 'from-indigo-400 to-indigo-600' : 'from-white/20 to-transparent'}
                 `}>
-                    <div className="w-full h-full rounded-full bg-neutral-950 p-[2px]">
+                    <div className="w-full h-full rounded-full bg-neutral-950 p-[2.5px]">
                         <div className="w-full h-full rounded-full overflow-hidden relative group-hover/card:scale-110 transition-transform">
                             {signal.photoURL ? (
                                 <img src={signal.photoURL} className="w-full h-full object-cover" alt={signal.userName} />
@@ -262,7 +249,7 @@ export const Inbox: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Small music/status indicator overlay */}
+                {/* Status Indicator Badge */}
                 <div className={`absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-neutral-900 border border-white/10 flex items-center justify-center shadow-lg z-10 transition-all ${isMe ? 'bg-indigo-600' : ''}`}>
                     {signal.music ? <Music size={10} className={isMe ? "text-white" : "text-indigo-400"} /> : 
                      signal.statusType === 'pomodoro' ? <Zap size={10} className="text-orange-400" /> :
@@ -278,7 +265,7 @@ export const Inbox: React.FC = () => {
                 )}
             </div>
 
-            <span className={`text-[10px] font-black uppercase tracking-tight truncate max-w-[56px] text-center
+            <span className={`text-[9px] font-black uppercase tracking-tight truncate max-w-[56px] text-center
                 ${isMe ? 'text-indigo-400' : 'text-neutral-500 group-hover/card:text-neutral-300 transition-colors'}
             `}>
                 {isMe ? 'Me' : signal.userName.split(' ')[0]}
@@ -912,6 +899,14 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
         }
     };
 
+    // Auto-play on mount as requested
+    useEffect(() => {
+        if (signal.music?.previewUrl) {
+            const timer = setTimeout(() => togglePlayback(), 500);
+            return () => clearTimeout(timer);
+        }
+    }, [signal.music]);
+
     useEffect(() => {
         return () => {
             if (signalAudioInstance) {
@@ -958,13 +953,11 @@ const SignalDetailsModal: React.FC<{ signal: Signal, onClose: () => void, onEdit
                         <div className={`relative w-48 h-48 md:w-56 md:h-56 rounded-full shadow-[0_20px_50px_rgba(0,0,0,0.5)] p-1 bg-black overflow-hidden border border-white/5
                             ${isPlaying ? 'animate-[spin_6s_linear_infinite]' : ''}
                         `}>
-                            {/* Vinyl Grooves Texture */}
                             <div className="absolute inset-0 z-10 pointer-events-none" style={{ 
                                 background: 'repeating-radial-gradient(circle, #1a1a1a 0px, #1a1a1a 1px, #111 2px, #111 3px)',
                                 opacity: 0.5 
                             }}></div>
                             
-                            {/* Center Label (Album Artwork) */}
                             <div className="w-full h-full rounded-full overflow-hidden flex items-center justify-center bg-neutral-900 border-[10px] border-[#0a0a0a]">
                                 <div className="w-[45%] h-[45%] rounded-full overflow-hidden relative border border-[#1a1a1a]">
                                     {highResArtwork ? (
@@ -1152,18 +1145,17 @@ const SignalMusicPicker: React.FC<{ onSelect: (m: MusicMetadata) => void, onClos
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
     useEffect(() => {
+        const fetchTrending = async () => {
+            setLoading(true);
+            try {
+                const resp = await fetch(`https://itunes.apple.com/search?term=billboard+hot+100&media=music&entity=song&limit=15`);
+                const data = await resp.json();
+                setTrending(data.results || []);
+            } catch (e) { console.error(e); }
+            setLoading(false);
+        };
         fetchTrending();
     }, []);
-
-    const fetchTrending = async () => {
-        setLoading(true);
-        try {
-            const resp = await fetch(`https://itunes.apple.com/search?term=billboard+hot+100&media=music&entity=song&limit=15`);
-            const data = await resp.json();
-            setTrending(data.results || []);
-        } catch (e) { console.error(e); }
-        setLoading(false);
-    };
 
     const handleSearch = async () => {
         if (!query.trim()) return;
